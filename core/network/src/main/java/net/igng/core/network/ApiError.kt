@@ -28,7 +28,7 @@ data class ApiErrorEnvelopeDto(
 /**
  * Unified Client API v1 exception shared by all IGNG Android apps.
  * Distinguishes OAuth session failures ([isSessionAuthFailure]) from business-level HTTP 401
- * responses (e.g. `auth.credential_invalid` or `mc.password_invalid`) so single-flight refresh
+ * responses (e.g. `auth.credential_invalid` or domain credential checks) so single-flight refresh
  * never mistakenly rotates or revokes an active session on credential-check errors.
  */
 class ApiException(
@@ -57,7 +57,7 @@ class ApiException(
     val isRateLimited: Boolean
         get() = statusCode == 429 ||
             errorCode == "rate_limit.exceeded" ||
-            errorCode == "bbs.daily_limit_exceeded"
+            errorCode?.endsWith(".daily_limit_exceeded", ignoreCase = true) == true
     val isNetworkOrServer: Boolean get() = statusCode == 0 || statusCode >= 500
     val isServerTransient: Boolean get() = statusCode in 502..504
 

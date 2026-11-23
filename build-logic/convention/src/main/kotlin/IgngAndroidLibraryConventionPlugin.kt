@@ -10,14 +10,7 @@ class IgngAndroidLibraryConventionPlugin : Plugin<Project> {
             pluginManager.apply("org.jetbrains.kotlin.plugin.serialization")
 
             extensions.configure<LibraryExtension> {
-                compileSdk = IgngSdk.COMPILE
-                defaultConfig {
-                    minSdk = IgngSdk.MIN
-                }
-                compileOptions {
-                    sourceCompatibility = IgngSdk.JAVA_VERSION
-                    targetCompatibility = IgngSdk.JAVA_VERSION
-                }
+                configureCommonAndroid(this, includeConsumerProguard = file("consumer-rules.pro").exists())
             }
         }
     }

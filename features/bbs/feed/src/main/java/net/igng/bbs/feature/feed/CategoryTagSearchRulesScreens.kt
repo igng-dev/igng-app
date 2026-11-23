@@ -261,7 +261,7 @@ fun SearchScreen(
         val directId = Regex("^(?:post_)?(\\d+)$").matchEntire(trimmed)?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex("igngbbs\\.net/post/(\\d+)", RegexOption.IGNORE_CASE).find(trimmed)?.groupValues?.get(1)?.toIntOrNull()
         if (directId != null && trimmed.length <= 64) {
-            onOpenPost(V1Id.post(directId))
+            onOpenPost(net.igng.bbs.core.model.BbsV1Id.post(directId))
             return
         }
         scope.launch {

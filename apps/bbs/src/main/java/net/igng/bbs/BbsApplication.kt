@@ -24,7 +24,6 @@ class BbsApplication : Application(), SingletonImageLoader.Factory {
             ),
             appVersion = BuildConfig.VERSION_NAME,
         )
-        NotificationSyncWorker.schedule(this)
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

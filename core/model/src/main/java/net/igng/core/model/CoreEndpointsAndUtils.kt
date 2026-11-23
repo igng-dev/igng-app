@@ -13,7 +13,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 
 /**
- * Unified Client API v1 opaque prefixed ID helper (`usr_42`, `post_101`, `tkt_8`, `med_9`).
+ * Unified Client API v1 opaque prefixed ID helper (`usr_42`, `med_9`, or domain prefixes via [format]).
  */
 object V1Id {
     fun format(prefix: String, numericId: Int): String = "${prefix}_$numericId"
@@ -28,12 +28,8 @@ object V1Id {
 
     fun numericOf(raw: String?): Int? = parseNumeric(raw)
 
-    fun post(numericId: Int): String = "post_$numericId"
     fun user(numericId: Int): String = "usr_$numericId"
     fun user(numericId: Long): String = "usr_$numericId"
-    fun column(numericId: Int): String = "col_$numericId"
-    fun series(numericId: Int): String = "ser_$numericId"
-    fun comment(numericId: Int): String = "cmt_$numericId"
     fun media(numericId: Int): String = "med_$numericId"
 }
 

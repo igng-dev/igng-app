@@ -1,5 +1,8 @@
 package net.igng.core.designsystem
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -11,13 +14,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import net.igng.core.model.MotionIntensity
 import net.igng.core.model.ReaderCanvasTone
 import net.igng.core.model.ThemeMode
@@ -255,7 +261,38 @@ object IgngTheme {
 fun IgngColors.readerSurfaceColors(tone: ReaderCanvasTone): Triple<Color, Color, Color> = when (tone) {
     ReaderCanvasTone.DEFAULT -> Triple(canvas, textPrimary, textSecondary)
     ReaderCanvasTone.WARM_PAPER -> Triple(warmPaperCanvas, warmPaperText, warmPaperSecondary)
-    ReaderCanvasTone.INK_DARK -> Triple(Color(0xFF0A0D12), Color(0xFFE6EDF3), Color(0xFF8B949E))
+    ReaderCanvasTone.INK_DARK -> Triple(IgngDarkColors.canvas, IgngDarkColors.textPrimary, IgngDarkColors.textSecondary)
+}
+
+/**
+ * Provides coherent theme tokens when a reader surface overrides the canvas tone (for example
+ * [ReaderCanvasTone.INK_DARK] while the host app is in light mode, or [ReaderCanvasTone.WARM_PAPER]).
+ */
+@Composable
+fun ProvideIgngReaderSurface(
+    tone: ReaderCanvasTone,
+    content: @Composable () -> Unit,
+) {
+    val base = IgngTheme.colors
+    val effective = when (tone) {
+        ReaderCanvasTone.DEFAULT -> base
+        ReaderCanvasTone.INK_DARK -> if (base.isDark) base else IgngDarkColors
+        ReaderCanvasTone.WARM_PAPER -> base.copy(
+            canvas = base.warmPaperCanvas,
+            textPrimary = base.warmPaperText,
+            textSecondary = base.warmPaperSecondary,
+            tile = if (base.isDark) Color(0xFF211C16) else Color(0xFFFFFDF8),
+            tileSoft = if (base.isDark) Color(0xFF28221A) else Color(0xFFF5EFE3),
+            codeBackground = if (base.isDark) Color(0xFF1A1611) else Color(0xFFF0E8DA),
+        )
+    }
+    CompositionLocalProvider(LocalIgngColors provides effective, content = content)
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
@@ -276,6 +313,17 @@ fun IgngTheme(
     val effectiveIntensity = if (systemReduced) MotionIntensity.REDUCED else motionIntensity
     val reduced = effectiveIntensity == MotionIntensity.REDUCED
 
+    // Keep system status/navigation bar icon contrast in sync even when themeMode overrides system
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = view.context.findActivity()?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
+    }
+
     val m3Scheme = if (dark) {
         darkColorScheme(
             primary = colors.accent,
@@ -283,15 +331,27 @@ fun IgngTheme(
             primaryContainer = colors.accentSoft,
             onPrimaryContainer = colors.accent,
             secondary = colors.textSecondary,
+            onSecondary = colors.onAccent,
+            secondaryContainer = colors.tileSoft,
+            onSecondaryContainer = colors.textPrimary,
             background = colors.canvas,
             onBackground = colors.textPrimary,
             surface = colors.tile,
             onSurface = colors.textPrimary,
             surfaceVariant = colors.tileSoft,
             onSurfaceVariant = colors.textSecondary,
+            surfaceTint = Color.Transparent,
+            surfaceContainerLowest = colors.canvas,
+            surfaceContainerLow = colors.tile,
+            surfaceContainer = colors.tile,
+            surfaceContainerHigh = colors.tileSoft,
+            surfaceContainerHighest = colors.tilePressed,
             outline = colors.line,
             outlineVariant = colors.lineStrong,
             error = colors.danger,
+            onError = colors.onAccent,
+            errorContainer = colors.dangerBg,
+            onErrorContainer = colors.danger,
         )
     } else {
         lightColorScheme(
@@ -300,15 +360,27 @@ fun IgngTheme(
             primaryContainer = colors.accentSoft,
             onPrimaryContainer = colors.accent,
             secondary = colors.textSecondary,
+            onSecondary = colors.onAccent,
+            secondaryContainer = colors.tileSoft,
+            onSecondaryContainer = colors.textPrimary,
             background = colors.canvas,
             onBackground = colors.textPrimary,
             surface = colors.tile,
             onSurface = colors.textPrimary,
             surfaceVariant = colors.tileSoft,
             onSurfaceVariant = colors.textSecondary,
+            surfaceTint = Color.Transparent,
+            surfaceContainerLowest = colors.tile,
+            surfaceContainerLow = colors.tileSoft,
+            surfaceContainer = colors.tile,
+            surfaceContainerHigh = colors.tileSoft,
+            surfaceContainerHighest = colors.tilePressed,
             outline = colors.line,
             outlineVariant = colors.lineStrong,
             error = colors.danger,
+            onError = colors.onAccent,
+            errorContainer = colors.dangerBg,
+            onErrorContainer = colors.danger,
         )
     }
 
@@ -332,6 +404,7 @@ fun IgngTheme(
             ),
             typography = Typography(
                 headlineMedium = type.heroTitle,
+                headlineSmall = type.pageTitle,
                 titleLarge = type.pageTitle,
                 titleMedium = type.sectionTitle,
                 titleSmall = type.cardTitle,

@@ -1,7 +1,7 @@
 package net.igng.bbs
 
 import android.net.Uri
-import net.igng.core.model.V1Id
+import net.igng.bbs.core.model.BbsV1Id
 
 object AppRoutes {
     const val FEED = "feed"
@@ -72,7 +72,7 @@ object AppRoutes {
                 }
             }
             if (host == "post" && segments.isNotEmpty()) {
-                val id = segments.first().toIntOrNull()?.let { V1Id.post(it) } ?: segments.first()
+                val id = segments.first().toIntOrNull()?.let { BbsV1Id.post(it) } ?: segments.first()
                 return post(id)
             }
             return null
@@ -83,7 +83,7 @@ object AppRoutes {
             val second = segments.getOrNull(1)
             return when (first) {
                 "post" -> second?.let { raw ->
-                    val normalized = raw.toIntOrNull()?.let { V1Id.post(it) } ?: raw
+                    val normalized = raw.toIntOrNull()?.let { BbsV1Id.post(it) } ?: raw
                     post(normalized)
                 }
                 "user" -> second?.let { user(it) }
