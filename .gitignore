@@ -1,0 +1,55 @@
+# OS / editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# Android / Gradle / Kotlin local state
+.gradle/
+**/.gradle/
+.kotlin/
+**/.kotlin/
+**/build/
+**/captures/
+**/local.properties
+local.properties
+**/generated/
+**/externalNativeBuild/
+**/.cxx/
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+
+# Logs and reports
+*.log
+*.hprof
+*.stacktrace
+
+# Signing keys, secrets, and local artifacts
+**/release-signing.properties
+release-signing.properties
+**/keystore.properties
+keystore.properties
+**/signing/
+**/keystore/
+*.jks
+*.keystore
+*.pem
+*.p12
+*.pfx
+*.key
+*.der
+.env
+.env.*
+!.env.example
+*.apk
+*.aab
+artifacts/
+nas-backup.local.json
+nas-backup.local.psd1
+
+# Local backup and script cache files
+**/*.bak
+**/__pycache__/
