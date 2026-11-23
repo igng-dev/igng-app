@@ -9,11 +9,15 @@ class IgngAndroidApplicationConventionPlugin : Plugin<Project> {
             pluginManager.apply("com.android.application")
             pluginManager.apply("org.jetbrains.kotlin.plugin.serialization")
 
+            val appVersion = resolveIgngAppVersion()
+
             extensions.configure<ApplicationExtension> {
                 compileSdk = IgngSdk.COMPILE
                 defaultConfig {
                     minSdk = IgngSdk.MIN
                     targetSdk = IgngSdk.TARGET
+                    versionCode = appVersion.code
+                    versionName = appVersion.name
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                 }
                 compileOptions {

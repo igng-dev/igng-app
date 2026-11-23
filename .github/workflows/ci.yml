@@ -28,14 +28,16 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: 隐私扫描、模块隔离红线与脚本语法检查
+      - name: 隐私扫描、模块隔离红线、统一版本真源与脚本检查
         run: |
           set -euo pipefail
           bash scripts/check-privacy.sh --all
           sh -n scripts/check-privacy.sh
           sh -n .githooks/pre-commit
           bash -n .githooks/pre-push
-          python3 -m py_compile scripts/verify-release-dex.py
+          python3 -m py_compile scripts/verify-release-dex.py scripts/release_utils.py scripts/test_release_utils.py
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          python3 scripts/release_utils.py validate-version --check-no-app-overrides
           if grep -rnE --include='*.kt' --include='*.kts' 'net\.igng\.(bbs|mcstatus|ink)' core/; then
             echo "::error::core 模块违规引用了业务领域代码！"
             exit 1
@@ -164,10 +166,18 @@ jobs:
       - name: 构建 BBS Debug 与未签名 Release APK
         run: sh ./gradlew :apps:bbs:assembleDebug :apps:bbs:assembleRelease --no-daemon --stacktrace
 
-      - name: 校验 BBS Release DEX 关键符号
+      - name: 校验 BBS 统一版本元数据与 Release DEX 关键符号
         run: |
           set -euo pipefail
           APK=$(ls apps/bbs/build/outputs/apk/release/*.apk | head -n 1)
+          BUILD_TOOLS=$(ls -d "${ANDROID_HOME}/build-tools/"* | sort -V | tail -n 1)
+          EXPECTED_VER_NAME=$(awk -F'=' '$1 == "IGNG_APP_VERSION_NAME" { print $2; exit }' gradle.properties | tr -d ' \r')
+          EXPECTED_VER_CODE=$(awk -F'=' '$1 == "IGNG_APP_VERSION_CODE" { print $2; exit }' gradle.properties | tr -d ' \r')
+          BADGING_LINE=$("$BUILD_TOOLS/aapt2" dump badging "$APK" | awk '/^package:/ && !seen { print; seen=1 }')
+          echo "$BADGING_LINE"
+          printf '%s\n' "$BADGING_LINE" | grep -q "name='net.igng.bbs'"
+          printf '%s\n' "$BADGING_LINE" | grep -q "versionCode='${EXPECTED_VER_CODE}'"
+          printf '%s\n' "$BADGING_LINE" | grep -q "versionName='${EXPECTED_VER_NAME}'"
           python3 scripts/verify-release-dex.py --app bbs "$APK"
 
       - name: 运行 BBS 单元测试
@@ -217,10 +227,18 @@ jobs:
       - name: 构建 MC Debug 与未签名 Release APK
         run: sh ./gradlew :apps:mc:assembleDebug :apps:mc:assembleRelease --no-daemon --stacktrace
 
-      - name: 校验 MC Release DEX 关键符号
+      - name: 校验 MC 统一版本元数据与 Release DEX 关键符号
         run: |
           set -euo pipefail
           APK=$(ls apps/mc/build/outputs/apk/release/*.apk | head -n 1)
+          BUILD_TOOLS=$(ls -d "${ANDROID_HOME}/build-tools/"* | sort -V | tail -n 1)
+          EXPECTED_VER_NAME=$(awk -F'=' '$1 == "IGNG_APP_VERSION_NAME" { print $2; exit }' gradle.properties | tr -d ' \r')
+          EXPECTED_VER_CODE=$(awk -F'=' '$1 == "IGNG_APP_VERSION_CODE" { print $2; exit }' gradle.properties | tr -d ' \r')
+          BADGING_LINE=$("$BUILD_TOOLS/aapt2" dump badging "$APK" | awk '/^package:/ && !seen { print; seen=1 }')
+          echo "$BADGING_LINE"
+          printf '%s\n' "$BADGING_LINE" | grep -q "name='net.igng.mcstatus'"
+          printf '%s\n' "$BADGING_LINE" | grep -q "versionCode='${EXPECTED_VER_CODE}'"
+          printf '%s\n' "$BADGING_LINE" | grep -q "versionName='${EXPECTED_VER_NAME}'"
           python3 scripts/verify-release-dex.py --app mc "$APK"
 
       - name: 运行 MC 单元测试
