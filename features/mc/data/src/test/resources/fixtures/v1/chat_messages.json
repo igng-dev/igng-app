@@ -1,0 +1,125 @@
+{
+  "messages": [
+    {
+      "id": "qq-90001",
+      "source": "qq",
+      "platform": "qq",
+      "server_id": null,
+      "group_id": "123456789",
+      "sender_id": "10001",
+      "sender_name": "Alice",
+      "sender_avatar": "https://q1.qlogo.cn/g?b=qq&nk=10001&s=100",
+      "is_bot": false,
+      "is_self": false,
+      "logical_speaker": "person",
+      "message_source": null,
+      "message_source_label": null,
+      "is_at_all": true,
+      "is_recalled": false,
+      "recalled_at": null,
+      "persona_label": null,
+      "content": "晚上一起打龙吗 @全体成员",
+      "reply_to": {
+        "id": "",
+        "sender_name": "Bob",
+        "preview": "今晚 8 点集合吗"
+      },
+      "attachments": [
+        {
+          "index": 0,
+          "kind": "image",
+          "name": "dragon.png",
+          "url": "/api/v1/chat/media/qq-90001/0",
+          "thumb_url": "/api/v1/chat/media/qq-90001/0?variant=thumb",
+          "mime_type": "image/png",
+          "size_bytes": 102400,
+          "width": 1280,
+          "height": 720,
+          "is_animated": false,
+          "ocr_text": "末影龙坐标 0, 64, 0",
+          "transcript": null,
+          "external_url": null
+        }
+      ],
+      "message_structure": [
+        {
+          "type": "card",
+          "part_index": 0,
+          "card_type": "quote",
+          "title": "Bob",
+          "description": "今晚 8 点集合吗",
+          "summary": "",
+          "url": null,
+          "attachments": []
+        },
+        {
+          "type": "forward",
+          "part_index": 1,
+          "id": "fwd-1",
+          "nickname": "",
+          "summary": "群聊的聊天记录",
+          "child_count": 2,
+          "has_details": true,
+          "children": []
+        }
+      ],
+      "forward_summary": "群聊的聊天记录",
+      "has_forward": true,
+      "created_at": "2026-11-22T12:00:00Z"
+    }
+  ],
+  "has_more": true,
+  "focused_id": null,
+  "sender_profiles": {
+    "qq:10001": {
+      "bound": true,
+      "igng_id": 1024,
+      "user_id": "usr_1024",
+      "igng_nickname": "Alice",
+      "igng_username": "alice",
+      "display_name": "Alice (10001)",
+      "avatar_url": "https://img.igng.net/avatars/a.webp",
+      "badges": [
+        {
+          "key": "pro",
+          "label": "云萤 Pro",
+          "tone": "pro"
+        }
+      ],
+      "relationship": null,
+      "luckperms_groups": []
+    },
+    "wechat:700000000000101": {
+      "bound": false,
+      "igng_id": null,
+      "user_id": null,
+      "igng_nickname": null,
+      "igng_username": null,
+      "display_name": "微信用户",
+      "avatar_url": "https://wx.qlogo.cn/mmhead/ver_1/sample/0",
+      "badges": [],
+      "relationship": null,
+      "luckperms_groups": []
+    },
+    "player:alice_cn": {
+      "bound": true,
+      "igng_id": 1024,
+      "user_id": "usr_1024",
+      "igng_nickname": "Alice",
+      "igng_username": "alice",
+      "display_name": "Alice_CN",
+      "avatar_url": "/api/v1/mc/avatars/Alice_CN?size=64",
+      "badges": [],
+      "relationship": null,
+      "luckperms_groups": [
+        "perfect"
+      ]
+    }
+  },
+  "persona": {
+    "id": "yunying",
+    "label": "云萤",
+    "description": "核心元气少女设定，带个性与风格档案"
+  },
+  "channel_group_id": "123456789"
+}
