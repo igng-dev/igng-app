@@ -35,7 +35,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.markdown.IgngMarkdownDocumentView
+import net.igng.core.markdown.MarkdownParser
 import net.igng.mcstatus.core.data.AdminCurrentNodesResponse
 import net.igng.mcstatus.core.data.AdminPlayerResultDto
 import net.igng.mcstatus.core.data.AdminPunishmentsResponse
@@ -147,7 +149,7 @@ fun AdminPocketConsoleScreen(
                 actions = {
                     IgngButton(
                         text = "网页版",
-                        onClick = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/admin", colors.isDark) },
+                        onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/admin", colors.isDark) },
                         style = IgngButtonStyle.Secondary,
                         icon = Icons.Rounded.OpenInBrowser,
                         compact = true,
@@ -427,7 +429,11 @@ fun AdminPocketConsoleScreen(
                 val run = historianDetail?.run
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val bodyText = run?.markdown ?: run?.summary ?: "暂无正文"
-                    Text(bodyText, style = IgngTheme.type.body, color = colors.textPrimary)
+                    val parsedDoc = remember(bodyText) { MarkdownParser.parse(bodyText) }
+                    IgngMarkdownDocumentView(
+                        document = parsedDoc,
+                        onLinkClick = { url -> IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark) },
+                    )
                     if (!run?.observations.isNullOrEmpty()) {
                         IgngSectionHeader(title = "关键观察项")
                         run?.observations.orEmpty().forEach { obs ->

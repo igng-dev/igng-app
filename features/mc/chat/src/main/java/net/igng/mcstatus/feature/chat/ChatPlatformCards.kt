@@ -95,7 +95,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.ChatAttachmentDto
 import net.igng.mcstatus.core.data.ChatForwardChildDto
 import net.igng.mcstatus.core.data.ChatForwardResponse
@@ -1105,7 +1105,7 @@ fun ChatStructuredCard(
                     .border(0.5.dp, colors.line, RoundedCornerShape(12.dp))
                     .then(
                         if (safeUrl != null) {
-                            Modifier.clickable { CustomTabsLauncher.openExternalUrl(context, safeUrl, colors.isDark) }
+                            Modifier.clickable { IgngBrowserLauncher.openExternalUrl(context, safeUrl, colors.isDark) }
                         } else {
                             Modifier
                         },

@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.ExploreRepository
 import net.igng.mcstatus.core.data.HallFakePlayerDto
 import net.igng.mcstatus.core.data.HallLandDto
@@ -190,7 +190,7 @@ fun ServerFamilyDetailScreen(
                                     if (href != null) {
                                         Row(
                                             modifier = Modifier.clickable {
-                                                CustomTabsLauncher.openExternalUrl(context, href, colors.isDark)
+                                                IgngBrowserLauncher.openExternalUrl(context, href, colors.isDark)
                                             },
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(3.dp),

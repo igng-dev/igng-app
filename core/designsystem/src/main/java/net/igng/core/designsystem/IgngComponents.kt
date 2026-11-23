@@ -50,11 +50,13 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
@@ -848,11 +850,13 @@ fun IgngTextField(
 ) {
     val colors = IgngTheme.colors
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = label,
-            style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
-            color = if (isError) colors.danger else colors.textSecondary,
-        )
+        if (label.isNotBlank()) {
+            Text(
+                text = label,
+                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                color = if (isError) colors.danger else colors.textSecondary,
+            )
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1023,6 +1027,7 @@ fun IgngDetailSheet(
     onDismiss: () -> Unit,
     title: String? = null,
     subtitle: String? = null,
+    scrollable: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = IgngTheme.colors
@@ -1035,10 +1040,16 @@ fun IgngDetailSheet(
         scrimColor = colors.scrim,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
+        val scrollMod = if (scrollable) {
+            Modifier.verticalScroll(rememberScrollState())
+        } else {
+            Modifier
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .then(scrollMod)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
         ) {
@@ -1125,6 +1136,8 @@ fun IgngAvatar(
 
 // =============================================================================
 // Unified Bento 2.0 convenience components & overloads (shared across BBS / MC / Ink)
+// All overloads delegate directly to the canonical Surface/Button/StateBlock primitives above
+// so every app shares identical elevation, press physics, typography, and haptics.
 // =============================================================================
 
 @Composable
@@ -1135,21 +1148,24 @@ fun IgngTile(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val colors = IgngTheme.colors
-    val shape = RoundedCornerShape(IgngRadius.tile)
-    val baseModifier = if (onClick != null) {
-        modifier.igngPressScale(onClick = onClick)
+    if (onClick != null) {
+        IgngInteractiveTile(
+            onClick = onClick,
+            modifier = modifier,
+            shape = IgngTheme.radii.lg,
+            soft = soft,
+            contentPadding = padding,
+            content = content,
+        )
     } else {
-        modifier
+        IgngTile(
+            modifier = modifier,
+            shape = IgngTheme.radii.lg,
+            soft = soft,
+            contentPadding = padding,
+            content = content,
+        )
     }
-    Column(
-        modifier = baseModifier
-            .clip(shape)
-            .background(if (soft) colors.tileSoft else colors.tile)
-            .border(1.dp, colors.line, shape)
-            .padding(padding),
-        content = content,
-    )
 }
 
 enum class IgngTone {
@@ -1171,6 +1187,9 @@ fun IgngTagChip(
     val colors = IgngTheme.colors
     val intensity = IgngTheme.motionIntensity
     val targetBg = when {
+        selected && tone == IgngTone.DANGER -> colors.danger
+        selected && tone == IgngTone.WARNING -> colors.warning
+        selected && tone == IgngTone.SUCCESS -> colors.success
         selected -> colors.accent
         tone == IgngTone.ACCENT -> colors.accentLow
         tone == IgngTone.SUCCESS -> colors.successLow
@@ -1186,10 +1205,14 @@ fun IgngTagChip(
         tone == IgngTone.DANGER -> colors.danger
         else -> colors.textSecondary
     }
-    val bg by animateColorAsState(targetBg, IgngMotion.easeTween(160, intensity), label = "chipBg")
-    val fg by animateColorAsState(targetFg, IgngMotion.easeTween(160, intensity), label = "chipFg")
-    val shape = RoundedCornerShape(IgngRadius.pill)
-    val mod = if (onClick != null) modifier.igngPressScale(haptic = true, onClick = onClick) else modifier
+    val bg by animateColorAsState(targetBg, IgngMotion.microTween(intensity), label = "chipBg")
+    val fg by animateColorAsState(targetFg, IgngMotion.microTween(intensity), label = "chipFg")
+    val shape = IgngTheme.radii.pill
+    val mod = if (onClick != null) {
+        modifier.igngPressScale(haptic = true, hapticKind = IgngHapticKind.Tick, onClick = onClick)
+    } else {
+        modifier
+    }
 
     Box(
         modifier = mod
@@ -1205,7 +1228,7 @@ fun IgngTagChip(
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelMedium,
+            style = IgngTheme.type.badge,
             color = fg,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1221,29 +1244,17 @@ fun IgngAvatar(
     size: Dp = 36.dp,
     onClick: (() -> Unit)? = null,
 ) {
-    val colors = IgngTheme.colors
-    val initial = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "I"
-    val mod = (if (onClick != null) modifier.igngPressScale(onClick = onClick) else modifier)
-        .size(size)
-        .clip(CircleShape)
-        .background(colors.accentLow)
-        .border(1.dp, colors.line, CircleShape)
-
-    Box(modifier = mod, contentAlignment = Alignment.Center) {
-        Text(
-            text = initial,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-            color = colors.accent,
-        )
-        if (!avatarUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = avatarUrl,
-                contentDescription = displayName,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.matchParentSize(),
-            )
-        }
+    val mod = if (onClick != null) {
+        modifier.igngPressScale(haptic = true, onClick = onClick)
+    } else {
+        modifier
     }
+    IgngAvatar(
+        name = displayName,
+        avatarUrl = avatarUrl,
+        modifier = mod,
+        size = size,
+    )
 }
 
 @Composable
@@ -1252,29 +1263,17 @@ fun IgngPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    loading: Boolean = false,
     icon: ImageVector? = null,
-) {
-    val colors = IgngTheme.colors
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(44.dp),
-        shape = RoundedCornerShape(IgngRadius.control),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = colors.accent,
-            contentColor = colors.onAccent,
-            disabledContainerColor = colors.lineStrong,
-            disabledContentColor = colors.textMuted,
-        ),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
-    ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(text = text, style = MaterialTheme.typography.labelLarge)
-    }
-}
+) = IgngButton(
+    text = text,
+    onClick = onClick,
+    modifier = modifier,
+    style = IgngButtonStyle.Primary,
+    icon = icon,
+    enabled = enabled,
+    loading = loading,
+)
 
 @Composable
 fun IgngSecondaryButton(
@@ -1282,28 +1281,17 @@ fun IgngSecondaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    loading: Boolean = false,
     icon: ImageVector? = null,
-) {
-    val colors = IgngTheme.colors
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(44.dp),
-        shape = RoundedCornerShape(IgngRadius.control),
-        border = BorderStroke(1.dp, colors.lineStrong),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = colors.tile,
-            contentColor = colors.textPrimary,
-        ),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-    ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(text = text, style = MaterialTheme.typography.labelLarge)
-    }
-}
+) = IgngButton(
+    text = text,
+    onClick = onClick,
+    modifier = modifier,
+    style = IgngButtonStyle.Secondary,
+    icon = icon,
+    enabled = enabled,
+    loading = loading,
+)
 
 @Composable
 fun IgngErrorTile(
@@ -1311,37 +1299,14 @@ fun IgngErrorTile(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     title: String = "暂时无法获取数据",
-) {
-    val colors = IgngTheme.colors
-    IgngTile(modifier = modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Rounded.WarningAmber,
-                contentDescription = null,
-                tint = colors.warning,
-                modifier = Modifier.size(22.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = colors.textPrimary,
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-        )
-        Spacer(Modifier.height(14.dp))
-        IgngSecondaryButton(
-            text = "重新加载",
-            icon = Icons.Rounded.Refresh,
-            onClick = onRetry,
-        )
-    }
-}
+) = IgngStateBlock(
+    title = title,
+    description = message,
+    isError = true,
+    actionLabel = "重新加载",
+    onAction = onRetry,
+    modifier = modifier,
+)
 
 @Composable
 fun IgngEmptyTile(
@@ -1350,26 +1315,14 @@ fun IgngEmptyTile(
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
-) {
-    val colors = IgngTheme.colors
-    IgngTile(modifier = modifier.fillMaxWidth(), soft = true) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-        )
-        if (!actionLabel.isNullOrBlank() && onAction != null) {
-            Spacer(Modifier.height(14.dp))
-            IgngPrimaryButton(text = actionLabel, onClick = onAction)
-        }
-    }
-}
+) = IgngStateBlock(
+    title = title,
+    description = subtitle,
+    isError = false,
+    actionLabel = actionLabel,
+    onAction = onAction,
+    modifier = modifier,
+)
 
 @Composable
 fun IgngStatTile(

@@ -211,15 +211,14 @@ private fun ProfileRowItem(
     accentTint: Boolean = false,
 ) {
     val colors = IgngTheme.colors
-    IgngTile(padding = PaddingValues(14.dp), onClick = onClick) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(icon, contentDescription = null, tint = if (accentTint) colors.warning else colors.accent)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-            }
-        }
-    }
+    net.igng.core.designsystem.IgngNavRowTile(
+        title = title,
+        subtitle = subtitle,
+        icon = icon,
+        iconTint = if (accentTint) colors.warning else colors.accent,
+        accentBorder = if (accentTint) colors.warning else null,
+        onClick = onClick,
+    )
 }
 
 @Composable

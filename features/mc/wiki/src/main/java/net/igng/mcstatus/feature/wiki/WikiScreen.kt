@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,7 +29,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,33 +44,39 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.igng.mcstatus.core.data.SettingsRepository
-import net.igng.mcstatus.core.data.WikiCatalogResponse
-import net.igng.mcstatus.core.data.WikiPageDetail
-import net.igng.mcstatus.core.data.WikiPageSummary
-import net.igng.mcstatus.core.data.WikiRepository
 import net.igng.core.designsystem.IgngAmbientCanvas
-import net.igng.core.designsystem.IgngBadge
-import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
-import net.igng.core.designsystem.IgngCopyPill
 import net.igng.core.designsystem.IgngDetailSheet
+import net.igng.core.designsystem.IgngHapticKind
+import net.igng.core.designsystem.IgngImageGalleryLightbox
 import net.igng.core.designsystem.IgngInteractiveTile
 import net.igng.core.designsystem.IgngLoadingBlock
 import net.igng.core.designsystem.IgngPullToRefreshBox
+import net.igng.core.designsystem.IgngReaderTypographySheet
 import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngSkeletonRows
 import net.igng.core.designsystem.IgngStateBlock
 import net.igng.core.designsystem.IgngTheme
-import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.ProvideIgngReaderSurface
 import net.igng.core.designsystem.igngStaggeredReveal
+import net.igng.core.designsystem.rememberIgngHaptics
+import net.igng.core.markdown.IgngMarkdownBlockView
+import net.igng.core.markdown.MarkdownParser
+import net.igng.mcstatus.core.data.SettingsRepository
+import net.igng.mcstatus.core.data.WikiCatalogResponse
+import net.igng.mcstatus.core.data.WikiPageDetail
+import net.igng.mcstatus.core.data.WikiPageSummary
+import net.igng.mcstatus.core.data.WikiRepository
+import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.mcstatus.core.model.IgngFormatters
 
 @Composable
@@ -252,68 +263,6 @@ private fun WikiPageRow(
     }
 }
 
-private sealed interface MdBlock {
-    data class Heading(val level: Int, val text: String) : MdBlock
-    data class Paragraph(val text: String) : MdBlock
-    data class Bullet(val text: String) : MdBlock
-    data class Quote(val text: String) : MdBlock
-    data class Code(val lang: String, val code: String) : MdBlock
-}
-
-private fun parseSimpleMarkdown(raw: String): List<MdBlock> {
-    val blocks = mutableListOf<MdBlock>()
-    val lines = raw.replace("\r\n", "\n").split("\n")
-    var i = 0
-    val para = StringBuilder()
-
-    fun flushPara() {
-        val text = para.toString().trim()
-        if (text.isNotEmpty()) blocks += MdBlock.Paragraph(text)
-        para.setLength(0)
-    }
-
-    while (i < lines.size) {
-        val line = lines[i]
-        val trimmed = line.trim()
-        when {
-            trimmed.startsWith("```") -> {
-                flushPara()
-                val lang = trimmed.removePrefix("```").trim()
-                val codeBuf = StringBuilder()
-                i++
-                while (i < lines.size && !lines[i].trim().startsWith("```")) {
-                    if (codeBuf.isNotEmpty()) codeBuf.append('\n')
-                    codeBuf.append(lines[i])
-                    i++
-                }
-                blocks += MdBlock.Code(lang, codeBuf.toString())
-            }
-            trimmed.startsWith("#") -> {
-                flushPara()
-                val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 4)
-                val title = trimmed.drop(level).trim()
-                if (title.isNotEmpty()) blocks += MdBlock.Heading(level, title)
-            }
-            trimmed.startsWith(">") -> {
-                flushPara()
-                blocks += MdBlock.Quote(trimmed.removePrefix(">").trim())
-            }
-            trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
-                flushPara()
-                blocks += MdBlock.Bullet(trimmed.drop(2).trim())
-            }
-            trimmed.isEmpty() -> flushPara()
-            else -> {
-                if (para.isNotEmpty()) para.append('\n')
-                para.append(trimmed)
-            }
-        }
-        i++
-    }
-    flushPara()
-    return blocks
-}
-
 @Composable
 fun WikiArticleScreen(
     pageId: Int,
@@ -321,14 +270,18 @@ fun WikiArticleScreen(
     settingsRepository: SettingsRepository,
     onBack: () -> Unit,
 ) {
-    val colors = IgngTheme.colors
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptic = rememberIgngHaptics()
     val listState = rememberLazyListState()
+    val prefs by settingsRepository.preferences.collectAsState(initial = AppPreferences())
 
     var page by remember(pageId) { mutableStateOf<WikiPageDetail?>(null) }
     var loading by remember(pageId) { mutableStateOf(true) }
     var error by remember(pageId) { mutableStateOf<String?>(null) }
     var showToc by remember { mutableStateOf(false) }
+    var showTypoSheet by remember { mutableStateOf(false) }
+    var lightboxIndex by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(pageId) {
         loading = true
@@ -344,128 +297,121 @@ fun WikiArticleScreen(
         loading = false
     }
 
-    val blocks = remember(page?.content) { parseSimpleMarkdown(page?.content.orEmpty()) }
-    val headings = remember(blocks) {
-        blocks.mapIndexedNotNull { idx, b -> if (b is MdBlock.Heading) idx to b else null }
+    val document = remember(page?.content) {
+        MarkdownParser.parse(source = page?.content.orEmpty())
     }
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-    IgngAmbientCanvas {
-        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(
-                title = page?.title ?: "百科文档",
-                subtitle = page?.updatedAt?.let { "更新于 ${IgngFormatters.formatIsoDateTime(it, short = true)}" },
-                onBack = onBack,
-                actions = {
-                    if (headings.isNotEmpty()) {
-                        IgngButton(
-                            text = "目录",
-                            onClick = { showToc = true },
-                            style = IgngButtonStyle.Secondary,
-                            icon = Icons.AutoMirrored.Rounded.FormatListBulleted,
-                            compact = true,
-                        )
+    ProvideIgngReaderSurface(tone = prefs.reader.canvasTone) {
+        val colors = IgngTheme.colors
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.canvas)
+                .statusBarsPadding(),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                IgngTopBar(
+                    title = page?.title ?: "百科文档",
+                    subtitle = page?.updatedAt?.let { "更新于 ${IgngFormatters.formatIsoDateTime(it, short = true)}" },
+                    onBack = onBack,
+                    actions = {
+                        if (document.toc.isNotEmpty()) {
+                            IconButton(onClick = {
+                                haptic(IgngHapticKind.Tap)
+                                showToc = true
+                            }) {
+                                Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = "目录", tint = colors.textPrimary)
+                            }
+                        }
+                        IconButton(onClick = {
+                            haptic(IgngHapticKind.Tap)
+                            showTypoSheet = true
+                        }) {
+                            Icon(Icons.Rounded.TextFields, contentDescription = "阅读排版", tint = colors.textPrimary)
+                        }
+                    },
+                )
+                when {
+                    loading && page == null -> IgngLoadingBlock(fill = true)
+                    error != null && page == null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true)
                     }
-                },
-            )
-            when {
-                loading && page == null -> IgngLoadingBlock(fill = true)
-                error != null && page == null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "读取失败", description = error, isError = true)
-                }
-                else -> LazyColumn(
-                    state = listState,
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    itemsIndexed(blocks) { _, block ->
-                        when (block) {
-                            is MdBlock.Heading -> {
-                                Spacer(Modifier.height(if (block.level <= 2) 6.dp else 2.dp))
-                                Text(
-                                    text = block.text,
-                                    style = when (block.level) {
-                                        1 -> IgngTheme.type.pageTitle
-                                        2 -> IgngTheme.type.sectionTitle
-                                        else -> IgngTheme.type.cardTitle
-                                    },
-                                    color = colors.textPrimary,
-                                )
-                            }
-                            is MdBlock.Paragraph -> {
-                                Text(
-                                    text = block.text.replace("**", "").replace("`", ""),
-                                    style = IgngTheme.type.body,
-                                    color = colors.textSecondary,
-                                )
-                            }
-                            is MdBlock.Bullet -> {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("•", style = IgngTheme.type.body, color = colors.accent)
-                                    Text(
-                                        text = block.text.replace("**", "").replace("`", ""),
-                                        style = IgngTheme.type.body,
-                                        color = colors.textSecondary,
-                                    )
-                                }
-                            }
-                            is MdBlock.Quote -> {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(IgngTheme.radii.sm)
-                                        .background(colors.accentSoft)
-                                        .padding(12.dp),
-                                ) {
-                                    Text(block.text, style = IgngTheme.type.body, color = colors.textPrimary)
-                                }
-                            }
-                            is MdBlock.Code -> {
-                                IgngTile(soft = true, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(12.dp)) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        IgngBadge(block.lang.ifBlank { "命令 / 代码" }, tone = IgngBadgeTone.Neutral)
-                                        IgngCopyPill(value = block.code, label = "复制代码", mono = false)
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        text = block.code,
-                                        style = IgngTheme.type.mono,
-                                        color = colors.textPrimary,
-                                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                    )
-                                }
-                            }
+                    else -> LazyColumn(
+                        state = listState,
+                        contentPadding = PaddingValues(
+                            start = 18.dp,
+                            end = 18.dp,
+                            top = 12.dp,
+                            bottom = navBottom + 28.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        itemsIndexed(document.blocks) { _, block ->
+                            IgngMarkdownBlockView(
+                                block = block,
+                                typography = prefs.reader,
+                                onImageClick = { clickedUrl ->
+                                    val idx = document.imageUrls.indexOf(clickedUrl).coerceAtLeast(0)
+                                    if (document.imageUrls.isNotEmpty()) lightboxIndex = idx
+                                },
+                                onLinkClick = { url ->
+                                    IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark)
+                                },
+                            )
                         }
                     }
                 }
             }
         }
-    }
 
-    if (showToc) {
-        IgngDetailSheet(onDismiss = { showToc = false }, title = "文章目录") {
-            headings.forEach { (blockIndex, heading) ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(IgngTheme.radii.sm)
-                        .clickable {
-                            showToc = false
-                            scope.launch { listState.animateScrollToItem(blockIndex) }
-                        }
-                        .padding(
-                            start = ((heading.level - 1) * 14).dp,
-                            top = 10.dp,
-                            bottom = 10.dp,
-                            end = 8.dp,
-                        ),
-                ) {
-                    Text(
-                        text = heading.text,
-                        style = if (heading.level <= 2) IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.Bold) else IgngTheme.type.body,
-                        color = colors.textPrimary,
-                    )
+        if (showToc) {
+            IgngDetailSheet(
+                onDismiss = { showToc = false },
+                title = "文章目录",
+                scrollable = true,
+            ) {
+                document.toc.forEach { entry ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(IgngTheme.radii.sm)
+                            .clickable {
+                                haptic(IgngHapticKind.Tap)
+                                showToc = false
+                                scope.launch { listState.animateScrollToItem(entry.blockIndex) }
+                            }
+                            .padding(
+                                start = ((entry.level - 1) * 14).dp,
+                                top = 10.dp,
+                                bottom = 10.dp,
+                                end = 8.dp,
+                            ),
+                    ) {
+                        Text(
+                            text = entry.title,
+                            style = if (entry.level <= 2) IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.Bold) else IgngTheme.type.body,
+                            color = colors.textPrimary,
+                        )
+                    }
                 }
             }
+        }
+
+        if (showTypoSheet) {
+            IgngReaderTypographySheet(
+                prefs = prefs.reader,
+                onUpdate = { transform -> scope.launch { settingsRepository.updateReaderPrefs(transform) } },
+                onDismiss = { showTypoSheet = false },
+            )
+        }
+
+        lightboxIndex?.let { idx ->
+            IgngImageGalleryLightbox(
+                imageUrls = document.imageUrls,
+                initialIndex = idx,
+                onDismiss = { lightboxIndex = null },
+            )
         }
     }
 }

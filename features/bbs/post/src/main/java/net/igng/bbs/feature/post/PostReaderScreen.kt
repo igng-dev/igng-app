@@ -79,12 +79,14 @@ import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
+import net.igng.core.designsystem.IgngDetailSheet
+import net.igng.core.designsystem.IgngReaderTypographySheet
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.ProvideIgngReaderSurface
 import net.igng.core.designsystem.readerSurfaceColors
 import net.igng.core.designsystem.rememberIgngScrollBarVisibility
-import net.igng.core.markdown.BbsMarkdownBlockView
+import net.igng.core.markdown.IgngMarkdownBlockView
 import net.igng.core.markdown.MarkdownParser
 import net.igng.bbs.core.model.AppPreferences
 import net.igng.bbs.core.model.BbsFormatters
@@ -428,7 +430,7 @@ fun PostReaderScreen(
                             // Native Markdown / HTML AST Blocks
                             val blocks = document?.blocks.orEmpty()
                             itemsIndexed(blocks, key = { idx, _ -> "blk_$idx" }) { _, block ->
-                                BbsMarkdownBlockView(
+                                IgngMarkdownBlockView(
                                     block = block,
                                     typography = prefs.reader,
                                     onImageClick = { url ->
@@ -556,88 +558,35 @@ fun PostReaderScreen(
 
     // TOC Bottom Sheet
     if (showTocSheet && document != null) {
-        ModalBottomSheet(
-            onDismissRequest = { showTocSheet = false },
-            containerColor = colors.tile,
+        IgngDetailSheet(
+            onDismiss = { showTocSheet = false },
+            title = "文章目录",
+            scrollable = true,
         ) {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
-                Text("文章目录", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                Spacer(Modifier.height(12.dp))
-                document.toc.forEach { entry ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(IgngRadius.control))
-                            .clickable {
-                                showTocSheet = false
-                                scope.launch { listState.animateScrollToItem(headerItemsCount + entry.blockIndex) }
-                            }
-                            .padding(start = ((entry.level - 1) * 14).dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
-                    ) {
-                        Text(entry.title, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                    }
+            document.toc.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(IgngTheme.radii.sm)
+                        .clickable {
+                            showTocSheet = false
+                            scope.launch { listState.animateScrollToItem(headerItemsCount + entry.blockIndex) }
+                        }
+                        .padding(start = ((entry.level - 1) * 14).dp, top = 10.dp, bottom = 10.dp, end = 8.dp),
+                ) {
+                    Text(entry.title, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
                 }
-                Spacer(Modifier.height(24.dp))
             }
         }
     }
 
     // Typography Bottom Sheet
     if (showTypoSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showTypoSheet = false },
-            containerColor = colors.tile,
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("阅读排版设置", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                Text("字号：${prefs.reader.fontSizeSp.toInt()} sp", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
-                Slider(
-                    value = prefs.reader.fontSizeSp,
-                    onValueChange = { v -> scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(fontSizeSp = v) } } },
-                    valueRange = 14f..22f,
-                )
-                Text("行距：${String.format("%.2f", prefs.reader.lineHeightMultiplier)}x", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
-                Slider(
-                    value = prefs.reader.lineHeightMultiplier,
-                    onValueChange = { v -> scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(lineHeightMultiplier = v) } } },
-                    valueRange = 1.45f..2.0f,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IgngTagChip(
-                        text = "默认画布",
-                        selected = prefs.reader.canvasTone == ReaderCanvasTone.DEFAULT,
-                        onClick = { scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = ReaderCanvasTone.DEFAULT) } } },
-                    )
-                    IgngTagChip(
-                        text = "暖纸护眼",
-                        selected = prefs.reader.canvasTone == ReaderCanvasTone.WARM_PAPER,
-                        onClick = { scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = ReaderCanvasTone.WARM_PAPER) } } },
-                    )
-                    IgngTagChip(
-                        text = "深墨夜间",
-                        selected = prefs.reader.canvasTone == ReaderCanvasTone.INK_DARK,
-                        onClick = { scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = ReaderCanvasTone.INK_DARK) } } },
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("正文衬线字体", style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                    Switch(
-                        checked = prefs.reader.preferSerif,
-                        onCheckedChange = { checked ->
-                            scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(preferSerif = checked) } }
-                        },
-                    )
-                }
-                Spacer(Modifier.height(18.dp))
-            }
-        }
+        IgngReaderTypographySheet(
+            prefs = prefs.reader,
+            onUpdate = { transform -> scope.launch { container.settingsRepository.updateReaderPrefs(transform) } },
+            onDismiss = { showTypoSheet = false },
+        )
     }
 
     // Report Modal with 12-code taxonomy

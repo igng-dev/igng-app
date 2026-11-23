@@ -46,7 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.BoundMcAccountDto
 import net.igng.mcstatus.core.data.CustomMedalSlotDto
 import net.igng.mcstatus.core.data.McCharacterDetailsResponse
@@ -144,7 +144,7 @@ fun CharactersScreen(
                 actions = {
                     IgngButton(
                         text = "绑定新角色",
-                        onClick = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
+                        onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
                         style = IgngButtonStyle.Secondary,
                         icon = Icons.Rounded.OpenInBrowser,
                         compact = true,
@@ -166,7 +166,7 @@ fun CharactersScreen(
                         title = "还没有绑定 Minecraft 角色",
                         description = "前往网页端完成人机验证并验证游戏密码即可绑定。",
                         actionLabel = "前往绑定角色",
-                        onAction = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
+                        onAction = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
                     )
                 }
                 else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -299,7 +299,7 @@ fun CharactersScreen(
                         Spacer(Modifier.height(8.dp))
                         IgngButton(
                             text = "前往网页端核验",
-                            onClick = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
+                            onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
                             style = IgngButtonStyle.Secondary,
                             icon = Icons.Rounded.OpenInBrowser,
                             compact = true,
@@ -931,7 +931,7 @@ fun LoginActivityScreen(
                 actions = {
                     IgngButton(
                         text = "角色核验",
-                        onClick = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
+                        onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
                         style = IgngButtonStyle.Secondary,
                         icon = Icons.Rounded.OpenInBrowser,
                         compact = true,
@@ -956,7 +956,7 @@ fun LoginActivityScreen(
                             },
                             actionLabel = if (isNeedVerify) "前往网页端核验" else null,
                             onAction = if (isNeedVerify) {
-                                { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) }
+                                { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) }
                             } else {
                                 null
                             },
@@ -1022,7 +1022,7 @@ fun LoginActivityScreen(
                                         Spacer(Modifier.height(6.dp))
                                         IgngButton(
                                             text = "前往网页端完成核验",
-                                            onClick = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
+                                            onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
                                             style = IgngButtonStyle.Secondary,
                                             icon = Icons.Rounded.OpenInBrowser,
                                             compact = true,

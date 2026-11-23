@@ -980,8 +980,7 @@ fun CreatorMediaScreen(
                                             text = "复制 Markdown",
                                             tone = IgngTone.ACCENT,
                                             onClick = {
-                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                                cm?.setPrimaryClip(ClipData.newPlainText("md", "![](${file.markdownUrl})"))
+                                                net.igng.core.designsystem.copyTextToClipboard(context, "md", "![](${file.markdownUrl})")
                                                 notice = "已复制图片 Markdown 引用"
                                             },
                                         )

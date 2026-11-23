@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -92,7 +93,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.markdown.BbsMarkdownDocumentView
+import net.igng.core.markdown.IgngMarkdownDocumentView
 import net.igng.core.markdown.MarkdownParser
 import net.igng.core.markdown.WysiwygBlock
 import net.igng.core.markdown.WysiwygBlockType
@@ -570,6 +571,7 @@ fun NativeWysiwygEditorScreen(
                         .fillMaxWidth()
                         .background(colors.tile)
                         .border(1.dp, colors.line)
+                        .navigationBarsPadding()
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -642,7 +644,7 @@ fun NativeWysiwygEditorScreen(
                         HorizontalDivider(color = colors.line)
                     }
                     item {
-                        BbsMarkdownDocumentView(
+                        IgngMarkdownDocumentView(
                             document = doc,
                             typography = prefs.reader,
                             onImageClick = {},
@@ -656,71 +658,71 @@ fun NativeWysiwygEditorScreen(
 
     // Add Block Palette Bottom Sheet
     if (showAddBlockSheet) {
-        ModalBottomSheet(onDismissRequest = { showAddBlockSheet = false }, containerColor = colors.tile) {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("插入内容块", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WysiwygBlockType.entries.forEach { type ->
-                        IgngTagChip(
-                            text = type.label,
-                            tone = if (type == WysiwygBlockType.IMAGE) IgngTone.ACCENT else IgngTone.NEUTRAL,
-                            onClick = {
-                                showAddBlockSheet = false
-                                if (type == WysiwygBlockType.IMAGE) {
-                                    pendingImageBlockId = null
-                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                } else {
-                                    val newBlock = WysiwygBlock.emptyOf(type)
-                                    val next = history.present.toMutableList()
-                                    val idx = activeBlockId?.let { id -> next.indexOfFirst { it.id == id } } ?: next.lastIndex
-                                    next.add((idx + 1).coerceIn(0, next.size), newBlock)
-                                    activeBlockId = newBlock.id
-                                    updateBlocks(next)
-                                }
-                            },
-                        )
-                    }
+        net.igng.core.designsystem.IgngDetailSheet(
+            onDismiss = { showAddBlockSheet = false },
+            title = "插入内容块",
+            scrollable = true,
+        ) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                WysiwygBlockType.entries.forEach { type ->
+                    IgngTagChip(
+                        text = type.label,
+                        tone = if (type == WysiwygBlockType.IMAGE) IgngTone.ACCENT else IgngTone.NEUTRAL,
+                        onClick = {
+                            showAddBlockSheet = false
+                            if (type == WysiwygBlockType.IMAGE) {
+                                pendingImageBlockId = null
+                                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            } else {
+                                val newBlock = WysiwygBlock.emptyOf(type)
+                                val next = history.present.toMutableList()
+                                val idx = activeBlockId?.let { id -> next.indexOfFirst { it.id == id } } ?: next.lastIndex
+                                next.add((idx + 1).coerceIn(0, next.size), newBlock)
+                                activeBlockId = newBlock.id
+                                updateBlocks(next)
+                            }
+                        },
+                    )
                 }
-                Spacer(Modifier.height(24.dp))
             }
         }
     }
 
     // Convert Block Type Sheet
     convertTargetBlockId?.let { targetId ->
-        ModalBottomSheet(onDismissRequest = { convertTargetBlockId = null }, containerColor = colors.tile) {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("转换当前块类型", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WysiwygBlockType.entries.filterNot { it == WysiwygBlockType.IMAGE || it == WysiwygBlockType.VIDEO }.forEach { t ->
-                        IgngTagChip(
-                            text = t.label,
-                            onClick = {
-                                val next = history.present.map { b ->
-                                    if (b.id == targetId) WysiwygCodec.convertBlockType(b, t) else b
-                                }
-                                updateBlocks(next)
-                                convertTargetBlockId = null
-                            },
-                        )
-                    }
+        net.igng.core.designsystem.IgngDetailSheet(
+            onDismiss = { convertTargetBlockId = null },
+            title = "转换当前块类型",
+            scrollable = true,
+        ) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                WysiwygBlockType.entries.filterNot { it == WysiwygBlockType.IMAGE || it == WysiwygBlockType.VIDEO }.forEach { t ->
+                    IgngTagChip(
+                        text = t.label,
+                        onClick = {
+                            val next = history.present.map { b ->
+                                if (b.id == targetId) WysiwygCodec.convertBlockType(b, t) else b
+                            }
+                            updateBlocks(next)
+                            convertTargetBlockId = null
+                        },
+                    )
                 }
-                Spacer(Modifier.height(24.dp))
             }
         }
     }
 
     // Publish Settings Sheet
     if (showPublishSheet) {
-        ModalBottomSheet(onDismissRequest = { showPublishSheet = false }, containerColor = colors.tile) {
+        net.igng.core.designsystem.IgngDetailSheet(
+            onDismiss = { showPublishSheet = false },
+            title = "发布与文章设置",
+            scrollable = true,
+        ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("发布与文章设置", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-
                 Text("所属分区", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     bootstrap?.categories.orEmpty().forEach { cat ->
@@ -768,14 +770,16 @@ fun NativeWysiwygEditorScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("发布时请求 AI 生成摘要", style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                    Switch(checked = requestSummary, onCheckedChange = { requestSummary = it })
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("发布时请求 AI 推荐标签", style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                    Switch(checked = requestTags, onCheckedChange = { requestTags = it })
-                }
+                net.igng.core.designsystem.IgngSwitchRow(
+                    title = "发布时请求 AI 生成摘要",
+                    checked = requestSummary,
+                    onCheckedChange = { requestSummary = it },
+                )
+                net.igng.core.designsystem.IgngSwitchRow(
+                    title = "发布时请求 AI 推荐标签",
+                    checked = requestTags,
+                    onCheckedChange = { requestTags = it },
+                )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     IgngSecondaryButton(
@@ -789,11 +793,11 @@ fun NativeWysiwygEditorScreen(
                         text = if (busy) "提交中…" else "提交发布",
                         icon = Icons.Rounded.Publish,
                         enabled = !busy,
+                        loading = busy,
                         onClick = { saveOrPublish(saveAsDraft = false) },
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Spacer(Modifier.height(22.dp))
             }
         }
     }
@@ -838,7 +842,12 @@ private fun WysiwygBlockEditorCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = if (isActive) colors.accent else colors.textMuted,
             )
-            AnimatedVisibility(visible = isActive) {
+            val blkIntensity = IgngTheme.motionIntensity
+            AnimatedVisibility(
+                visible = isActive,
+                enter = androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(blkIntensity)),
+                exit = androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(blkIntensity)),
+            ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onMoveUp, enabled = canMoveUp, modifier = Modifier.size(30.dp)) {
                         Icon(Icons.Rounded.ArrowUpward, contentDescription = "上移", tint = if (canMoveUp) colors.textSecondary else colors.lineStrong, modifier = Modifier.size(16.dp))

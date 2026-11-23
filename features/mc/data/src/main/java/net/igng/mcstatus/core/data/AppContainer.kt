@@ -24,12 +24,14 @@ import net.igng.core.auth.IgngOAuthClient
 import net.igng.core.auth.OAuthClientConfig
 import net.igng.core.auth.SecureSessionStore
 import net.igng.core.model.MotionIntensity
+import net.igng.core.model.ReaderTypographyPrefs
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
 import net.igng.core.model.ThemeMode
 import net.igng.core.network.ApiException
 import net.igng.core.network.IgngClientConfig
 import net.igng.core.network.IgngHttpClient
+import net.igng.core.network.IgngJson
 import net.igng.core.network.SessionExpiredNotifier
 import net.igng.core.network.SingleFlightTokenRefresher
 import net.igng.core.network.TokenRefreshResult
@@ -42,10 +44,14 @@ private val Context.igngPrefsDataStore by preferencesDataStore(name = "igng_mc_v
 
 class SettingsRepository(private val context: Context) {
     val preferences: Flow<AppPreferences> = context.igngPrefsDataStore.data.map { prefs ->
+        val reader = prefs[KEY_READER_PREFS]?.let { raw ->
+            runCatching { IgngJson.instance.decodeFromString(ReaderTypographyPrefs.serializer(), raw) }.getOrNull()
+        } ?: ReaderTypographyPrefs()
         AppPreferences(
             themeMode = ThemeMode.entries.firstOrNull { it.id == prefs[KEY_THEME] } ?: ThemeMode.SYSTEM,
             motionIntensity = MotionIntensity.entries.firstOrNull { it.id == prefs[KEY_MOTION] } ?: MotionIntensity.FULL,
             hapticsEnabled = prefs[KEY_HAPTICS] ?: true,
+            reader = reader,
         )
     }
 
@@ -65,6 +71,18 @@ class SettingsRepository(private val context: Context) {
         context.igngPrefsDataStore.edit { it[KEY_HAPTICS] = enabled }
     }
 
+    suspend fun updateReaderPrefs(transform: (ReaderTypographyPrefs) -> ReaderTypographyPrefs) {
+        context.igngPrefsDataStore.edit { prefs ->
+            val current = prefs[KEY_READER_PREFS]?.let { raw ->
+                runCatching { IgngJson.instance.decodeFromString(ReaderTypographyPrefs.serializer(), raw) }.getOrNull()
+            } ?: ReaderTypographyPrefs()
+            prefs[KEY_READER_PREFS] = IgngJson.instance.encodeToString(
+                ReaderTypographyPrefs.serializer(),
+                transform(current),
+            )
+        }
+    }
+
     suspend fun recordRecentWiki(pageId: Int) {
         context.igngPrefsDataStore.edit { prefs ->
             val current = prefs[KEY_RECENT_WIKI].orEmpty().split(",").mapNotNull { it.toIntOrNull() }
@@ -77,6 +95,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_THEME = stringPreferencesKey("theme_mode")
         val KEY_MOTION = stringPreferencesKey("motion_intensity")
         val KEY_HAPTICS = booleanPreferencesKey("haptics_enabled")
+        val KEY_READER_PREFS = stringPreferencesKey("reader_typography_prefs_v1")
         val KEY_RECENT_WIKI = stringPreferencesKey("recent_wiki_ids")
         val KEY_SESSION_EPOCH = intPreferencesKey("session_epoch")
     }

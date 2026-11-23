@@ -551,22 +551,35 @@ fun BbsAppRoot(
         }
         }
 
-        // Global 401 Session Expired Dialog
+        // Global 401 Session Expired Sheet (aligned with MC non-destructive re-auth sheet)
         sessionExpiredReason?.let { reason ->
-            AlertDialog(
-                onDismissRequest = { sessionExpiredReason = null },
-                title = { Text("需要重新登录") },
-                text = { Text(reason) },
-                confirmButton = {
-                    TextButton(onClick = {
+            net.igng.core.designsystem.IgngDetailSheet(
+                onDismiss = { sessionExpiredReason = null },
+                title = "需要重新授权登录",
+                subtitle = "重新授权后即可继续，你正在编辑的内容不会被清除。",
+            ) {
+                Text(
+                    text = reason,
+                    style = IgngTheme.type.body,
+                    color = colors.textSecondary,
+                )
+                Spacer(Modifier.height(14.dp))
+                net.igng.core.designsystem.IgngButton(
+                    text = "重新通过 IGNG SSO 登录",
+                    onClick = {
                         sessionExpiredReason = null
-                        container.oauthManager.launchLogin(context)
-                    }) { Text("重新登录") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { sessionExpiredReason = null }) { Text("稍后再说") }
-                },
-            )
+                        container.oauthManager.launchLogin(context, isDark = colors.isDark)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                net.igng.core.designsystem.IgngButton(
+                    text = "稍后再说",
+                    onClick = { sessionExpiredReason = null },
+                    style = net.igng.core.designsystem.IgngButtonStyle.Secondary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
