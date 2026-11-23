@@ -12,8 +12,6 @@ android {
 
     defaultConfig {
         applicationId = "net.igng.bbs"
-        versionCode = 20001
-        versionName = "2.0.1"
 
         buildConfigField("String", "IGNG_API_BASE_URL", "\"$apiBaseUrl\"")
         buildConfigField("String", "IGNG_BBS_BASE_URL", "\"$bbsBaseUrl\"")

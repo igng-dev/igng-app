@@ -17,6 +17,64 @@ internal object IgngSdk {
     val JAVA_VERSION = JavaVersion.VERSION_17
 }
 
+data class IgngAppVersion(
+    val name: String,
+    val code: Int,
+)
+
+private val IGNG_SEMVER_REGEX = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$""")
+private const val LEGACY_MAX_VERSION_CODE = 20302
+
+fun Project.resolveIgngAppVersion(): IgngAppVersion {
+    val rawName = providers.gradleProperty("IGNG_APP_VERSION_NAME").orNull?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: throw GradleException("Missing IGNG_APP_VERSION_NAME in root gradle.properties.")
+    val rawCode = providers.gradleProperty("IGNG_APP_VERSION_CODE").orNull?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: throw GradleException("Missing IGNG_APP_VERSION_CODE in root gradle.properties.")
+
+    val match = IGNG_SEMVER_REGEX.matchEntire(rawName)
+        ?: throw GradleException(
+            "Invalid IGNG_APP_VERSION_NAME='$rawName'. Expected SemVer format like 3.0.0 or 3.0.0-rc.1.",
+        )
+    val major = match.groupValues[1].toInt()
+    val minor = match.groupValues[2].toInt()
+    val patch = match.groupValues[3].toInt()
+    val prerelease = match.groupValues[4]
+
+    if (minor >= 100 || patch >= 100) {
+        throw GradleException(
+            "Invalid IGNG_APP_VERSION_NAME='$rawName': minor and patch must be < 100 for major*10000+minor*100+patch encoding.",
+        )
+    }
+
+    val code = rawCode.toIntOrNull()
+        ?: throw GradleException("Invalid IGNG_APP_VERSION_CODE='$rawCode': expected a positive integer.")
+    if (code <= LEGACY_MAX_VERSION_CODE) {
+        throw GradleException(
+            "IGNG_APP_VERSION_CODE=$code must be strictly greater than legacy max versionCode ($LEGACY_MAX_VERSION_CODE) " +
+                "to preserve seamless in-place upgrades.",
+        )
+    }
+
+    val expectedStableCode = major * 10000 + minor * 100 + patch
+    if (prerelease.isEmpty()) {
+        if (code != expectedStableCode) {
+            throw GradleException(
+                "IGNG_APP_VERSION_CODE=$code does not match stable IGNG_APP_VERSION_NAME='$rawName' " +
+                    "(expected $expectedStableCode = major*10000 + minor*100 + patch).",
+            )
+        }
+    } else if (code > expectedStableCode) {
+        throw GradleException(
+            "Prerelease IGNG_APP_VERSION_CODE=$code must not exceed target stable code $expectedStableCode " +
+                "for IGNG_APP_VERSION_NAME='$rawName'.",
+        )
+    }
+
+    return IgngAppVersion(name = rawName, code = code)
+}
+
 fun Project.signingCredential(name: String, appPrefix: String? = null): String? {
     val candidates = buildList {
         if (!appPrefix.isNullOrBlank()) {

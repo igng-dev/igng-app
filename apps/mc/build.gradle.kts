@@ -14,8 +14,6 @@ android {
 
     defaultConfig {
         applicationId = "net.igng.mcstatus"
-        versionCode = 20302
-        versionName = "2.3.2"
 
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
         buildConfigField("String", "SSO_BASE_URL", "\"$ssoBaseUrl\"")

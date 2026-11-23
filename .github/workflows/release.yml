@@ -3,21 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'bbs-v*.*.*'
-      - 'mc-v*.*.*'
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
-      target:
-        description: '选择要发布的应用（bbs / mc / all）'
-        required: true
-        type: choice
-        default: bbs
-        options:
-          - bbs
-          - mc
-          - all
       tag:
-        description: '可选：单应用手动发布时指定 tag（如 bbs-v2.0.2）；留空自动读取各应用 versionName 生成 <app>-v<versionName>'
+        description: '可选：发布 tag（如 v3.0.0 或 v3.0.0-rc.1）；留空自动取 gradle.properties 的 v<IGNG_APP_VERSION_NAME>'
         required: false
         type: string
         default: ''
@@ -32,168 +22,118 @@ on:
         type: boolean
         default: false
       dry_run:
-        description: '仅执行签名构建与完整验签，不创建 GitHub Release（用于预演 Secrets 与签名链路）'
+        description: '仅执行全应用单测、签名构建与完整验签，不创建 GitHub Release（用于预演 Secrets 与签名链路）'
         required: false
         type: boolean
         default: false
       notes:
-        description: '自定义发布说明（留空则自动生成变更记录）'
+        description: '自定义发布说明（留空则按模块自动汇总变更记录）'
         required: false
         type: string
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.target || 'tag' }}
+  group: release-${{ github.ref }}-${{ inputs.tag || 'auto' }}
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: 解析发布目标矩阵
+  prepare:
+    name: 校验统一版本与发布前提
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
-      apps: ${{ steps.resolve.outputs.apps }}
-    steps:
-      - id: resolve
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_TARGET: ${{ inputs.target }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "push" ]; then
-            case "$REF_NAME" in
-              bbs-v*)
-                echo 'apps=["bbs"]' >> "$GITHUB_OUTPUT"
-                ;;
-              mc-v*)
-                echo 'apps=["mc"]' >> "$GITHUB_OUTPUT"
-                ;;
-              *)
-                echo "::error::不支持的发布 Tag 前缀：$REF_NAME（要求 bbs-v*.*.* 或 mc-v*.*.*）"
-                exit 1
-                ;;
-            esac
-          else
-            if [ "$INPUT_TARGET" = "all" ]; then
-              if [ -n "$INPUT_TAG" ]; then
-                echo "::error::target=all 时请将 tag 留空（将按各应用 versionName 分别生成独立 tag）"
-                exit 1
-              fi
-              echo 'apps=["bbs","mc"]' >> "$GITHUB_OUTPUT"
-            else
-              echo "apps=[\"${INPUT_TARGET}\"]" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
-  release:
-    name: 发布 ${{ matrix.app }}
-    needs: plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        app: ${{ fromJson(needs.plan.outputs.apps) }}
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      APP_KEY: ${{ matrix.app }}
+      apps: ${{ steps.meta.outputs.apps }}
+      version_name: ${{ steps.meta.outputs.version_name }}
+      version_code: ${{ steps.meta.outputs.version_code }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      draft: ${{ steps.meta.outputs.draft }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      prev_tag: ${{ steps.meta.outputs.prev_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: 隐私与脚本安全扫描
+      - name: 隐私扫描、脚本校验与模块边界守卫
         run: |
           set -euo pipefail
           bash scripts/check-privacy.sh --all
-          python3 -m py_compile scripts/verify-release-dex.py
+          python3 -m py_compile scripts/verify-release-dex.py scripts/release_utils.py
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          if grep -rnE --include='*.kt' --include='*.kts' 'net\.igng\.(bbs|mcstatus|ink)' core/; then
+            echo "::error::core 模块违规引用了业务领域代码！"
+            exit 1
+          fi
 
-      - name: 解析应用版本元数据并校验 Tag 一致性
+      - name: 解析全仓统一版本并校验 Tag 防覆写规则
         id: meta
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          GITHUB_REF_FULL: ${{ github.ref }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_PRERELEASE: ${{ inputs.prerelease }}
           INPUT_DRAFT: ${{ inputs.draft }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          case "$APP_KEY" in
-            bbs)
-              APP_GRADLE="apps/bbs/build.gradle.kts"
-              APP_ID="net.igng.bbs"
-              APP_TITLE="IGNG BBS"
-              ASSET_PREFIX="IGNGBBS"
-              SIGN_PREFIX="BBS"
-              KEYSTORE_EXT="p12"
-              ;;
-            mc)
-              APP_GRADLE="apps/mc/build.gradle.kts"
-              APP_ID="net.igng.mcstatus"
-              APP_TITLE="IGNGmc"
-              ASSET_PREFIX="IGNGmc"
-              SIGN_PREFIX="MC"
-              KEYSTORE_EXT="jks"
-              ;;
-            *)
-              echo "::error::未知应用目标：$APP_KEY"
-              exit 1
-              ;;
-          esac
+          DRY_RUN=$([ "$INPUT_DRY_RUN" = "true" ] && echo "true" || echo "false")
+          DRAFT=$([ "$INPUT_DRAFT" = "true" ] && echo "true" || echo "false")
 
-          VERSION_NAME=$(awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=/ { print $2; exit }' "$APP_GRADLE")
-          VERSION_CODE=$(awk -F'=' '/^[[:space:]]*versionCode[[:space:]]*=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$APP_GRADLE")
-          if [ -z "$VERSION_NAME" ] || [ -z "$VERSION_CODE" ]; then
-            echo "::error::无法从 $APP_GRADLE 解析 versionName / versionCode"
+          if [ "$DRY_RUN" != "true" ] && [ "$GITHUB_REF_FULL" != "refs/heads/main" ] && [ "$REF_TYPE" != "tag" ]; then
+            echo "::error::正式发布只能从 main 分支或 v*.*.* tag 触发（当前 ref=${GITHUB_REF_FULL}）；如需在分支预演请勾选 dry_run"
             exit 1
           fi
 
+          TARGET_TAG=""
           if [ "$EVENT_NAME" = "push" ]; then
-            TAG="$REF_NAME"
+            TARGET_TAG="$REF_NAME"
           elif [ -n "$INPUT_TAG" ]; then
-            TAG="$INPUT_TAG"
-          else
-            TAG="${APP_KEY}-v${VERSION_NAME}"
+            TARGET_TAG="$INPUT_TAG"
           fi
 
-          EXPECTED_TAG_PREFIX="${APP_KEY}-v${VERSION_NAME}"
-          TAG_BASE="${TAG%%-*}"
-          TAG_VER="${TAG#${APP_KEY}-v}"
-          TAG_CORE="${TAG_VER%%-*}"
-          if [ "$TAG_BASE" != "$APP_KEY" ] || [ "$TAG_CORE" != "$VERSION_NAME" ]; then
-            echo "::error::Tag ($TAG) 与 $APP_GRADLE 中的 versionName ($VERSION_NAME) 不一致（期望 ${EXPECTED_TAG_PREFIX} 或带预发布后缀）"
-            exit 1
-          fi
+          TMP_OUT="${RUNNER_TEMP}/version-meta.out"
+          : > "$TMP_OUT"
+          python3 scripts/release_utils.py validate-version \
+            --check-no-app-overrides \
+            --tag "$TARGET_TAG" \
+            --github-output "$TMP_OUT"
+
+          VERSION_NAME=$(awk -F'=' '$1 == "version_name" && !seen { print $2; seen=1 }' "$TMP_OUT")
+          VERSION_CODE=$(awk -F'=' '$1 == "version_code" && !seen { print $2; seen=1 }' "$TMP_OUT")
+          TAG=$(awk -F'=' '$1 == "tag" && !seen { print $2; seen=1 }' "$TMP_OUT")
+          TAG_IS_PRE=$(awk -F'=' '$1 == "tag_is_prerelease" && !seen { print $2; seen=1 }' "$TMP_OUT")
 
           PRERELEASE="false"
-          if [ "$INPUT_PRERELEASE" = "true" ] || printf '%s' "$TAG_VER" | grep -q '-'; then
+          if [ "$INPUT_PRERELEASE" = "true" ] || [ "$TAG_IS_PRE" = "true" ]; then
             PRERELEASE="true"
           fi
-          DRAFT=$([ "$INPUT_DRAFT" = "true" ] && echo "true" || echo "false")
-          DRY_RUN=$([ "$INPUT_DRY_RUN" = "true" ] && echo "true" || echo "false")
-          SHORT_SHA=$(git rev-parse --short HEAD)
 
           if [ "$DRY_RUN" != "true" ]; then
             if gh release view "$TAG" >/dev/null 2>&1; then
               echo "::error::GitHub Release $TAG 已存在，禁止覆盖已发布版本"
               exit 1
             fi
+            EXISTING_TAG_SHA=$(git rev-list -n 1 "refs/tags/$TAG" 2>/dev/null || true)
+            if [ -n "$EXISTING_TAG_SHA" ] && [ "$EXISTING_TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag $TAG 已指向其他提交 ($EXISTING_TAG_SHA != $GITHUB_SHA)，禁止移动已有 Tag"
+              exit 1
+            fi
           fi
 
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          PREV_TAG=$(git tag -l 'v*.*.*' --sort=-v:refname | awk -v t="$TAG" '$0 != t && !seen { print; seen=1 }')
+
           {
-            echo "app_id=$APP_ID"
-            echo "app_title=$APP_TITLE"
-            echo "asset_prefix=$ASSET_PREFIX"
-            echo "sign_prefix=$SIGN_PREFIX"
-            echo "keystore_ext=$KEYSTORE_EXT"
+            echo 'apps=["bbs","mc"]'
             echo "version_name=$VERSION_NAME"
             echo "version_code=$VERSION_CODE"
             echo "tag=$TAG"
@@ -201,13 +141,31 @@ jobs:
             echo "draft=$DRAFT"
             echo "dry_run=$DRY_RUN"
             echo "short_sha=$SHORT_SHA"
+            echo "prev_tag=$PREV_TAG"
           } >> "$GITHUB_OUTPUT"
 
-      - name: 解码并校验应用专属签名密钥
+  build:
+    name: 签名构建与验签 (${{ matrix.app }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.prepare.outputs.apps) }}
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      APP_KEY: ${{ matrix.app }}
+      VERSION_NAME: ${{ needs.prepare.outputs.version_name }}
+      VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 解析应用元数据并解码专属签名密钥
         id: signing
         env:
-          SIGN_PREFIX: ${{ steps.meta.outputs.sign_prefix }}
-          KEYSTORE_EXT: ${{ steps.meta.outputs.keystore_ext }}
           BBS_KS_B64: ${{ secrets.BBS_ANDROID_KEYSTORE_BASE64 }}
           BBS_KS_PASS: ${{ secrets.BBS_ANDROID_KEYSTORE_PASSWORD }}
           BBS_KEY_ALIAS: ${{ secrets.BBS_ANDROID_KEY_ALIAS }}
@@ -218,21 +176,27 @@ jobs:
           MC_KEY_PASS: ${{ secrets.MC_ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          case "$SIGN_PREFIX" in
-            BBS)
+          case "$APP_KEY" in
+            bbs)
+              APP_ID="net.igng.bbs"
+              APP_TITLE="IGNG BBS"
+              SIGN_PREFIX="BBS"
               KS_B64="$BBS_KS_B64"
               KS_PASS="$BBS_KS_PASS"
               K_ALIAS="$BBS_KEY_ALIAS"
               K_PASS="$BBS_KEY_PASS"
               ;;
-            MC)
+            mc)
+              APP_ID="net.igng.mcstatus"
+              APP_TITLE="IGNGmc"
+              SIGN_PREFIX="MC"
               KS_B64="$MC_KS_B64"
               KS_PASS="$MC_KS_PASS"
               K_ALIAS="$MC_KEY_ALIAS"
               K_PASS="$MC_KEY_PASS"
               ;;
             *)
-              echo "::error::未知签名配置前缀：$SIGN_PREFIX"
+              echo "::error::未知应用目标：$APP_KEY"
               exit 1
               ;;
           esac
@@ -242,10 +206,27 @@ jobs:
             exit 1
           fi
 
-          KS_PATH="${RUNNER_TEMP}/${APP_KEY}-release.${KEYSTORE_EXT}"
+          # Unified keystore filename format: igng-<app>-release.p12
+          KS_PATH="${RUNNER_TEMP}/igng-${APP_KEY}-release.p12"
           printf '%s' "$KS_B64" | tr -d '\r\n ' | base64 --decode > "$KS_PATH"
           chmod 600 "$KS_PATH"
-          echo "keystore_path=$KS_PATH" >> "$GITHUB_OUTPUT"
+          test -s "$KS_PATH"
+
+          MAGIC=$(od -An -tx1 -N4 "$KS_PATH" | tr -d ' \n')
+          if [ "$MAGIC" = "feedfeed" ]; then
+            KS_FORMAT="JKS-compat"
+            echo "::notice::检测到 ${APP_KEY} 当前仍使用遗留 JKS 容器（JDK 21 已无损兼容读取）；建议按 CONTRIBUTING.md 使用 keytool -importkeystore 无损转换为标准 PKCS12 (.p12)。"
+          else
+            KS_FORMAT="PKCS12"
+          fi
+
+          {
+            echo "app_id=$APP_ID"
+            echo "app_title=$APP_TITLE"
+            echo "sign_prefix=$SIGN_PREFIX"
+            echo "keystore_path=$KS_PATH"
+            echo "keystore_format=$KS_FORMAT"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -254,7 +235,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: 运行目标应用与核心模块单元测试
+      - name: 运行核心模块与目标应用单元测试
         run: |
           set -euo pipefail
           if [ "$APP_KEY" = "bbs" ]; then
@@ -263,34 +244,39 @@ jobs:
             sh ./gradlew :core:model:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :features:mc:model:testDebugUnitTest :features:mc:data:testDebugUnitTest :features:mc:chat:testDebugUnitTest :apps:mc:testDebugUnitTest --no-daemon
           fi
 
-      - name: 构建正式签名 Release APK
+      - name: 构建正式签名 Release APK（BBS）
+        if: matrix.app == 'bbs'
         env:
           IGNG_REQUIRE_RELEASE_SIGNING: "true"
-          BBS_ANDROID_SIGNING_STORE_FILE: ${{ steps.signing.outputs.keystore_path }}
-          BBS_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.BBS_ANDROID_KEYSTORE_PASSWORD }}
-          BBS_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.BBS_ANDROID_KEY_ALIAS }}
-          BBS_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.BBS_ANDROID_KEY_PASSWORD }}
-          MC_ANDROID_SIGNING_STORE_FILE: ${{ steps.signing.outputs.keystore_path }}
-          MC_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.MC_ANDROID_KEYSTORE_PASSWORD }}
-          MC_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.MC_ANDROID_KEY_ALIAS }}
-          MC_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.MC_ANDROID_KEY_PASSWORD }}
-        run: sh ./gradlew ":apps:${APP_KEY}:assembleRelease" --no-daemon --stacktrace
+          ANDROID_SIGNING_STORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.BBS_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.BBS_ANDROID_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.BBS_ANDROID_KEY_PASSWORD }}
+        run: sh ./gradlew :apps:bbs:assembleRelease --no-daemon --stacktrace
 
-      - name: 校验 APK 签名证书指纹、包元数据与 Release DEX
+      - name: 构建正式签名 Release APK（MC）
+        if: matrix.app == 'mc'
+        env:
+          IGNG_REQUIRE_RELEASE_SIGNING: "true"
+          ANDROID_SIGNING_STORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.MC_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.MC_ANDROID_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.MC_ANDROID_KEY_PASSWORD }}
+        run: sh ./gradlew :apps:mc:assembleRelease --no-daemon --stacktrace
+
+      - name: 校验签名证书指纹、统一版本元数据与 Release DEX
         id: verify_apk
         env:
-          APP_ID: ${{ steps.meta.outputs.app_id }}
-          ASSET_PREFIX: ${{ steps.meta.outputs.asset_prefix }}
-          SIGN_PREFIX: ${{ steps.meta.outputs.sign_prefix }}
-          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
-          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          APP_ID: ${{ steps.signing.outputs.app_id }}
+          APP_TITLE: ${{ steps.signing.outputs.app_title }}
+          KS_FORMAT: ${{ steps.signing.outputs.keystore_format }}
           BBS_CERT_SHA256: ${{ secrets.BBS_ANDROID_SIGNING_CERT_SHA256 }}
           MC_CERT_SHA256: ${{ secrets.MC_ANDROID_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
-          case "$SIGN_PREFIX" in
-            BBS) EXPECTED_CERT_SHA256="$BBS_CERT_SHA256" ;;
-            MC)  EXPECTED_CERT_SHA256="$MC_CERT_SHA256" ;;
+          case "$APP_KEY" in
+            bbs) EXPECTED_CERT_SHA256="$BBS_CERT_SHA256" ;;
+            mc)  EXPECTED_CERT_SHA256="$MC_CERT_SHA256" ;;
             *)   EXPECTED_CERT_SHA256="" ;;
           esac
 
@@ -298,19 +284,20 @@ jobs:
           if [ ! -f "$RAW_APK" ]; then
             RAW_APK=$(ls "apps/${APP_KEY}/build/outputs/apk/release/"*-release.apk | head -n 1)
           fi
-          ASSET_NAME="${ASSET_PREFIX}-v${VERSION_NAME}-release.apk"
-          OUT_DIR="${RUNNER_TEMP}/release-${APP_KEY}"
+
+          # Unified APK asset naming: igng-<app>-v<version>.apk
+          ASSET_NAME="igng-${APP_KEY}-v${VERSION_NAME}.apk"
+          OUT_DIR="${RUNNER_TEMP}/release-bundle-${APP_KEY}"
           mkdir -p "$OUT_DIR"
           FINAL_APK="${OUT_DIR}/${ASSET_NAME}"
           cp "$RAW_APK" "$FINAL_APK"
-          (cd "$OUT_DIR" && sha256sum "$ASSET_NAME" > "${ASSET_NAME}.sha256")
-          APK_SHA256=$(awk '{print $1}' "${FINAL_APK}.sha256")
+          APK_SHA256=$(sha256sum "$FINAL_APK" | awk '{print $1}')
 
           BUILD_TOOLS=$(ls -d "${ANDROID_HOME}/build-tools/"* | sort -V | tail -n 1)
           echo "=== apksigner verify ==="
           SIGNER_OUT=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$FINAL_APK")
           printf '%s\n' "$SIGNER_OUT"
-          CERT_SHA256=$(printf '%s\n' "$SIGNER_OUT" | awk '/certificate SHA-256 digest:/ { print $NF; exit }' | tr -d ':\r\n ' | tr 'A-Z' 'a-z')
+          CERT_SHA256=$(printf '%s\n' "$SIGNER_OUT" | awk '/certificate SHA-256 digest:/ && !seen { print $NF; seen=1 }' | tr -d ':\r\n ' | tr 'A-Z' 'a-z')
           if ! printf '%s' "$CERT_SHA256" | grep -qE '^[0-9a-f]{64}$'; then
             echo "::error::无法从 apksigner 输出中解析签名证书 SHA-256 摘要"
             exit 1
@@ -321,13 +308,13 @@ jobs:
               echo "::error::签名证书 SHA-256 不匹配，中止发布以保护覆盖升级链路"
               exit 1
             fi
-            echo "Signing certificate SHA-256 matches expected fingerprint."
+            echo "Signing certificate SHA-256 matches expected fingerprint for ${APP_KEY}."
           fi
           APP_LINKS_FP=$(printf '%s' "$CERT_SHA256" | tr 'a-f' 'A-F' | sed -E 's/(..)/\1:/g; s/:$//')
 
           echo "=== aapt2 dump badging ==="
           BADGING_OUT=$("$BUILD_TOOLS/aapt2" dump badging "$FINAL_APK")
-          BADGING_LINE=$(printf '%s\n' "$BADGING_OUT" | awk '/^package:/ { print; exit }')
+          BADGING_LINE=$(printf '%s\n' "$BADGING_OUT" | awk '/^package:/ && !seen { print; seen=1 }')
           echo "$BADGING_LINE"
           printf '%s\n' "$BADGING_LINE" | grep -q "name='${APP_ID}'"
           printf '%s\n' "$BADGING_LINE" | grep -q "versionCode='${VERSION_CODE}'"
@@ -336,114 +323,149 @@ jobs:
           echo "=== dexdump verify ==="
           python3 scripts/verify-release-dex.py --app "$APP_KEY" "$FINAL_APK" --dexdump "$BUILD_TOOLS/dexdump"
 
-          # Store cert metadata on disk in RUNNER_TEMP (not GITHUB_OUTPUT) so secret-masking never drops outputs
-          printf '%s\n' "$CERT_SHA256" > "${OUT_DIR}/cert.sha256"
-          printf '%s\n' "$APP_LINKS_FP" > "${OUT_DIR}/applinks.fp"
+          export APP_KEY APP_TITLE APP_ID ASSET_NAME APK_SHA256 CERT_SHA256 APP_LINKS_FP KS_FORMAT OUT_DIR
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
 
-          {
-            echo "asset_name=$ASSET_NAME"
-            echo "apk_path=$FINAL_APK"
-            echo "sha_path=${FINAL_APK}.sha256"
-            echo "apk_sha256=$APK_SHA256"
-            echo "meta_dir=$OUT_DIR"
-          } >> "$GITHUB_OUTPUT"
+          meta = {
+              "app_key": os.environ["APP_KEY"],
+              "app_title": os.environ["APP_TITLE"],
+              "app_id": os.environ["APP_ID"],
+              "asset_name": os.environ["ASSET_NAME"],
+              "apk_sha256": os.environ["APK_SHA256"],
+              "cert_sha256": os.environ["CERT_SHA256"],
+              "applinks_fp": os.environ["APP_LINKS_FP"],
+              "keystore_format": os.environ["KS_FORMAT"],
+          }
+          out_path = Path(os.environ["OUT_DIR"]) / f"meta-{os.environ['APP_KEY']}.json"
+          out_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
+          echo "bundle_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: 清理临时签名密钥
         if: always()
-        run: rm -f "${RUNNER_TEMP}/${APP_KEY}-release."*
+        run: rm -f "${RUNNER_TEMP}/igng-${APP_KEY}-release."*
 
-      - name: 发布分应用 GitHub Release
-        if: steps.meta.outputs.dry_run != 'true'
-        env:
-          APP_ID: ${{ steps.meta.outputs.app_id }}
-          APP_TITLE: ${{ steps.meta.outputs.app_title }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
-          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
-          SHORT_SHA: ${{ steps.meta.outputs.short_sha }}
-          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
-          DRAFT: ${{ steps.meta.outputs.draft }}
-          CUSTOM_NOTES: ${{ inputs.notes }}
-          ASSET_NAME: ${{ steps.verify_apk.outputs.asset_name }}
-          APK_PATH: ${{ steps.verify_apk.outputs.apk_path }}
-          SHA_PATH: ${{ steps.verify_apk.outputs.sha_path }}
-          APK_SHA256: ${{ steps.verify_apk.outputs.apk_sha256 }}
-          META_DIR: ${{ steps.verify_apk.outputs.meta_dir }}
+      - name: 暂存本应用已验签产物供统一发布阶段汇总
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-${{ matrix.app }}
+          path: ${{ steps.verify_apk.outputs.bundle_dir }}
+          retention-days: 1
+
+  publish:
+    name: 汇总校验并原子发布统一 GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION_NAME: ${{ needs.prepare.outputs.version_name }}
+      VERSION_CODE: ${{ needs.prepare.outputs.version_code }}
+      SHORT_SHA: ${{ needs.prepare.outputs.short_sha }}
+      PREV_TAG: ${{ needs.prepare.outputs.prev_tag }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      DRAFT: ${{ needs.prepare.outputs.draft }}
+      DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
+      CUSTOM_NOTES: ${{ inputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: 汇总全部已验签应用产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-bundle-*
+          path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
+
+      - name: 生成统一 SHA256SUMS.txt 与家族发布说明
+        id: assemble
         run: |
           set -euo pipefail
-          CERT_SHA256=$(cat "${META_DIR}/cert.sha256")
-          APP_LINKS_FP=$(cat "${META_DIR}/applinks.fp")
-          NOTES_FILE="${RUNNER_TEMP}/release-notes-${APP_KEY}.md"
-          {
-            echo "## ${APP_TITLE} Android v${VERSION_NAME} (\`${TAG}\`)"
-            echo ""
-            if [ -n "${CUSTOM_NOTES}" ]; then
-              printf '%s\n\n' "${CUSTOM_NOTES}"
-            else
-              AUTO_NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-                -f tag_name="${TAG}" \
-                -f target_commitish="${GITHUB_SHA}" \
-                -q '.body' 2>/dev/null || true)
-              if [ -n "${AUTO_NOTES}" ]; then
-                printf '%s\n\n' "${AUTO_NOTES}"
-              fi
-            fi
-            cat <<EOF
-          ### 安装与升级说明
+          ASSETS_DIR="${RUNNER_TEMP}/release-assets"
+          ls -la "$ASSETS_DIR"
 
-          - 包名保持 \`${APP_ID}\`，使用与既有正式版一致的发布签名证书，支持从历史版本直接覆盖升级，无需卸载。
-          - 支持 Android 8.0（API 26）及以上系统。
+          (
+            cd "$ASSETS_DIR"
+            LC_ALL=C ls -1 igng-*-v"${VERSION_NAME}".apk | xargs sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
 
-          ### 发布校验信息
+          AUTO_NOTES_FILE="${RUNNER_TEMP}/auto-notes.md"
+          : > "$AUTO_NOTES_FILE"
+          if [ -z "${CUSTOM_NOTES}" ]; then
+            AUTO_NOTES=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${TAG}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              ${PREV_TAG:+-f previous_tag_name="${PREV_TAG}"} \
+              -q '.body' 2>/dev/null || true)
+            printf '%s\n' "$AUTO_NOTES" > "$AUTO_NOTES_FILE"
+          fi
 
-          - \`applicationId\`: \`${APP_ID}\`
-          - \`versionCode\`: \`${VERSION_CODE}\`
-          - \`versionName\`: \`${VERSION_NAME}\`
-          - \`Commit\`: \`${SHORT_SHA}\`
-          - \`APK 文件名\`: \`${ASSET_NAME}\`
-          - \`APK SHA-256\`: \`${APK_SHA256}\`
-          - \`签名证书 SHA-256\`: \`${CERT_SHA256}\`
-          - \`App Links 证书指纹\`: \`${APP_LINKS_FP}\`
-          EOF
-          } > "$NOTES_FILE"
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          RENDER_ARGS=(
+            render-notes
+            --tag "${TAG}"
+            --version-name "${VERSION_NAME}"
+            --version-code "${VERSION_CODE}"
+            --commit "${SHORT_SHA}"
+            --meta-dir "${ASSETS_DIR}"
+            --output "${NOTES_FILE}"
+            --summary-output "${GITHUB_STEP_SUMMARY}"
+            --prev-tag "${PREV_TAG}"
+            --custom-notes "${CUSTOM_NOTES}"
+            --auto-notes-file "${AUTO_NOTES_FILE}"
+          )
+          if [ "${DRY_RUN}" = "true" ]; then RENDER_ARGS+=(--dry-run); fi
+          if [ "${PRERELEASE}" = "true" ]; then RENDER_ARGS+=(--prerelease); fi
+          if [ "${DRAFT}" = "true" ]; then RENDER_ARGS+=(--draft); fi
+
+          python3 scripts/release_utils.py "${RENDER_ARGS[@]}"
+
+          echo "assets_dir=${ASSETS_DIR}" >> "$GITHUB_OUTPUT"
+          echo "notes_file=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: 创建统一 GitHub Release
+        if: needs.prepare.outputs.dry_run != 'true'
+        env:
+          ASSETS_DIR: ${{ steps.assemble.outputs.assets_dir }}
+          NOTES_FILE: ${{ steps.assemble.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          mapfile -t APK_FILES < <(LC_ALL=C ls -1 "${ASSETS_DIR}"/igng-*-v"${VERSION_NAME}".apk)
+          if [ "${#APK_FILES[@]}" -eq 0 ]; then
+            echo "::error::未找到待发布的 APK 资产"
+            exit 1
+          fi
 
           ARGS=(
             "$TAG"
-            "$APK_PATH"
-            "$SHA_PATH"
-            --title "${APP_TITLE} v${VERSION_NAME} (${TAG})"
+            "${APK_FILES[@]}"
+            "${ASSETS_DIR}/SHA256SUMS.txt"
+            --title "IGNG Android Apps v${VERSION_NAME}"
             --notes-file "$NOTES_FILE"
-            --latest=false
           )
+
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             ARGS+=(--target "${GITHUB_SHA}")
           else
             ARGS+=(--verify-tag)
           fi
-          if [ "${PRERELEASE}" = "true" ]; then
-            ARGS+=(--prerelease)
-          fi
+
           if [ "${DRAFT}" = "true" ]; then
             ARGS+=(--draft)
+          elif [ "${PRERELEASE}" = "true" ]; then
+            ARGS+=(--prerelease --latest=false)
+          else
+            ARGS+=(--latest)
           fi
 
           gh release create "${ARGS[@]}"
-
-      - name: 输出构建摘要
-        env:
-          APP_TITLE: ${{ steps.meta.outputs.app_title }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          DRY_RUN: ${{ steps.meta.outputs.dry_run }}
-          ASSET_NAME: ${{ steps.verify_apk.outputs.asset_name }}
-          APK_SHA256: ${{ steps.verify_apk.outputs.apk_sha256 }}
-          META_DIR: ${{ steps.verify_apk.outputs.meta_dir }}
-        run: |
-          CERT_SHA256=$(cat "${META_DIR}/cert.sha256")
-          {
-            echo "### ${APP_TITLE} Release 构建结果"
-            echo "- Tag: \`${TAG}\`"
-            echo "- 模式: \`$( [ "$DRY_RUN" = "true" ] && echo "dry-run（未发布 Release）" || echo "正式发布" )\`"
-            echo "- APK: \`${ASSET_NAME}\`"
-            echo "- APK SHA-256: \`${APK_SHA256}\`"
-            echo "- 签名证书 SHA-256 校验: 已通过（\`${CERT_SHA256}\`）"
-          } >> "$GITHUB_STEP_SUMMARY"
