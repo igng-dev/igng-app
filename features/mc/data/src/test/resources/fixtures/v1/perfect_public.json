@@ -1,0 +1,58 @@
+{
+  "available": true,
+  "group": "perfect",
+  "wiki_url": "https://wiki.igng.net/IGNGmc/perfect",
+  "total_count": 5,
+  "public_count": 1,
+  "hidden_count": 4,
+  "benefits": [
+    {
+      "key": "lands",
+      "title": "额外领地",
+      "description": "增加可用领地数量",
+      "summary": "增加可用领地数量",
+      "limits": [
+        "领地上限 +10"
+      ],
+      "server_label": "生存服",
+      "limit": 20,
+      "servers": [
+        {
+          "server_id": "srv_3",
+          "server_name": "生存服"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "benefit": "lands",
+      "text": "领地需合规建设，不得恶意圈占公共资源"
+    }
+  ],
+  "criteria": [
+    {
+      "key": "building",
+      "title": "优秀建筑",
+      "text": "在服务器内完成高质量原创建筑"
+    }
+  ],
+  "apply_steps": [
+    "提交工单申请"
+  ],
+  "principles": [
+    "公平透明"
+  ],
+  "public_members": [
+    {
+      "username": "Alice_CN",
+      "user_id": "usr_1024",
+      "numeric_user_id": 1024,
+      "member_no": 1,
+      "member_no_label": "No.001",
+      "qualification_label": "优秀建筑",
+      "joined_at": "2026-06-01T00:00:00Z",
+      "since": "2026-06-01"
+    }
+  ]
+}

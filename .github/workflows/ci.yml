@@ -1,0 +1,241 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: 隐私检查与受影响应用判定
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run_core: ${{ steps.scope.outputs.run_core }}
+      run_bbs: ${{ steps.scope.outputs.run_bbs }}
+      run_mc: ${{ steps.scope.outputs.run_mc }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: 隐私扫描、模块隔离红线与脚本语法检查
+        run: |
+          set -euo pipefail
+          bash scripts/check-privacy.sh --all
+          sh -n scripts/check-privacy.sh
+          sh -n .githooks/pre-commit
+          bash -n .githooks/pre-push
+          python3 -m py_compile scripts/verify-release-dex.py
+          if grep -rnE --include='*.kt' --include='*.kts' 'net\.igng\.(bbs|mcstatus|ink)' core/; then
+            echo "::error::core 模块违规引用了业务领域代码！"
+            exit 1
+          fi
+
+      - name: 判定受影响的构建范围
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          set_all() {
+            echo "run_core=true" >> "$GITHUB_OUTPUT"
+            echo "run_bbs=true" >> "$GITHUB_OUTPUT"
+            echo "run_mc=true" >> "$GITHUB_OUTPUT"
+          }
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "workflow_dispatch: full verification across all apps"
+            set_all
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_SHA" ]; then
+            CHANGED=$(git diff --name-only "$PR_BASE_SHA" HEAD)
+          elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            CHANGED=$(git diff --name-only "$PUSH_BEFORE" HEAD)
+          else
+            echo "Initial push or unknown base: running full verification"
+            set_all
+            exit 0
+          fi
+
+          if [ -z "$CHANGED" ]; then
+            echo "No changed files; skipping Gradle build"
+            echo "run_core=false" >> "$GITHUB_OUTPUT"
+            echo "run_bbs=false" >> "$GITHUB_OUTPUT"
+            echo "run_mc=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NON_DOC=$(printf '%s\n' "$CHANGED" | grep -Ev '\.md$' || true)
+          if [ -z "$NON_DOC" ]; then
+            echo "Docs-only change detected; skipping Gradle build & tests"
+            echo "run_core=false" >> "$GITHUB_OUTPUT"
+            echo "run_bbs=false" >> "$GITHUB_OUTPUT"
+            echo "run_mc=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          SHARED_HIT=$(printf '%s\n' "$NON_DOC" | grep -E '^(core/|build-logic/|gradle/|gradlew|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|scripts/|\.github/workflows/ci\.yml)' || true)
+          BBS_HIT=$(printf '%s\n' "$NON_DOC" | grep -E '^(apps/bbs/|features/bbs/)' || true)
+          MC_HIT=$(printf '%s\n' "$NON_DOC" | grep -E '^(apps/mc/|features/mc/)' || true)
+
+          if [ -n "$SHARED_HIT" ]; then
+            echo "Shared core/build/CI files changed: verifying core + bbs + mc"
+            set_all
+          else
+            RUN_BBS=$([ -n "$BBS_HIT" ] && echo "true" || echo "false")
+            RUN_MC=$([ -n "$MC_HIT" ] && echo "true" || echo "false")
+            echo "Selective verification: run_core=false run_bbs=$RUN_BBS run_mc=$RUN_MC"
+            echo "run_core=false" >> "$GITHUB_OUTPUT"
+            echo "run_bbs=$RUN_BBS" >> "$GITHUB_OUTPUT"
+            echo "run_mc=$RUN_MC" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify-core:
+    name: Core 共享底座单元测试
+    needs: detect
+    if: needs.detect.outputs.run_core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 运行共享底座模块单元测试
+        run: |
+          sh ./gradlew \
+            :core:model:testDebugUnitTest \
+            :core:network:testDebugUnitTest \
+            :core:auth:testDebugUnitTest \
+            :core:markdown:testDebugUnitTest \
+            --no-daemon --stacktrace
+
+  verify-bbs:
+    name: IGNG BBS 构建、R8 与单元测试
+    needs: detect
+    if: needs.detect.outputs.run_bbs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 校验 BBS 构建边界（禁止依赖 MC/Ink 模块）
+        run: |
+          set -euo pipefail
+          if grep -rnE --include='*.kts' 'project\(":features:(mc|ink)' apps/bbs features/bbs; then
+            echo "::error::BBS 模块违规依赖了非 BBS 领域模块！"
+            exit 1
+          fi
+
+      - name: 构建 BBS Debug 与未签名 Release APK
+        run: sh ./gradlew :apps:bbs:assembleDebug :apps:bbs:assembleRelease --no-daemon --stacktrace
+
+      - name: 校验 BBS Release DEX 关键符号
+        run: |
+          set -euo pipefail
+          APK=$(ls apps/bbs/build/outputs/apk/release/*.apk | head -n 1)
+          python3 scripts/verify-release-dex.py --app bbs "$APK"
+
+      - name: 运行 BBS 单元测试
+        run: |
+          sh ./gradlew \
+            :features:bbs:model:testDebugUnitTest \
+            :features:bbs:data:testDebugUnitTest \
+            :apps:bbs:testDebugUnitTest \
+            --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: bbs-debug-apk-${{ github.event.number || github.sha }}
+          path: apps/bbs/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+  verify-mc:
+    name: IGNGmc 构建、R8 与单元测试
+    needs: detect
+    if: needs.detect.outputs.run_mc == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 校验 MC 构建边界（禁止依赖 BBS/Ink 模块）
+        run: |
+          set -euo pipefail
+          if grep -rnE --include='*.kts' 'project\(":features:(bbs|ink)' apps/mc features/mc; then
+            echo "::error::MC 模块违规依赖了非 MC 领域模块！"
+            exit 1
+          fi
+
+      - name: 构建 MC Debug 与未签名 Release APK
+        run: sh ./gradlew :apps:mc:assembleDebug :apps:mc:assembleRelease --no-daemon --stacktrace
+
+      - name: 校验 MC Release DEX 关键符号
+        run: |
+          set -euo pipefail
+          APK=$(ls apps/mc/build/outputs/apk/release/*.apk | head -n 1)
+          python3 scripts/verify-release-dex.py --app mc "$APK"
+
+      - name: 运行 MC 单元测试
+        run: |
+          sh ./gradlew \
+            :features:mc:model:testDebugUnitTest \
+            :features:mc:data:testDebugUnitTest \
+            :features:mc:chat:testDebugUnitTest \
+            :apps:mc:testDebugUnitTest \
+            --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: mc-debug-apk-${{ github.event.number || github.sha }}
+          path: apps/mc/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 7
