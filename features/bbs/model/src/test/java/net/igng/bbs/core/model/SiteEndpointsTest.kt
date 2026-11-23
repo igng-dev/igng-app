@@ -31,6 +31,6 @@ class SiteEndpointsTest {
     fun v1IdHelpersParseAndFormatIds() {
         assertEquals(108, V1Id.numericOf("post_108"))
         assertEquals(108, V1Id.numericOf("108"))
-        assertEquals("post_108", V1Id.post(108))
+        assertEquals("post_108", BbsV1Id.post(108))
     }
 }

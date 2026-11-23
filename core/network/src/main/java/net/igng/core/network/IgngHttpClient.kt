@@ -608,25 +608,39 @@ class IgngHttpClient(
         suppressAuthNotify: Boolean,
         allowAnonymousFallback: Boolean,
     ): String = withContext(Dispatchers.IO) {
-        val outcome = executeWithSessionHandling(
-            allowAnonymousFallback = allowAnonymousFallback && tokenOverride.isNullOrBlank(),
-            suppressAuthNotify = suppressAuthNotify,
-            allowRefresh = tokenOverride.isNullOrBlank(),
-        ) { overrideToken, skipAuth ->
-            buildJsonRequest(
-                method = method,
-                url = url,
-                body = body,
-                ifMatch = ifMatch,
-                idempotencyKey = idempotencyKey,
-                tokenOverride = overrideToken ?: tokenOverride,
-                skipAuth = skipAuth,
-            )
+        val maxAttempts = if (method == "GET") 2 else 1
+        var attempt = 0
+        var lastError: ApiException? = null
+        while (attempt < maxAttempts) {
+            attempt++
+            val outcome = executeWithSessionHandling(
+                allowAnonymousFallback = allowAnonymousFallback && tokenOverride.isNullOrBlank(),
+                suppressAuthNotify = suppressAuthNotify,
+                allowRefresh = tokenOverride.isNullOrBlank(),
+            ) { overrideToken, skipAuth ->
+                buildJsonRequest(
+                    method = method,
+                    url = url,
+                    body = body,
+                    ifMatch = ifMatch,
+                    idempotencyKey = idempotencyKey,
+                    tokenOverride = overrideToken ?: tokenOverride,
+                    skipAuth = skipAuth,
+                )
+            }
+            when (outcome) {
+                is CallOutcome.Success -> return@withContext outcome.body
+                is CallOutcome.Failure -> {
+                    lastError = outcome.exception
+                    if (method == "GET" && outcome.exception.isNetworkOrServer && attempt < maxAttempts) {
+                        delay(350L * attempt)
+                        continue
+                    }
+                    throw outcome.exception
+                }
+            }
         }
-        when (outcome) {
-            is CallOutcome.Success -> outcome.body
-            is CallOutcome.Failure -> throw outcome.exception
-        }
+        throw lastError ?: createApiException(0, "network.offline", "网络请求失败")
     }
 
     // -------------------------------------------------------------------------

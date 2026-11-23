@@ -58,6 +58,7 @@ import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
@@ -195,7 +196,7 @@ private fun FilteredPostListScreen(
                     IgngEmptyTile(title = "暂无相关文章", subtitle = "这里暂时还没有符合条件的内容。")
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     itemsIndexed(posts, key = { _, p -> p.id }) { idx, post ->
@@ -261,7 +262,7 @@ fun SearchScreen(
         val directId = Regex("^(?:post_)?(\\d+)$").matchEntire(trimmed)?.groupValues?.get(1)?.toIntOrNull()
             ?: Regex("igngbbs\\.net/post/(\\d+)", RegexOption.IGNORE_CASE).find(trimmed)?.groupValues?.get(1)?.toIntOrNull()
         if (directId != null && trimmed.length <= 64) {
-            onOpenPost(V1Id.post(directId))
+            onOpenPost(net.igng.bbs.core.model.BbsV1Id.post(directId))
             return
         }
         scope.launch {
@@ -325,7 +326,7 @@ fun SearchScreen(
                 IgngErrorTile(message = error!!, onRetry = { executeSearch(query) })
             }
             result == null -> LazyColumn(
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = rememberIgngPageContentPadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
@@ -353,7 +354,7 @@ fun SearchScreen(
             else -> {
                 val res = result!!
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (res.users.isNotEmpty()) {
@@ -448,7 +449,7 @@ fun RulesScreen(
             rules != null -> {
                 val r = rules!!
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (r.principles.isNotEmpty()) {
@@ -486,7 +487,14 @@ fun RulesScreen(
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(clause.description, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                            AnimatedVisibility(visible = isOpen) {
+                            val ruleIntensity = IgngTheme.motionIntensity
+                            AnimatedVisibility(
+                                visible = isOpen,
+                                enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
+                                    androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
+                                exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
+                                    androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
+                            ) {
                                 Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     if (clause.elements.isNotEmpty()) {
                                         Text("构成要件", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)

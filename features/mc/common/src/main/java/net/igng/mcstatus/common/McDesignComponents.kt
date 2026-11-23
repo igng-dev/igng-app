@@ -91,15 +91,16 @@ fun IgngServerBackdropCanvas(
     modifier: Modifier = Modifier,
 ) {
     val isDark = IgngTheme.colors.isDark
+    val intensity = IgngTheme.motionIntensity
     val visual = serverFamilyVisual(themeKey, isDark)
     val accent by animateColorAsState(
         targetValue = visual.accent,
-        animationSpec = tween(if (IgngTheme.motionReduced) 0 else IgngMotion.DURATION_AMBIENT, easing = IgngMotion.Ease),
+        animationSpec = IgngMotion.ambientTween(intensity),
         label = "serverAccent",
     )
     val secondary by animateColorAsState(
         targetValue = visual.secondaryGlow,
-        animationSpec = tween(if (IgngTheme.motionReduced) 0 else IgngMotion.DURATION_AMBIENT, easing = IgngMotion.Ease),
+        animationSpec = IgngMotion.ambientTween(intensity),
         label = "serverSecondary",
     )
 

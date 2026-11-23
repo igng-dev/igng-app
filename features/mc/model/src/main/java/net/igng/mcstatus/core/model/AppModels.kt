@@ -1,6 +1,7 @@
 package net.igng.mcstatus.core.model
 
 import net.igng.core.model.MotionIntensity
+import net.igng.core.model.ReaderTypographyPrefs
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.ThemeMode
 import net.igng.core.model.V1Id
@@ -138,6 +139,7 @@ data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val motionIntensity: MotionIntensity = MotionIntensity.FULL,
     val hapticsEnabled: Boolean = true,
+    val reader: ReaderTypographyPrefs = ReaderTypographyPrefs(),
 )
 
 sealed interface UiState<out T> {

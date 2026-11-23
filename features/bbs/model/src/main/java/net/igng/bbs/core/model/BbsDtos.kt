@@ -179,7 +179,7 @@ data class BootstrapViewerDto(
     val user: UserBriefDto? = null,
     val exp: Int? = null,
     @SerialName("base_exp") val baseExp: Int? = null,
-    val multiplier: Int = 1,
+    val multiplier: Double = 1.0,
     val level: Int? = null,
     val unread: UnreadCountsDto = UnreadCountsDto(),
     val risk: RiskSummaryDto = RiskSummaryDto(),
@@ -994,7 +994,7 @@ data class DailyLoginDto(
     val awarded: Boolean = false,
     val exp: Int? = null,
     @SerialName("base_exp") val baseExp: Int? = null,
-    val multiplier: Int = 1,
+    val multiplier: Double = 1.0,
     val level: Int? = null,
     val period: String = "",
 )

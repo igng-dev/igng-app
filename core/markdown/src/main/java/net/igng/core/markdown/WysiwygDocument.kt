@@ -61,7 +61,7 @@ data class WysiwygBlock(
 }
 
 /**
- * Lossless bidirectional converter between IGNG BBS Markdown/HTML and the native block-based
+ * Lossless bidirectional converter between IGNG Markdown/HTML and the native block-based
  * WYSIWYG document model.
  */
 object WysiwygCodec {

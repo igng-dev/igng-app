@@ -67,7 +67,7 @@ import net.igng.bbs.core.model.RecommendationSlotDto
 import net.igng.bbs.core.model.RiskSummaryDto
 
 /**
- * Floating 4-tab frosted glass Bento pill navigation bar with subtle sliding pill highlight.
+ * Forwarding wrapper onto the unified zero-jitter [IgngFloatingDockBar] in `:core:designsystem`.
  */
 data class BbsNavTabItem(
     val route: String,
@@ -83,85 +83,12 @@ fun BbsFloatingNavBar(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = IgngTheme.colors
-    val intensity = IgngTheme.motionIntensity
-    val shape = RoundedCornerShape(IgngRadius.pill)
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            modifier = Modifier
-                .clip(shape)
-                .background(colors.glassBar)
-                .border(1.dp, colors.lineStrong, shape)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            tabs.forEach { tab ->
-                val selected = tab.route == selectedRoute
-                val bg by animateColorAsState(
-                    targetValue = if (selected) colors.accentLow else Color.Transparent,
-                    animationSpec = IgngMotion.easeTween(180, intensity),
-                    label = "navBg",
-                )
-                val fg by animateColorAsState(
-                    targetValue = if (selected) colors.accent else colors.textSecondary,
-                    animationSpec = IgngMotion.easeTween(180, intensity),
-                    label = "navFg",
-                )
-                val horizPad by animateDpAsState(
-                    targetValue = if (selected) 16.dp else 12.dp,
-                    animationSpec = IgngMotion.standardSpring(intensity),
-                    label = "navPad",
-                )
-                Row(
-                    modifier = Modifier
-                        .clip(shape)
-                        .background(bg)
-                        .igngPressScale(haptic = true, onClick = { onSelect(tab.route) })
-                        .padding(horizontal = horizPad, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Box {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = tab.label,
-                            tint = fg,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        if (tab.badgeCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.danger),
-                            )
-                        }
-                    }
-                    AnimatedVisibility(
-                        visible = selected,
-                        enter = fadeIn(IgngMotion.easeTween(160, intensity)),
-                        exit = fadeOut(IgngMotion.easeTween(120, intensity)),
-                    ) {
-                        Text(
-                            text = tab.label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = fg,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
-    }
+    IgngFloatingDockBar(
+        items = tabs.map { IgngNavTabItem(id = it.route, label = it.label, icon = it.icon, badgeCount = it.badgeCount) },
+        selectedId = selectedRoute,
+        onSelect = onSelect,
+        modifier = modifier,
+    )
 }
 
 /**
@@ -568,8 +495,8 @@ fun BbsFloatingArticleBar(
 
     AnimatedVisibility(
         visible = visible,
-        enter = slideInVertically(IgngMotion.standardSpring(intensity)) { it } + fadeIn(IgngMotion.easeTween(160, intensity)),
-        exit = slideOutVertically(IgngMotion.standardSpring(intensity)) { it } + fadeOut(IgngMotion.easeTween(140, intensity)),
+        enter = slideInVertically(IgngMotion.dockSpring(intensity)) { it } + fadeIn(IgngMotion.microTween(intensity)),
+        exit = slideOutVertically(IgngMotion.dockSpring(intensity)) { it } + fadeOut(IgngMotion.microTween(intensity)),
         modifier = modifier,
     ) {
         Box(

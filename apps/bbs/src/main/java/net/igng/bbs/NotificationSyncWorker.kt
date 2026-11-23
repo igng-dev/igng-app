@@ -50,7 +50,13 @@ class NotificationSyncWorker(
                 }
                 Result.success()
             }
-            is ApiResult.Failure -> Result.retry()
+            is ApiResult.Failure -> {
+                if (res.error.isNetworkOrServer || res.error.isRateLimited) {
+                    Result.retry()
+                } else {
+                    Result.success()
+                }
+            }
         }
     }
 

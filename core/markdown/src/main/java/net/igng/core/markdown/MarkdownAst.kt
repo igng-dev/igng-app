@@ -395,7 +395,7 @@ object MarkdownParser {
     }
 
     /**
-     * Converts legacy / rich-text HTML posts from BBS into clean Markdown before AST parsing.
+     * Converts legacy / rich-text HTML documents into clean Markdown before AST parsing.
      */
     fun htmlToMarkdown(html: String): String {
         var s = html

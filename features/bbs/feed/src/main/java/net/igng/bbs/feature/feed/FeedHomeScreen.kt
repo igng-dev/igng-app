@@ -448,7 +448,12 @@ fun FeedHomeScreen(
                     }
 
                     item(key = "footer_loader") {
-                        androidx.compose.animation.AnimatedVisibility(visible = loadingMore) {
+                        val footIntensity = IgngTheme.motionIntensity
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = loadingMore,
+                            enter = androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(footIntensity)),
+                            exit = androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(footIntensity)),
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()

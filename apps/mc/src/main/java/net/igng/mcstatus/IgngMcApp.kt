@@ -23,8 +23,12 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -44,9 +52,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import net.igng.mcstatus.core.data.AuthRepository
-import net.igng.core.auth.CustomTabsLauncher
-import net.igng.core.auth.PkceGenerator
+import net.igng.core.auth.OAuthCallbackResult
 import net.igng.mcstatus.core.data.IgngAppContainer
 import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.core.designsystem.IgngBadge
@@ -54,11 +60,13 @@ import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngDetailSheet
-import net.igng.core.designsystem.IgngFloatingNavBar
+import net.igng.core.designsystem.IgngDockHost
 import net.igng.core.designsystem.IgngLoadingVeil
 import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngNavTabItem
 import net.igng.core.designsystem.IgngTheme
+import net.igng.core.designsystem.LocalIgngDockBottomPadding
+import net.igng.core.designsystem.rememberIgngDockBottomPadding
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.core.model.SessionAuthStatus
 import net.igng.mcstatus.feature.admin.AdminPocketConsoleScreen
@@ -105,6 +113,7 @@ fun IgngMcApp(
     val bootstrap by container.bootstrap.collectAsState()
     val sessionEpoch by container.sessionEpoch.collectAsState()
     val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val familyAccounts by container.familyAccounts.collectAsState()
     val incomingIntent by incomingIntentFlow.collectAsState()
 
     IgngTheme(
@@ -114,9 +123,24 @@ fun IgngMcApp(
     ) {
         val navController = rememberNavController()
         val context = LocalContext.current
+        val lifecycleOwner = LocalLifecycleOwner.current
         val scope = rememberCoroutineScope()
         val colors = IgngTheme.colors
-        val reduced = IgngTheme.motionReduced
+        val intensity = IgngTheme.motionIntensity
+        val snackbarHostState = remember { SnackbarHostState() }
+
+        LaunchedEffect(Unit) {
+            container.refreshFamilyAccounts()
+        }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    scope.launch { container.refreshFamilyAccounts() }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
 
         var authExchanging by remember { mutableStateOf(false) }
         var authError by remember { mutableStateOf<String?>(null) }
@@ -126,42 +150,30 @@ fun IgngMcApp(
 
         fun startOAuth(forceLogin: Boolean) {
             authError = null
-            val pair = PkceGenerator.generate()
-            container.oauthPendingStore.save(pair)
-            val uri = container.authRepository.buildAuthorizeUri(pair, forceLogin = forceLogin)
-            CustomTabsLauncher.launchOAuth(context, uri, colors.isDark)
+            container.sessionManager.launchLogin(
+                context = context,
+                isDark = colors.isDark,
+                forceSwitchAccount = forceLogin,
+            )
         }
 
-        // Handle OAuth callbacks & App Shortcut intents
+        // Handle OAuth callbacks & App Shortcut intents via unified IgngSessionManager
         LaunchedEffect(incomingIntent) {
             val intent = incomingIntent ?: return@LaunchedEffect
             onIntentConsumed()
             val data = intent.data
-            if (data != null && data.scheme == AuthRepository.CALLBACK_SCHEME && data.host == AuthRepository.CALLBACK_HOST) {
-                val err = data.getQueryParameter("error")
-                val code = data.getQueryParameter("code")
-                val state = data.getQueryParameter("state")
-                if (!err.isNullOrBlank()) {
-                    container.oauthPendingStore.clear()
-                    authError = if (err == "access_denied") "你已取消本次授权" else "授权未完成（$err）"
-                    return@LaunchedEffect
-                }
-                if (code.isNullOrBlank() || state.isNullOrBlank()) {
-                    authError = "回调参数不完整，请重新登录"
-                    return@LaunchedEffect
-                }
-                val verifier = container.oauthPendingStore.consume(state)
-                if (verifier == null) {
-                    authError = "登录状态校验失败或已过期，请重新授权"
-                    return@LaunchedEffect
-                }
+            if (container.sessionManager.isMatchingCallback(data)) {
                 authExchanging = true
-                runCatching { container.authRepository.exchangeAuthorizationCode(code, verifier) }
-                    .onSuccess { account ->
-                        container.saveAndActivateAccount(account)
+                when (val result = container.handleOAuthCallback(data)) {
+                    is OAuthCallbackResult.Success -> {
                         sessionExpiredPrompt = false
+                        snackbarHostState.showSnackbar("欢迎回来，${result.account.displayName}")
                     }
-                    .onFailure { authError = it.message ?: "换取登录会话失败" }
+                    is OAuthCallbackResult.Error -> {
+                        authError = result.message
+                    }
+                    OAuthCallbackResult.Ignored -> Unit
+                }
                 authExchanging = false
                 return@LaunchedEffect
             }
@@ -225,6 +237,12 @@ fun IgngMcApp(
             }
         }
 
+        fun NavDestination?.isTopLevelTab(): Boolean =
+            this?.hasRoute<AppRoute.Explore>() == true ||
+                this?.hasRoute<AppRoute.Chat>() == true ||
+                this?.hasRoute<AppRoute.Wiki>() == true ||
+                this?.hasRoute<AppRoute.PlayerCenter>() == true
+
         val backStackEntry by navController.currentBackStackEntryAsState()
         val dest = backStackEntry?.destination
         val activeTabId = when {
@@ -244,8 +262,9 @@ fun IgngMcApp(
             )
         }
 
-        val bottomBarPadding = PaddingValues(bottom = if (activeTabId != null) 88.dp else 0.dp)
+        val bottomBarPadding = rememberIgngDockBottomPadding(dockVisible = activeTabId != null)
 
+        CompositionLocalProvider(LocalIgngDockBottomPadding provides bottomBarPadding) {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 containerColor = colors.canvas,
@@ -255,17 +274,32 @@ fun IgngMcApp(
                     navController = navController,
                     startDestination = AppRoute.Explore,
                     enterTransition = {
-                        fadeIn(IgngMotion.normalTween(reduced)) +
-                            slideInHorizontally(IgngMotion.standardSpring(reduced)) { it / 14 }
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabEnter(intensity)
+                        } else {
+                            IgngMotion.pushEnter(intensity)
+                        }
                     },
-                    exitTransition = { fadeOut(IgngMotion.microTween(reduced)) },
+                    exitTransition = {
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabExit(intensity)
+                        } else {
+                            IgngMotion.pushExit(intensity)
+                        }
+                    },
                     popEnterTransition = {
-                        fadeIn(IgngMotion.normalTween(reduced)) +
-                            slideInHorizontally(IgngMotion.standardSpring(reduced)) { -it / 16 }
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabEnter(intensity)
+                        } else {
+                            IgngMotion.popEnter(intensity)
+                        }
                     },
                     popExitTransition = {
-                        fadeOut(IgngMotion.microTween(reduced)) +
-                            slideOutHorizontally(IgngMotion.standardSpring(reduced)) { it / 14 }
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabExit(intensity)
+                        } else {
+                            IgngMotion.popExit(intensity)
+                        }
                     },
                 ) {
                     composable<AppRoute.Explore> {
@@ -371,6 +405,7 @@ fun IgngMcApp(
                             sessionAuthStatus = sessionAuthStatus,
                             sessionEpoch = sessionEpoch,
                             dailyExp = dailyExp,
+                            familyAccounts = familyAccounts,
                             playerRepository = container.playerRepository,
                             ticketRepository = container.ticketRepository,
                             bottomPadding = bottomBarPadding,
@@ -571,48 +606,50 @@ fun IgngMcApp(
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
                             accounts = accounts,
+                            familyAccounts = familyAccounts,
                             onBack = { navController.popBackStack() },
                             onStartOAuthLogin = { force -> startOAuth(forceLogin = force) },
                             onSwitchAccount = { uid -> container.switchAccount(uid) },
+                            onRemoveAccount = { uid -> container.removeAccount(uid) },
                             onLogoutActive = {
-                                val token = container.activeUsableToken()
                                 scope.launch {
-                                    if (!token.isNullOrBlank()) {
-                                        runCatching { container.authRepository.logout(token) }
-                                    }
-                                    container.removeActiveAccount()
+                                    container.logoutActive()
+                                    snackbarHostState.showSnackbar("已退出当前账户")
                                 }
                             },
+                            onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
                         )
                     }
                 }
             }
 
-            // Floating Glass Bottom Navigation Pill (visible only on the 4 top-level tabs)
-            AnimatedVisibility(
+            // Unified Floating Compact Expanding-Pill Dock (visible only on the 4 top-level tabs)
+            IgngDockHost(
                 visible = activeTabId != null,
-                enter = slideInVertically(IgngMotion.standardSpring(reduced)) { it } + fadeIn(IgngMotion.microTween(reduced)),
-                exit = slideOutVertically(IgngMotion.standardSpring(reduced)) { it } + fadeOut(IgngMotion.microTween(reduced)),
+                items = navItems,
+                selectedId = activeTabId,
+                onSelect = { id ->
+                    val route: AppRoute = when (id) {
+                        "chat" -> AppRoute.Chat
+                        "wiki" -> AppRoute.Wiki
+                        "player" -> AppRoute.PlayerCenter
+                        else -> AppRoute.Explore
+                    }
+                    navController.navigate(route) {
+                        popUpTo(AppRoute.Explore) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
                 modifier = Modifier.align(Alignment.BottomCenter),
-            ) {
-                IgngFloatingNavBar(
-                    items = navItems,
-                    selectedId = activeTabId ?: "explore",
-                    onSelect = { id ->
-                        val route: AppRoute = when (id) {
-                            "chat" -> AppRoute.Chat
-                            "wiki" -> AppRoute.Wiki
-                            "player" -> AppRoute.PlayerCenter
-                            else -> AppRoute.Explore
-                        }
-                        navController.navigate(route) {
-                            popUpTo(AppRoute.Explore) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                )
-            }
+            )
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomBarPadding.calculateBottomPadding() + 8.dp),
+            )
 
             // Full-screen Folded Core veil during OAuth PKCE token exchange
             IgngLoadingVeil(visible = authExchanging)
@@ -669,6 +706,7 @@ fun IgngMcApp(
                     )
                 }
             }
+        }
         }
     }
 }

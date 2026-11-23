@@ -49,6 +49,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.bbs.core.model.AdminReviewItemDto
 import net.igng.bbs.core.model.AdminRiskEntryDto
 import net.igng.bbs.core.model.AdminUserRowDto
@@ -200,7 +201,7 @@ fun AdminConsoleScreen(
             if (loading) {
                 IgngLoadingCenter(loading = true)
             } else {
-                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     notice?.let { item { IgngInfoBanner("操作结果", it, IgngTone.ACCENT) } }
 
                     when (selectedTab) {

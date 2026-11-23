@@ -1,6 +1,5 @@
 package net.igng.bbs
 
-import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -10,9 +9,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,13 +22,13 @@ import androidx.compose.material.icons.rounded.Create
 import androidx.compose.material.icons.rounded.FolderShared
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,21 +41,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavType
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavDestination
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
+import androidx.navigation.toRoute
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import net.igng.bbs.core.data.BbsAppContainer
-import net.igng.bbs.common.BbsFloatingNavBar
-import net.igng.bbs.common.BbsNavTabItem
-import net.igng.core.designsystem.IgngMotion
-import net.igng.core.designsystem.IgngRadius
-import net.igng.core.designsystem.IgngTheme
 import net.igng.bbs.core.model.AppPreferences
 import net.igng.bbs.core.model.DailyLoginDto
 import net.igng.bbs.feature.admin.AdminConsoleScreen
@@ -88,17 +83,32 @@ import net.igng.bbs.feature.profile.PrivacyPreferencesScreen
 import net.igng.bbs.feature.profile.ProfileCenterScreen
 import net.igng.bbs.feature.profile.ReadingHistoryScreen
 import net.igng.bbs.feature.profile.UserProfileScreen
+import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
+import net.igng.core.designsystem.IgngDetailSheet
+import net.igng.core.designsystem.IgngDockHost
+import net.igng.core.designsystem.IgngMotion
+import net.igng.core.designsystem.IgngNavTabItem
+import net.igng.core.designsystem.IgngRadius
+import net.igng.core.designsystem.IgngTheme
+import net.igng.core.designsystem.LocalIgngDockBottomPadding
+import net.igng.core.designsystem.rememberIgngDockBottomPadding
+import net.igng.core.model.SessionAuthStatus
 
 @Composable
 fun BbsAppRoot(
     container: BbsAppContainer,
-    incomingDeepLinks: Flow<String>,
+    incomingDeepLinks: Flow<BbsRoute>,
     incomingAuthMessages: Flow<String>,
 ) {
     val prefs by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
-    val bootstrap by container.bootstrap.collectAsState()
-    val activeAccount by container.sessionStore.activeAccount.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val sessionEpoch by container.sessionEpoch.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
     IgngTheme(
@@ -112,14 +122,46 @@ fun BbsAppRoot(
         val snackbarHostState = remember { SnackbarHostState() }
 
         var sessionExpiredReason by remember { mutableStateOf<String?>(null) }
+        var promptedLegacyUserId by remember { mutableStateOf<Long?>(null) }
         var expToast by remember { mutableStateOf<DailyLoginDto?>(null) }
 
+        fun launchSso(forceSwitchAccount: Boolean = false) {
+            container.oauthManager.launchLogin(
+                context = context,
+                isDark = colors.isDark,
+                forceSwitchAccount = forceSwitchAccount,
+            )
+        }
+
+        // Cross-app family SSO discovery on launch & resume
+        LaunchedEffect(Unit) {
+            container.refreshFamilyAccounts()
+        }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    scope.launch { container.refreshFamilyAccounts() }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
         // Initial hydration + bootstrap + daily login settlement
-        LaunchedEffect(activeAccount?.userId) {
+        LaunchedEffect(activeAccount?.userId, sessionEpoch) {
             container.hydrateCachedBootstrap()
             container.refreshBootstrap()
-            if (activeAccount != null) {
+            if (activeAccount != null && sessionAuthStatus == SessionAuthStatus.ACTIVE) {
                 container.settleDailyLoginIfNeeded()
+            }
+        }
+
+        // Prompt once for legacy sessions requiring OAuth 2.1 re-auth
+        LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
+            val uid = activeAccount?.userId
+            if (uid != null && sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED && promptedLegacyUserId != uid) {
+                promptedLegacyUserId = uid
+                sessionExpiredReason = "本版本已升级至统一 OAuth 2.1 安全认证架构，旧版凭证已停用。重新授权前可继续浏览公开内容与本地记录。"
             }
         }
 
@@ -132,11 +174,12 @@ fun BbsAppRoot(
             }
         }
 
-        // Global 401 session expired observer
+        // Global 401 session expired observer (non-destructive)
         LaunchedEffect(Unit) {
             container.sessionExpiredNotifier.events.collect { event ->
-            val reason = event.message
-                sessionExpiredReason = reason
+                if (container.activeAccount.value != null) {
+                    sessionExpiredReason = event.message
+                }
             }
         }
 
@@ -171,319 +214,347 @@ fun BbsAppRoot(
             if (internal != null) {
                 navController.navigate(internal)
             } else if (uri != null && (uri.scheme == "https" || uri.scheme == "http")) {
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
+                IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark)
             }
         }
 
-        val currentBackStack by navController.currentBackStackEntryAsState()
-        val currentRoute = currentBackStack?.destination?.route ?: AppRoutes.FEED
-        val showBottomBar = currentRoute in AppRoutes.TOP_LEVEL_ROUTES
+        fun NavDestination?.isTopLevelTab(): Boolean =
+            this?.hasRoute<BbsRoute.Feed>() == true ||
+                this?.hasRoute<BbsRoute.Columns>() == true ||
+                this?.hasRoute<BbsRoute.Creator>() == true ||
+                this?.hasRoute<BbsRoute.Profile>() == true
 
-        val creatorTodos = 0
-        val tabs = remember(creatorTodos) {
+        val currentBackStack by navController.currentBackStackEntryAsState()
+        val dest = currentBackStack?.destination
+        val activeTabId = when {
+            dest?.hasRoute<BbsRoute.Feed>() == true -> "feed"
+            dest?.hasRoute<BbsRoute.Columns>() == true -> "columns"
+            dest?.hasRoute<BbsRoute.Creator>() == true -> "creator"
+            dest?.hasRoute<BbsRoute.Profile>() == true -> "profile"
+            else -> null
+        }
+        val showBottomBar = activeTabId != null
+        val dockBottomPadding = rememberIgngDockBottomPadding(dockVisible = showBottomBar)
+
+        val tabs = remember {
             listOf(
-                BbsNavTabItem(AppRoutes.FEED, "首页", Icons.Rounded.Home),
-                BbsNavTabItem(AppRoutes.COLUMNS, "专栏", Icons.Rounded.FolderShared),
-                BbsNavTabItem(AppRoutes.CREATOR, "创作", Icons.Rounded.Create, badgeCount = creatorTodos),
-                BbsNavTabItem(AppRoutes.PROFILE, "我的", Icons.Rounded.Person),
+                IgngNavTabItem("feed", "首页", Icons.Rounded.Home),
+                IgngNavTabItem("columns", "专栏", Icons.Rounded.FolderShared),
+                IgngNavTabItem("creator", "创作", Icons.Rounded.Create),
+                IgngNavTabItem("profile", "我的", Icons.Rounded.Person),
             )
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.canvas),
-        ) {
-            NavHost(
-                navController = navController,
-                startDestination = AppRoutes.FEED,
-                enterTransition = { IgngMotion.pushEnter(intensity) },
-                exitTransition = { IgngMotion.pushExit(intensity) },
-                popEnterTransition = { IgngMotion.popEnter(intensity) },
-                popExitTransition = { IgngMotion.popExit(intensity) },
-            ) {
-                composable(AppRoutes.FEED) {
-                    FeedHomeScreen(
-                        container = container,
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenCategory = { slug, title -> navController.navigate(AppRoutes.category(slug, title)) },
-                        onOpenTag = { navController.navigate(AppRoutes.tag(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenSearch = { navController.navigate(AppRoutes.SEARCH) },
-                        onOpenInbox = { navController.navigate(AppRoutes.INBOX) },
-                        onOpenRules = { navController.navigate(AppRoutes.RULES) },
-                    )
+        CompositionLocalProvider(LocalIgngDockBottomPadding provides dockBottomPadding) {
+            IgngAmbientCanvas(modifier = Modifier.fillMaxSize()) {
+                NavHost(
+                    navController = navController,
+                    startDestination = BbsRoute.Feed,
+                    enterTransition = {
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabEnter(intensity)
+                        } else {
+                            IgngMotion.pushEnter(intensity)
+                        }
+                    },
+                    exitTransition = {
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabExit(intensity)
+                        } else {
+                            IgngMotion.pushExit(intensity)
+                        }
+                    },
+                    popEnterTransition = {
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabEnter(intensity)
+                        } else {
+                            IgngMotion.popEnter(intensity)
+                        }
+                    },
+                    popExitTransition = {
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabExit(intensity)
+                        } else {
+                            IgngMotion.popExit(intensity)
+                        }
+                    },
+                ) {
+                    composable<BbsRoute.Feed> {
+                        FeedHomeScreen(
+                            container = container,
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenCategory = { slug, title -> navController.navigate(BbsRoute.Category(slug, title)) },
+                            onOpenTag = { navController.navigate(BbsRoute.Tag(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenSearch = { navController.navigate(BbsRoute.Search) },
+                            onOpenInbox = { navController.navigate(BbsRoute.Inbox) },
+                            onOpenRules = { navController.navigate(BbsRoute.Rules) },
+                            bottomInsetPadding = dockBottomPadding,
+                        )
+                    }
+
+                    composable<BbsRoute.Columns> {
+                        ColumnSquareScreen(
+                            container = container,
+                            onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
+                            onOpenCreatorColumns = { navController.navigate(BbsRoute.CreatorColumns) },
+                            bottomInsetPadding = dockBottomPadding,
+                        )
+                    }
+
+                    composable<BbsRoute.Creator> {
+                        CreatorHubScreen(
+                            container = container,
+                            onNewArticle = { navController.navigate(BbsRoute.CreatorEditor()) },
+                            onEditPost = { navController.navigate(BbsRoute.CreatorEditor(postId = it)) },
+                            onOpenPosts = { navController.navigate(BbsRoute.CreatorPosts) },
+                            onOpenColumns = { navController.navigate(BbsRoute.CreatorColumns) },
+                            onOpenSeries = { navController.navigate(BbsRoute.CreatorSeries) },
+                            onOpenComments = { navController.navigate(BbsRoute.CreatorComments) },
+                            onOpenReviews = { navController.navigate(BbsRoute.CreatorReviews) },
+                            onOpenMedia = { navController.navigate(BbsRoute.CreatorMedia) },
+                            onRequireLogin = { launchSso() },
+                            bottomInsetPadding = dockBottomPadding,
+                        )
+                    }
+
+                    composable<BbsRoute.Profile> {
+                        ProfileCenterScreen(
+                            container = container,
+                            onLogin = { launchSso() },
+                            onOpenMyProfile = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenFavorites = { navController.navigate(BbsRoute.Favorites) },
+                            onOpenFollowing = { navController.navigate(BbsRoute.Following) },
+                            onOpenHistory = { navController.navigate(BbsRoute.History) },
+                            onOpenCreator = {
+                                navController.navigate(BbsRoute.Creator) {
+                                    popUpTo(BbsRoute.Feed) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            onOpenAdmin = { navController.navigate(BbsRoute.AdminConsole) },
+                            onOpenAccountSecurity = { navController.navigate(BbsRoute.AccountSecurity) },
+                            onOpenPrivacyPreferences = { navController.navigate(BbsRoute.PrivacyPreferences) },
+                            onOpenAppSettings = { navController.navigate(BbsRoute.AppSettings) },
+                            onOpenRules = { navController.navigate(BbsRoute.Rules) },
+                            bottomInsetPadding = dockBottomPadding,
+                        )
+                    }
+
+                    composable<BbsRoute.Search> {
+                        SearchScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenTag = { navController.navigate(BbsRoute.Tag(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.Rules> {
+                        RulesScreen(container = container, onBack = { navController.popBackStack() })
+                    }
+
+                    composable<BbsRoute.Inbox> {
+                        InboxScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onRequireLogin = { launchSso() },
+                        )
+                    }
+
+                    composable<BbsRoute.Category> { entry ->
+                        val route = entry.toRoute<BbsRoute.Category>()
+                        CategoryFeedScreen(
+                            container = container,
+                            categorySlug = route.slug,
+                            categoryTitle = route.title,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenTag = { navController.navigate(BbsRoute.Tag(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.Tag> { entry ->
+                        val route = entry.toRoute<BbsRoute.Tag>()
+                        TagFeedScreen(
+                            container = container,
+                            tag = route.tag,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenTag = { navController.navigate(BbsRoute.Tag(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.ColumnDetail> { entry ->
+                        val route = entry.toRoute<BbsRoute.ColumnDetail>()
+                        ColumnDetailScreen(
+                            container = container,
+                            columnIdOrSlug = route.columnId,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenEditorForColumn = { colId -> navController.navigate(BbsRoute.CreatorEditor(columnId = colId)) },
+                            onRequireLogin = { launchSso() },
+                        )
+                    }
+
+                    composable<BbsRoute.PostDetail> { entry ->
+                        val route = entry.toRoute<BbsRoute.PostDetail>()
+                        PostReaderScreen(
+                            container = container,
+                            postId = route.postId,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                            onOpenTag = { navController.navigate(BbsRoute.Tag(it)) },
+                            onOpenLink = ::openUrlOrDeepLink,
+                            onEditPost = { navController.navigate(BbsRoute.CreatorEditor(postId = it)) },
+                            onRequireLogin = { launchSso() },
+                        )
+                    }
+
+                    composable<BbsRoute.UserProfile> { entry ->
+                        val route = entry.toRoute<BbsRoute.UserProfile>()
+                        UserProfileScreen(
+                            container = container,
+                            userIdOrUsername = route.userId,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onRequireLogin = { launchSso() },
+                        )
+                    }
+
+                    composable<BbsRoute.CreatorEditor> { entry ->
+                        val route = entry.toRoute<BbsRoute.CreatorEditor>()
+                        NativeWysiwygEditorScreen(
+                            container = container,
+                            postId = route.postId?.takeIf { it.isNotBlank() },
+                            initialColumnId = route.columnId?.takeIf { it.isNotBlank() },
+                            onBack = { navController.popBackStack() },
+                            onPublished = { publishedId ->
+                                navController.popBackStack()
+                                navController.navigate(BbsRoute.PostDetail(publishedId))
+                            },
+                        )
+                    }
+
+                    composable<BbsRoute.CreatorPosts> {
+                        CreatorPostsScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onNewArticle = { navController.navigate(BbsRoute.CreatorEditor()) },
+                            onEditPost = { navController.navigate(BbsRoute.CreatorEditor(postId = it)) },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.CreatorColumns> {
+                        CreatorColumnsScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.CreatorSeries> {
+                        CreatorSeriesScreen(container = container, onBack = { navController.popBackStack() })
+                    }
+
+                    composable<BbsRoute.CreatorComments> {
+                        CreatorCommentsScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.CreatorReviews> {
+                        CreatorReviewsScreen(container = container, onBack = { navController.popBackStack() })
+                    }
+
+                    composable<BbsRoute.CreatorMedia> {
+                        CreatorMediaScreen(container = container, onBack = { navController.popBackStack() })
+                    }
+
+                    composable<BbsRoute.Favorites> {
+                        FavoritesScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.Following> {
+                        FollowingScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.History> {
+                        ReadingHistoryScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                        )
+                    }
+
+                    composable<BbsRoute.AccountSecurity> {
+                        AccountSecurityScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onSignIn = { launchSso(forceSwitchAccount = false) },
+                            onAddAccount = { launchSso(forceSwitchAccount = true) },
+                            onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
+                        )
+                    }
+
+                    composable<BbsRoute.PrivacyPreferences> {
+                        PrivacyPreferencesScreen(container = container, onBack = { navController.popBackStack() })
+                    }
+
+                    composable<BbsRoute.AppSettings> {
+                        AppSettingsScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
+                        )
+                    }
+
+                    composable<BbsRoute.AdminConsole> {
+                        AdminConsoleScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
+                            onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
+                            onOpenUser = { navController.navigate(BbsRoute.UserProfile(it)) },
+                        )
+                    }
                 }
 
-                composable(AppRoutes.COLUMNS) {
-                    ColumnSquareScreen(
-                        container = container,
-                        onOpenColumn = { navController.navigate(AppRoutes.column(it)) },
-                        onOpenCreatorColumns = { navController.navigate(AppRoutes.CREATOR_COLUMNS) },
-                    )
-                }
-
-                composable(AppRoutes.CREATOR) {
-                    CreatorHubScreen(
-                        container = container,
-                        onNewArticle = { navController.navigate(AppRoutes.editor()) },
-                        onEditPost = { navController.navigate(AppRoutes.editor(postId = it)) },
-                        onOpenPosts = { navController.navigate(AppRoutes.CREATOR_POSTS) },
-                        onOpenColumns = { navController.navigate(AppRoutes.CREATOR_COLUMNS) },
-                        onOpenSeries = { navController.navigate(AppRoutes.CREATOR_SERIES) },
-                        onOpenComments = { navController.navigate(AppRoutes.CREATOR_COMMENTS) },
-                        onOpenReviews = { navController.navigate(AppRoutes.CREATOR_REVIEWS) },
-                        onOpenMedia = { navController.navigate(AppRoutes.CREATOR_MEDIA) },
-                        onRequireLogin = { container.oauthManager.launchLogin(context) },
-                    )
-                }
-
-                composable(AppRoutes.PROFILE) {
-                    ProfileCenterScreen(
-                        container = container,
-                        onLogin = { container.oauthManager.launchLogin(context) },
-                        onOpenMyProfile = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenFavorites = { navController.navigate(AppRoutes.FAVORITES) },
-                        onOpenFollowing = { navController.navigate(AppRoutes.FOLLOWING) },
-                        onOpenHistory = { navController.navigate(AppRoutes.HISTORY) },
-                        onOpenCreator = {
-                            navController.navigate(AppRoutes.CREATOR) {
-                                popUpTo(AppRoutes.FEED) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        onOpenAdmin = { navController.navigate(AppRoutes.ADMIN_CONSOLE) },
-                        onOpenAccountSecurity = { navController.navigate(AppRoutes.ACCOUNT_SECURITY) },
-                        onOpenPrivacyPreferences = { navController.navigate(AppRoutes.PRIVACY_PREFERENCES) },
-                        onOpenAppSettings = { navController.navigate(AppRoutes.APP_SETTINGS) },
-                        onOpenRules = { navController.navigate(AppRoutes.RULES) },
-                    )
-                }
-
-                composable(AppRoutes.SEARCH) {
-                    SearchScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenColumn = { navController.navigate(AppRoutes.column(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenTag = { navController.navigate(AppRoutes.tag(it)) },
-                    )
-                }
-
-                composable(AppRoutes.RULES) {
-                    RulesScreen(container = container, onBack = { navController.popBackStack() })
-                }
-
-                composable(AppRoutes.INBOX) {
-                    InboxScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onRequireLogin = { container.oauthManager.launchLogin(context) },
-                    )
-                }
-
-                composable(
-                    route = AppRoutes.CATEGORY,
-                    arguments = listOf(
-                        navArgument("slug") { type = NavType.StringType },
-                        navArgument("title") { type = NavType.StringType },
-                    ),
-                ) { entry ->
-                    CategoryFeedScreen(
-                        container = container,
-                        categorySlug = entry.arguments?.getString("slug").orEmpty(),
-                        categoryTitle = entry.arguments?.getString("title").orEmpty(),
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenTag = { navController.navigate(AppRoutes.tag(it)) },
-                    )
-                }
-
-                composable(
-                    route = AppRoutes.TAG,
-                    arguments = listOf(navArgument("tag") { type = NavType.StringType }),
-                ) { entry ->
-                    TagFeedScreen(
-                        container = container,
-                        tag = entry.arguments?.getString("tag").orEmpty(),
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenTag = { navController.navigate(AppRoutes.tag(it)) },
-                    )
-                }
-
-                composable(
-                    route = AppRoutes.COLUMN_DETAIL,
-                    arguments = listOf(navArgument("columnId") { type = NavType.StringType }),
-                ) { entry ->
-                    ColumnDetailScreen(
-                        container = container,
-                        columnIdOrSlug = entry.arguments?.getString("columnId").orEmpty(),
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenColumn = { navController.navigate(AppRoutes.column(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenEditorForColumn = { colId -> navController.navigate(AppRoutes.editor(columnId = colId)) },
-                        onRequireLogin = { container.oauthManager.launchLogin(context) },
-                    )
-                }
-
-                composable(
-                    route = AppRoutes.POST_DETAIL,
-                    arguments = listOf(navArgument("postId") { type = NavType.StringType }),
-                ) { entry ->
-                    PostReaderScreen(
-                        container = container,
-                        postId = entry.arguments?.getString("postId").orEmpty(),
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenColumn = { navController.navigate(AppRoutes.column(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                        onOpenTag = { navController.navigate(AppRoutes.tag(it)) },
-                        onOpenLink = ::openUrlOrDeepLink,
-                        onEditPost = { navController.navigate(AppRoutes.editor(postId = it)) },
-                        onRequireLogin = { container.oauthManager.launchLogin(context) },
-                    )
-                }
-
-                composable(
-                    route = AppRoutes.USER_PROFILE,
-                    arguments = listOf(navArgument("userId") { type = NavType.StringType }),
-                ) { entry ->
-                    UserProfileScreen(
-                        container = container,
-                        userIdOrUsername = entry.arguments?.getString("userId").orEmpty(),
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onRequireLogin = { container.oauthManager.launchLogin(context) },
-                    )
-                }
-
-                composable(
-                    route = AppRoutes.CREATOR_EDITOR,
-                    arguments = listOf(
-                        navArgument("postId") { type = NavType.StringType; defaultValue = "" },
-                        navArgument("columnId") { type = NavType.StringType; defaultValue = "" },
-                    ),
-                ) { entry ->
-                    val pid = entry.arguments?.getString("postId")?.takeIf { it.isNotBlank() }
-                    val cid = entry.arguments?.getString("columnId")?.takeIf { it.isNotBlank() }
-                    NativeWysiwygEditorScreen(
-                        container = container,
-                        postId = pid,
-                        initialColumnId = cid,
-                        onBack = { navController.popBackStack() },
-                        onPublished = { publishedId ->
-                            navController.popBackStack()
-                            navController.navigate(AppRoutes.post(publishedId))
-                        },
-                    )
-                }
-
-                composable(AppRoutes.CREATOR_POSTS) {
-                    CreatorPostsScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onNewArticle = { navController.navigate(AppRoutes.editor()) },
-                        onEditPost = { navController.navigate(AppRoutes.editor(postId = it)) },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                    )
-                }
-
-                composable(AppRoutes.CREATOR_COLUMNS) {
-                    CreatorColumnsScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenColumn = { navController.navigate(AppRoutes.column(it)) },
-                    )
-                }
-
-                composable(AppRoutes.CREATOR_SERIES) {
-                    CreatorSeriesScreen(container = container, onBack = { navController.popBackStack() })
-                }
-
-                composable(AppRoutes.CREATOR_COMMENTS) {
-                    CreatorCommentsScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                    )
-                }
-
-                composable(AppRoutes.CREATOR_REVIEWS) {
-                    CreatorReviewsScreen(container = container, onBack = { navController.popBackStack() })
-                }
-
-                composable(AppRoutes.CREATOR_MEDIA) {
-                    CreatorMediaScreen(container = container, onBack = { navController.popBackStack() })
-                }
-
-                composable(AppRoutes.FAVORITES) {
-                    FavoritesScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                    )
-                }
-
-                composable(AppRoutes.FOLLOWING) {
-                    FollowingScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                    )
-                }
-
-                composable(AppRoutes.HISTORY) {
-                    ReadingHistoryScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                    )
-                }
-
-                composable(AppRoutes.ACCOUNT_SECURITY) {
-                    AccountSecurityScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onAddAccount = { container.oauthManager.launchLogin(context, forceSwitchAccount = true) },
-                    )
-                }
-
-                composable(AppRoutes.PRIVACY_PREFERENCES) {
-                    PrivacyPreferencesScreen(container = container, onBack = { navController.popBackStack() })
-                }
-
-                composable(AppRoutes.APP_SETTINGS) {
-                    AppSettingsScreen(container = container, onBack = { navController.popBackStack() })
-                }
-
-                composable(AppRoutes.ADMIN_CONSOLE) {
-                    AdminConsoleScreen(
-                        container = container,
-                        onBack = { navController.popBackStack() },
-                        onOpenPost = { navController.navigate(AppRoutes.post(it)) },
-                        onOpenUser = { navController.navigate(AppRoutes.user(it)) },
-                    )
-                }
-            }
-
-            // Floating 4-tab Bento Pill Bar
-            if (showBottomBar) {
-                BbsFloatingNavBar(
-                    tabs = tabs,
-                    selectedRoute = currentRoute,
+                // Unified Floating Compact Expanding-Pill Dock
+                IgngDockHost(
+                    visible = showBottomBar,
+                    items = tabs,
+                    selectedId = activeTabId,
                     onSelect = { target ->
-                        if (target != currentRoute) {
-                            navController.navigate(target) {
-                                popUpTo(AppRoutes.FEED) { saveState = true }
+                        if (target != activeTabId) {
+                            val route: BbsRoute = when (target) {
+                                "columns" -> BbsRoute.Columns
+                                "creator" -> BbsRoute.Creator
+                                "profile" -> BbsRoute.Profile
+                                else -> BbsRoute.Feed
+                            }
+                            navController.navigate(route) {
+                                popUpTo(BbsRoute.Feed) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
                             }
@@ -491,61 +562,74 @@ fun BbsAppRoot(
                     },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
-            }
 
-            // Animated Daily EXP Reward Pill
-            AnimatedVisibility(
-                visible = expToast != null,
-                enter = slideInVertically(IgngMotion.standardSpring(intensity)) { -it } + fadeIn(IgngMotion.easeTween(180, intensity)),
-                exit = slideOutVertically(IgngMotion.standardSpring(intensity)) { -it } + fadeOut(IgngMotion.easeTween(140, intensity)),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 12.dp),
-            ) {
-                expToast?.let { reward ->
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(IgngRadius.pill))
-                            .background(colors.tile)
-                            .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(IgngRadius.pill))
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "每日签到已结算 · 当前 Lv.${reward.level ?: 1}（${reward.exp ?: 0} EXP）",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = colors.accent,
-                        )
+                // Animated Daily EXP Reward Pill
+                AnimatedVisibility(
+                    visible = expToast != null,
+                    enter = slideInVertically(IgngMotion.standardSpring(intensity)) { -it } + fadeIn(IgngMotion.easeTween(180, intensity)),
+                    exit = slideOutVertically(IgngMotion.standardSpring(intensity)) { -it } + fadeOut(IgngMotion.easeTween(140, intensity)),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 12.dp),
+                ) {
+                    expToast?.let { reward ->
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(IgngRadius.pill))
+                                .background(colors.tile)
+                                .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(IgngRadius.pill))
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "每日签到已结算 · 当前 Lv.${reward.level ?: 1}（${reward.exp ?: 0} EXP）",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colors.accent,
+                            )
+                        }
                     }
                 }
-            }
 
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = if (showBottomBar) 88.dp else 16.dp),
-            )
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = dockBottomPadding.calculateBottomPadding() + 8.dp),
+                )
+            }
         }
 
-        // Global 401 Session Expired Dialog
+        // Global 401 Session Expired Sheet (aligned with MC non-destructive re-auth sheet)
         sessionExpiredReason?.let { reason ->
-            AlertDialog(
-                onDismissRequest = { sessionExpiredReason = null },
-                title = { Text("需要重新登录") },
-                text = { Text(reason) },
-                confirmButton = {
-                    TextButton(onClick = {
+            IgngDetailSheet(
+                onDismiss = { sessionExpiredReason = null },
+                title = "需要重新授权登录",
+                subtitle = "重新授权后即可继续，你正在编辑的内容不会被清除。",
+            ) {
+                Text(
+                    text = reason,
+                    style = IgngTheme.type.body,
+                    color = colors.textSecondary,
+                )
+                Spacer(Modifier.height(14.dp))
+                IgngButton(
+                    text = "重新通过 IGNG SSO 登录",
+                    onClick = {
                         sessionExpiredReason = null
-                        container.oauthManager.launchLogin(context)
-                    }) { Text("重新登录") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { sessionExpiredReason = null }) { Text("稍后再说") }
-                },
-            )
+                        launchSso(forceSwitchAccount = false)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                IgngButton(
+                    text = "稍后再说",
+                    onClick = { sessionExpiredReason = null },
+                    style = IgngButtonStyle.Secondary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

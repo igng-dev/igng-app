@@ -26,6 +26,7 @@ dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:network"))
     implementation(project(":core:auth"))
+    implementation(project(":core:data"))
     implementation(project(":core:markdown"))
     implementation(project(":features:bbs:model"))
     implementation(project(":features:bbs:common"))
@@ -49,6 +50,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
 }

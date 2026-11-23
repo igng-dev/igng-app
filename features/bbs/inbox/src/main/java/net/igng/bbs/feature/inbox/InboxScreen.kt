@@ -55,6 +55,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.InboxItemDto
 import net.igng.core.network.ApiResult
@@ -210,7 +211,7 @@ fun InboxScreen(
                     )
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(items, key = { it.id }) { item ->

@@ -56,7 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.ChatMessageDto
 import net.igng.mcstatus.core.data.ChatReplyPreviewDto
 import net.igng.mcstatus.core.data.ChatRepository
@@ -255,7 +255,7 @@ fun ChatMessageGroupBlock(
 
             val focusBg by animateColorAsState(
                 targetValue = if (isFocused) colors.accentSoft else Color.Transparent,
-                animationSpec = IgngMotion.normalTween(IgngTheme.motionReduced),
+                animationSpec = IgngMotion.normalTween(IgngTheme.motionIntensity),
                 label = "msgFocusBg",
             )
 
@@ -625,7 +625,7 @@ fun ChatRichMessageText(
                                     ),
                                 ),
                             ) {
-                                CustomTabsLauncher.openExternalUrl(context, safe, colors.isDark)
+                                IgngBrowserLauncher.openExternalUrl(context, safe, colors.isDark)
                             },
                         ) {
                             append(token)

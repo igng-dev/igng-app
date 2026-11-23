@@ -95,7 +95,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.ChatAttachmentDto
 import net.igng.mcstatus.core.data.ChatForwardChildDto
 import net.igng.mcstatus.core.data.ChatForwardResponse
@@ -106,6 +106,7 @@ import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngLoadingBlock
+import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngTheme
 import net.igng.mcstatus.core.model.SiteEndpoints
 
@@ -455,7 +456,14 @@ private fun CollapsibleOcrChip(
                 color = colors.textSecondary,
             )
         }
-        AnimatedVisibility(visible = expanded) {
+        val ocrIntensity = IgngTheme.motionIntensity
+        AnimatedVisibility(
+            visible = expanded,
+            enter = androidx.compose.animation.expandVertically(IgngMotion.standardSpring(ocrIntensity)) +
+                androidx.compose.animation.fadeIn(IgngMotion.microTween(ocrIntensity)),
+            exit = androidx.compose.animation.shrinkVertically(IgngMotion.standardSpring(ocrIntensity)) +
+                androidx.compose.animation.fadeOut(IgngMotion.microTween(ocrIntensity)),
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -528,9 +536,8 @@ fun ChatVoiceCard(
                 contentAlignment = Alignment.Center,
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
+                    net.igng.core.designsystem.IgngFoldedCoreGlyph(
+                        size = net.igng.core.designsystem.FoldedCoreSize.Sm,
                         color = colors.accent,
                     )
                 } else {
@@ -718,8 +725,9 @@ fun ChatVideoPlayerDialog(
             val errMsg = error
             val videoFile = localFile
             when {
-                loading -> CircularProgressIndicator(
+                loading -> net.igng.core.designsystem.IgngFoldedCoreGlyph(
                     modifier = Modifier.align(Alignment.Center),
+                    size = net.igng.core.designsystem.FoldedCoreSize.Lg,
                     color = Color.White,
                 )
                 errMsg != null -> Column(
@@ -858,7 +866,10 @@ fun ChatFileCardList(
                     )
                 }
                 if (downloadingIdx == idx) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.accent)
+                    net.igng.core.designsystem.IgngFoldedCoreGlyph(
+                        size = net.igng.core.designsystem.FoldedCoreSize.Sm,
+                        color = colors.accent,
+                    )
                 } else if (available) {
                     Icon(
                         imageVector = Icons.Rounded.Download,
@@ -1094,7 +1105,7 @@ fun ChatStructuredCard(
                     .border(0.5.dp, colors.line, RoundedCornerShape(12.dp))
                     .then(
                         if (safeUrl != null) {
-                            Modifier.clickable { CustomTabsLauncher.openExternalUrl(context, safeUrl, colors.isDark) }
+                            Modifier.clickable { IgngBrowserLauncher.openExternalUrl(context, safeUrl, colors.isDark) }
                         } else {
                             Modifier
                         },

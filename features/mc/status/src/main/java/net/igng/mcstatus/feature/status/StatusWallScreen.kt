@@ -58,6 +58,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.igngStaggeredReveal
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.ServerThemeKey
@@ -119,7 +120,7 @@ fun StatusWallScreen(
                         )
                     }
                     else -> LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = rememberIgngPageContentPadding(),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         item(key = "overview") {

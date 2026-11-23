@@ -88,6 +88,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.ColumnEventDto
 import net.igng.bbs.core.model.ColumnSummaryDto
@@ -167,7 +168,7 @@ fun CreatorPostsScreen(
                 error != null && posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngErrorTile(message = error!!, onRetry = { scope.launch { load(false) } })
                 }
-                else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     notice?.let { msg -> item { IgngInfoBanner("提示", msg, IgngTone.ACCENT) } }
 
                     val pendingReceived = invites?.received?.filter { it.status == "pending" }.orEmpty()
@@ -402,7 +403,7 @@ fun CreatorColumnsScreen(
         if (loading && columns.isEmpty()) {
             IgngLoadingCenter(loading = true)
         } else {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 notice?.let { msg -> item { IgngInfoBanner("提示", msg, IgngTone.ACCENT) } }
 
                 val pendingEvents = events.filter { it.canRespond }
@@ -589,7 +590,7 @@ fun CreatorSeriesScreen(
         if (loading && seriesList.isEmpty()) {
             IgngLoadingCenter(loading = true)
         } else {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
                 if (seriesList.isEmpty()) {
                     item { IgngEmptyTile("还没有系列合集", "把多篇连载或教程文章编排为一个系列，方便读者连续阅读。") }
@@ -721,7 +722,7 @@ fun CreatorCommentsScreen(
         if (loading && comments.isEmpty()) {
             IgngLoadingCenter(loading = true)
         } else {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
                 if (comments.isEmpty()) {
                     item { IgngEmptyTile("暂无评论", "你的文章收到新评论后会集中展示在这里。") }
@@ -791,7 +792,7 @@ fun CreatorReviewsScreen(
         if (loading && data == null) {
             IgngLoadingCenter(loading = true)
         } else if (data != null) {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
                 item { BbsRiskMeterCard(risk = data!!.risk) }
                 item { IgngSectionHeader("审核记录（${data!!.reviews.size}）") }
@@ -947,7 +948,7 @@ fun CreatorMediaScreen(
         } else if (mediaList != null) {
             val quota = mediaList!!.quota
             val ratio = if (quota.limitBytes > 0L) (quota.usedBytes.toFloat() / quota.limitBytes.toFloat()).coerceIn(0f, 1f) else 0f
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
                 item {
                     IgngTile(padding = PaddingValues(14.dp)) {
@@ -980,8 +981,7 @@ fun CreatorMediaScreen(
                                             text = "复制 Markdown",
                                             tone = IgngTone.ACCENT,
                                             onClick = {
-                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                                cm?.setPrimaryClip(ClipData.newPlainText("md", "![](${file.markdownUrl})"))
+                                                net.igng.core.designsystem.copyTextToClipboard(context, "md", "![](${file.markdownUrl})")
                                                 notice = "已复制图片 Markdown 引用"
                                             },
                                         )

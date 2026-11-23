@@ -15,45 +15,22 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import net.igng.mcstatus.core.data.AuthRepository
 import net.igng.mcstatus.core.model.SiteEndpoints
+import net.igng.core.data.IgngLocalJsonCache
 import net.igng.core.model.V1Id
 import net.igng.mcstatus.core.data.ApiClient
 import net.igng.core.network.CredentialEnvelopeSeal
 import net.igng.core.network.SealedCredential
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
-/** Atomic JSON file cache for offline Wiki pages, server catalog snapshots, and ticket drafts. */
+/** Atomic JSON file cache delegating to shared [IgngLocalJsonCache] in `:core:data`. */
 class LocalJsonCache(context: Context, folderName: String) {
-    private val dir = File(context.applicationContext.filesDir, folderName).apply { mkdirs() }
+    private val delegate = IgngLocalJsonCache(context, folderName, useCacheDir = false)
 
-    suspend fun write(key: String, raw: String) = withContext(Dispatchers.IO) {
-        val safe = key.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val tmp = File(dir, "$safe.tmp")
-        val target = File(dir, "$safe.json")
-        tmp.writeText(raw, Charsets.UTF_8)
-        if (!tmp.renameTo(target)) {
-            target.writeText(raw, Charsets.UTF_8)
-            tmp.delete()
-        }
-    }
-
-    suspend fun read(key: String): String? = withContext(Dispatchers.IO) {
-        val safe = key.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val file = File(dir, "$safe.json")
-        if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrNull() else null
-    }
-
-    suspend fun delete(key: String) = withContext(Dispatchers.IO) {
-        val safe = key.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        File(dir, "$safe.json").delete()
-    }
-
-    suspend fun clearAll() = withContext(Dispatchers.IO) {
-        dir.listFiles()?.forEach { it.delete() }
-    }
-
-    suspend fun sizeBytes(): Long = withContext(Dispatchers.IO) {
-        dir.listFiles()?.sumOf { it.length() } ?: 0L
-    }
+    suspend fun write(key: String, raw: String) = delegate.write(key, raw)
+    suspend fun read(key: String): String? = delegate.read(key)
+    suspend fun delete(key: String) = delegate.delete(key)
+    suspend fun clearAll() = delegate.clearAll()
+    suspend fun sizeBytes(): Long = delegate.sizeBytes()
 }
 
 /**

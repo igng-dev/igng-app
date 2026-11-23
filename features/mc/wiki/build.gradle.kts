@@ -7,6 +7,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:markdown"))
     implementation(project(":features:mc:model"))
     implementation(project(":features:mc:common"))
     implementation(project(":features:mc:data"))

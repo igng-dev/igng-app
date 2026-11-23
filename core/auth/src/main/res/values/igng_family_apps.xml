@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Official first-party IGNG Android app family registry (`packageName|displayName`).
+      Read at runtime by IgngFamilySsoProvider and IgngFamilyAccountDiscovery so :core:auth
+      Kotlin code remains 100% domain-agnostic while enforcing strict caller allowlisting.
+    -->
+    <string-array name="igng_family_app_entries">
+        <item>net.igng.bbs|IGNG BBS</item>
+        <item>net.igng.mcstatus|IGNGmc</item>
+        <item>net.igng.ink|IGNG Ink</item>
+    </string-array>
+</resources>

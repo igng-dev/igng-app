@@ -4,7 +4,6 @@ import android.app.Application
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
-import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.model.SiteEndpoints
 
@@ -23,14 +22,9 @@ class BbsApplication : Application(), SingletonImageLoader.Factory {
                 bbsWebBaseUrl = BuildConfig.IGNG_BBS_BASE_URL,
             ),
             appVersion = BuildConfig.VERSION_NAME,
+            appVersionCode = BuildConfig.VERSION_CODE,
         )
-        NotificationSyncWorker.schedule(this)
     }
 
-    override fun newImageLoader(context: PlatformContext): ImageLoader =
-        ImageLoader.Builder(context)
-            .components {
-                add(OkHttpNetworkFetcherFactory(callFactory = { container.httpClient.mediaOkHttpClient }))
-            }
-            .build()
+    override fun newImageLoader(context: PlatformContext): ImageLoader = container.imageLoader
 }

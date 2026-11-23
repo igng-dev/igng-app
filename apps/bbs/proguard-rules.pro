@@ -1,14 +1,7 @@
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
--keep,includedescriptorclasses class net.igng.core.**$$serializer { *; }
 -keep,includedescriptorclasses class net.igng.bbs.**$$serializer { *; }
--keepclassmembers class net.igng.core.** {
-    *** Companion;
-}
 -keepclassmembers class net.igng.bbs.** {
     *** Companion;
-}
--keepclasseswithmembers class net.igng.core.** {
-    kotlinx.serialization.KSerializer serializer(...);
 }
 -keepclasseswithmembers class net.igng.bbs.** {
     kotlinx.serialization.KSerializer serializer(...);
@@ -18,6 +11,3 @@
 -keep class * extends androidx.room.RoomDatabase {
     void <init>();
 }
--dontwarn okhttp3.**
--dontwarn okio.**
--dontwarn javax.annotation.**

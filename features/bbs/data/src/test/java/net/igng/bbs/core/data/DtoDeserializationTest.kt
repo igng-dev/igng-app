@@ -125,6 +125,13 @@ class DtoDeserializationTest {
         val daily = json.decodeFromString(DailyLoginDto.serializer(), readFixture("daily_login.json"))
         assertTrue(daily.period.isNotBlank())
 
+        // Server OpenAPI defines multiplier as floating-point number (e.g. 1.25 / 1.5)
+        val fractionalDaily = json.decodeFromString(
+            DailyLoginDto.serializer(),
+            """{"awarded":true,"exp":125,"base_exp":100,"multiplier":1.25,"level":3,"period":"2026-11-23"}""",
+        )
+        assertEquals(1.25, fractionalDaily.multiplier, 0.0001)
+
         val err = json.decodeFromString(ApiErrorEnvelopeDto.serializer(), readFixture("error_envelope.json"))
         assertEquals("bbs.post_not_found", err.error.code)
         assertEquals("req_7f3c1a9e4b2d", err.requestId)

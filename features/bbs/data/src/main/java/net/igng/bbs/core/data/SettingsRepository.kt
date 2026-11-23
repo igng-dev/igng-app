@@ -17,11 +17,11 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import net.igng.bbs.core.model.AppPreferences
 import net.igng.bbs.core.model.LocalReadingHistoryEntry
+import net.igng.core.data.IgngLocalJsonCache
 import net.igng.core.model.MotionIntensity
 import net.igng.core.model.ReaderTypographyPrefs
 import net.igng.core.model.ThemeMode
 import net.igng.core.network.IgngJson
-import java.io.File
 
 private val Context.bbsDataStore: DataStore<Preferences> by preferencesDataStore(name = "igngbbs_v2_prefs")
 
@@ -41,7 +41,7 @@ data class LocalEditorDraft(
 
 class SettingsRepository(context: Context) {
     private val appContext = context.applicationContext
-    private val cacheDir = File(appContext.cacheDir, "igngbbs_swr_cache").apply { mkdirs() }
+    private val swrCache = IgngLocalJsonCache(appContext, "igngbbs_swr_cache", useCacheDir = true)
     private val json = IgngJson.instance
 
     val preferences: Flow<AppPreferences> = appContext.bbsDataStore.data.map { prefs ->
@@ -156,24 +156,13 @@ class SettingsRepository(context: Context) {
         }
     }
 
-    suspend fun writeCache(key: String, payloadJson: String) = withContext(Dispatchers.IO) {
-        runCatching {
-            File(cacheDir, "${sanitizeKey(key)}.json").writeText(payloadJson)
-        }
-    }
+    suspend fun writeCache(key: String, payloadJson: String) = swrCache.write(key, payloadJson)
 
-    suspend fun readCache(key: String): String? = withContext(Dispatchers.IO) {
-        runCatching {
-            val file = File(cacheDir, "${sanitizeKey(key)}.json")
-            if (file.exists()) file.readText() else null
-        }.getOrNull()
-    }
+    suspend fun readCache(key: String): String? = swrCache.read(key)
 
-    suspend fun clearLocalCache() = withContext(Dispatchers.IO) {
-        runCatching {
-            cacheDir.listFiles()?.forEach { it.delete() }
-        }
-    }
+    suspend fun cacheSizeBytes(): Long = swrCache.sizeBytes()
+
+    suspend fun clearLocalCache() = swrCache.clearAll()
 
     private fun decodeDraftMap(raw: String?): Map<String, LocalEditorDraft> = raw?.let {
         runCatching {

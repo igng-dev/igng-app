@@ -138,12 +138,17 @@ fun Project.configureIgngReleaseSigning(
     }
 }
 
-internal fun configureCommonAndroid(extension: LibraryExtension) {
+internal fun configureCommonAndroid(
+    extension: LibraryExtension,
+    includeConsumerProguard: Boolean = false,
+) {
     extension.apply {
         compileSdk = IgngSdk.COMPILE
         defaultConfig {
             minSdk = IgngSdk.MIN
-            consumerProguardFiles("consumer-rules.pro")
+            if (includeConsumerProguard) {
+                consumerProguardFiles("consumer-rules.pro")
+            }
         }
         compileOptions {
             sourceCompatibility = IgngSdk.JAVA_VERSION

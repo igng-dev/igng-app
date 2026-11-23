@@ -35,7 +35,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.markdown.IgngMarkdownDocumentView
+import net.igng.core.markdown.MarkdownParser
 import net.igng.mcstatus.core.data.AdminCurrentNodesResponse
 import net.igng.mcstatus.core.data.AdminPlayerResultDto
 import net.igng.mcstatus.core.data.AdminPunishmentsResponse
@@ -65,6 +67,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.igngStaggeredReveal
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.McAdminRole
 import net.igng.mcstatus.core.model.SiteEndpoints
@@ -147,7 +150,7 @@ fun AdminPocketConsoleScreen(
                 actions = {
                     IgngButton(
                         text = "网页版",
-                        onClick = { CustomTabsLauncher.openExternalUrl(context, "${endpoints.dash}/mc/admin", colors.isDark) },
+                        onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/admin", colors.isDark) },
                         style = IgngButtonStyle.Secondary,
                         icon = Icons.Rounded.OpenInBrowser,
                         compact = true,
@@ -165,7 +168,7 @@ fun AdminPocketConsoleScreen(
                 error != null -> Box(Modifier.padding(16.dp)) {
                     IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { loadSection() } })
                 }
-                section == AdminSection.TICKETS -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                section == AdminSection.TICKETS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (adminTickets.isEmpty()) {
                         item { IgngStateBlock(title = "一切正常", description = "当前没有待处理的全站工单。") }
                     } else {
@@ -190,7 +193,7 @@ fun AdminPocketConsoleScreen(
                         }
                     }
                 }
-                section == AdminSection.AUDIT -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                section == AdminSection.AUDIT -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
                         IgngSearchField(
                             value = playerQuery,
@@ -246,7 +249,7 @@ fun AdminPocketConsoleScreen(
                         }
                     }
                 }
-                section == AdminSection.HISTORIAN -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                section == AdminSection.HISTORIAN -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val serverNames = historianList?.servers.orEmpty().associate { it.serverId to it.serverName }
                     val reports = historianList?.items.orEmpty()
                     if (reports.isEmpty()) {
@@ -279,7 +282,7 @@ fun AdminPocketConsoleScreen(
                         }
                     }
                 }
-                section == AdminSection.OPS -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                section == AdminSection.OPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
                         IgngSegmentedTabs(
                             items = listOf(1L, 0L, 24L, 168L),
@@ -427,7 +430,11 @@ fun AdminPocketConsoleScreen(
                 val run = historianDetail?.run
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val bodyText = run?.markdown ?: run?.summary ?: "暂无正文"
-                    Text(bodyText, style = IgngTheme.type.body, color = colors.textPrimary)
+                    val parsedDoc = remember(bodyText) { MarkdownParser.parse(bodyText) }
+                    IgngMarkdownDocumentView(
+                        document = parsedDoc,
+                        onLinkClick = { url -> IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark) },
+                    )
                     if (!run?.observations.isNullOrEmpty()) {
                         IgngSectionHeader(title = "关键观察项")
                         run?.observations.orEmpty().forEach { obs ->

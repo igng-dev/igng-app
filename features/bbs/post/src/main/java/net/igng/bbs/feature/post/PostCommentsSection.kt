@@ -110,19 +110,21 @@ fun PostCommentsSection(
 
     LaunchedEffect(postId, sortBy, activeAccount?.userId) { loadComments() }
 
-    // Subtle 15-second poll for new comments without interrupting scroll
-    LaunchedEffect(postId, latestCommentId) {
-        while (true) {
-            delay(15_000L)
-            val anchor = latestCommentId ?: continue
-            when (val res = container.postRepository.listComments(postId = postId, pageSize = 5, afterId = anchor)) {
-                is ApiResult.Success -> {
-                    if (res.data.data.isNotEmpty() || (res.data.latestCommentId != null && res.data.latestCommentId != anchor)) {
-                        hasNewComments = true
-                    }
+    // Lifecycle-aware 15-second foreground poll for new comments (pauses automatically in background)
+    net.igng.core.data.LaunchedForegroundPollingEffect(
+        intervalMs = 15_000L,
+        key1 = postId,
+        key2 = latestCommentId,
+        enabled = latestCommentId != null,
+    ) {
+        val anchor = latestCommentId ?: return@LaunchedForegroundPollingEffect
+        when (val res = container.postRepository.listComments(postId = postId, pageSize = 5, afterId = anchor)) {
+            is ApiResult.Success -> {
+                if (res.data.data.isNotEmpty() || (res.data.latestCommentId != null && res.data.latestCommentId != anchor)) {
+                    hasNewComments = true
                 }
-                is ApiResult.Failure -> Unit
             }
+            is ApiResult.Failure -> Unit
         }
     }
 
@@ -153,7 +155,14 @@ fun PostCommentsSection(
             }
         }
 
-        AnimatedVisibility(visible = hasNewComments) {
+        val cmtIntensity = IgngTheme.motionIntensity
+        AnimatedVisibility(
+            visible = hasNewComments,
+            enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(cmtIntensity)) +
+                androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(cmtIntensity)),
+            exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(cmtIntensity)) +
+                androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(cmtIntensity)),
+        ) {
             IgngInfoBanner(
                 title = "有新评论发表",
                 message = "点击刷新即可查看最新讨论，不会打断当前阅读位置。",
@@ -259,7 +268,14 @@ fun PostCommentsSection(
                     )
                 }
 
-                AnimatedVisibility(visible = showMentionPicker) {
+                val mentionIntensity = IgngTheme.motionIntensity
+                AnimatedVisibility(
+                    visible = showMentionPicker,
+                    enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(mentionIntensity)) +
+                        androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(mentionIntensity)),
+                    exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(mentionIntensity)) +
+                        androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(mentionIntensity)),
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()

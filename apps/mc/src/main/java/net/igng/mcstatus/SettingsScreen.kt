@@ -1,23 +1,18 @@
 package net.igng.mcstatus
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Login
-import androidx.compose.material.icons.automirrored.rounded.Logout
-import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.PersonAdd
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,31 +21,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import net.igng.mcstatus.core.data.IgngAppContainer
+import kotlinx.coroutines.withContext
+import net.igng.core.designsystem.IgngAboutAppCard
+import net.igng.core.designsystem.IgngAccountVaultCard
 import net.igng.core.designsystem.IgngAmbientCanvas
-import net.igng.core.designsystem.IgngAvatar
-import net.igng.core.designsystem.IgngBadge
-import net.igng.core.designsystem.IgngBadgeTone
-import net.igng.core.designsystem.IgngButton
-import net.igng.core.designsystem.IgngButtonStyle
-import net.igng.core.designsystem.IgngConfirmDialog
-import net.igng.core.designsystem.IgngInteractiveTile
-import net.igng.core.designsystem.IgngSectionHeader
-import net.igng.core.designsystem.IgngSegmentedTabs
-import net.igng.core.designsystem.IgngTheme
-import net.igng.core.designsystem.IgngTile
+import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
+import net.igng.core.designsystem.IgngCacheCard
+import net.igng.core.designsystem.IgngDevicesSecurityCard
+import net.igng.core.designsystem.IgngProfileIdentityCard
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.mcstatus.core.model.AppPreferences
-import net.igng.mcstatus.core.model.IgngFormatters
-import net.igng.core.model.MotionIntensity
+import net.igng.core.model.CoreDeviceSessionDto
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
-import net.igng.core.model.ThemeMode
+import net.igng.core.network.ApiResult
+import net.igng.mcstatus.core.data.IgngAppContainer
+import net.igng.mcstatus.core.model.AppPreferences
 
 @Composable
 fun SettingsScreen(
@@ -59,231 +50,218 @@ fun SettingsScreen(
     activeAccount: SavedAccount?,
     sessionAuthStatus: SessionAuthStatus = if (activeAccount != null) SessionAuthStatus.ACTIVE else SessionAuthStatus.SIGNED_OUT,
     accounts: List<SavedAccount>,
+    familyAccounts: List<FamilySharedAccountHint> = emptyList(),
     onBack: () -> Unit,
     onStartOAuthLogin: (forceLogin: Boolean) -> Unit,
-    onSwitchAccount: (Int) -> Unit,
+    onSwitchAccount: (Long) -> Unit,
+    onRemoveAccount: (Long) -> Unit,
     onLogoutActive: () -> Unit,
+    onShowMessage: (String) -> Unit = {},
 ) {
-    val colors = IgngTheme.colors
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
     var cacheBytes by remember { mutableLongStateOf(0L) }
-    var showLogoutConfirm by remember { mutableStateOf(false) }
+    var clearingCache by remember { mutableStateOf(false) }
+
+    var usernameInput by remember(activeAccount?.username) { mutableStateOf(activeAccount?.username.orEmpty()) }
+    var uploadingAvatar by remember { mutableStateOf(false) }
+    var savingUsername by remember { mutableStateOf(false) }
+
+    var devices by remember { mutableStateOf<List<CoreDeviceSessionDto>>(emptyList()) }
+    var devicesLoading by remember { mutableStateOf(false) }
+    var devicesError by remember { mutableStateOf<String?>(null) }
+
+    suspend fun loadDevices() {
+        if (activeAccount == null || sessionAuthStatus.requiresReauth) {
+            devices = emptyList()
+            devicesError = null
+            return
+        }
+        devicesLoading = true
+        devicesError = null
+        when (val res = container.accountRepository.listDevices()) {
+            is ApiResult.Success -> devices = res.data.data
+            is ApiResult.Failure -> devicesError = res.error.message
+        }
+        devicesLoading = false
+    }
 
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
+        container.refreshFamilyAccounts()
     }
+
+    LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
+        loadDevices()
+    }
+
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            uploadingAvatar = true
+            val payload = withContext(Dispatchers.IO) {
+                runCatching {
+                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching null
+                    Triple(bytes, mime, "avatar_${System.currentTimeMillis()}.jpg")
+                }.getOrNull()
+            }
+            if (payload != null) {
+                when (val res = container.accountRepository.uploadAvatar(payload.third, payload.second, payload.first)) {
+                    is ApiResult.Success -> {
+                        container.sessionManager.updateActiveProfile(avatarUrl = res.data.avatarUrl)
+                        onShowMessage("头像已更新并同步")
+                    }
+                    is ApiResult.Failure -> onShowMessage(res.error.message)
+                }
+            } else {
+                onShowMessage("无法读取所选图片")
+            }
+            uploadingAvatar = false
+        }
+    }
+
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "设置", subtitle = "账户安全、外观画布与动效偏好", onBack = onBack)
             LazyColumn(
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 24.dp + navBottom,
+                ),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // 1. Account & Multi-Account Vault
+                // 1. Unified Multi-Account Vault + Cross-App Family SSO
                 item(key = "accounts") {
-                    IgngTile(modifier = Modifier.fillMaxWidth()) {
-                        IgngSectionHeader(
-                            title = "IGNG 账户",
-                            subtitle = "令牌由 Android Keystore AES-256-GCM 硬件加密保护",
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        if (activeAccount == null) {
-                            IgngButton(
-                                text = "通过 IGNG SSO 登录",
-                                onClick = { onStartOAuthLogin(false) },
-                                style = IgngButtonStyle.Primary,
-                                icon = Icons.AutoMirrored.Rounded.Login,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            val sessionExpired = sessionAuthStatus.requiresReauth
-                            val isLegacyUpgrade = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                IgngAvatar(activeAccount.displayName, activeAccount.avatarUrl, size = 46.dp)
-                                Column(Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Text(activeAccount.displayName, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                        if (sessionExpired) {
-                                            IgngBadge(
-                                                text = if (isLegacyUpgrade) "需升级授权" else "会话已失效",
-                                                tone = IgngBadgeTone.Warning,
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = if (sessionExpired) {
-                                            "@${activeAccount.username} · 会话已失效，仅保留本地记录"
-                                        } else {
-                                            buildString {
-                                                append("@${activeAccount.username}")
-                                                (activeAccount.refreshExpiresAt ?: activeAccount.expiresAt)?.let {
-                                                    append(" · 会话有效期至 ")
-                                                    append(IgngFormatters.formatIsoDateTime(it, short = true))
-                                                }
-                                            }
-                                        },
-                                        style = IgngTheme.type.caption,
-                                        color = if (sessionExpired) colors.warning else colors.textSecondary,
-                                    )
-                                }
-                            }
-                            if (sessionExpired) {
-                                Spacer(Modifier.height(12.dp))
-                                IgngButton(
-                                    text = "重新授权当前账户",
-                                    onClick = { onStartOAuthLogin(false) },
-                                    style = IgngButtonStyle.Primary,
-                                    icon = Icons.AutoMirrored.Rounded.Login,
-                                    compact = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IgngButton(
-                                    text = "添加其他账户",
-                                    onClick = { onStartOAuthLogin(true) },
-                                    style = IgngButtonStyle.Secondary,
-                                    icon = Icons.Rounded.PersonAdd,
-                                    compact = true,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                IgngButton(
-                                    text = "退出当前账户",
-                                    onClick = { showLogoutConfirm = true },
-                                    style = IgngButtonStyle.Danger,
-                                    icon = Icons.AutoMirrored.Rounded.Logout,
-                                    compact = true,
-                                )
-                            }
-
-                            if (accounts.size > 1) {
-                                Spacer(Modifier.height(12.dp))
-                                Text("已保存的账户（点击切换）", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Bold), color = colors.textSecondary)
-                                Spacer(Modifier.height(6.dp))
-                                accounts.forEach { acc ->
-                                    val isCurrent = acc.userId == activeAccount.userId
-                                    IgngInteractiveTile(
-                                        onClick = { if (!isCurrent) onSwitchAccount(acc.userIdInt) },
-                                        soft = true,
-                                        accentBorder = if (isCurrent) colors.accent else null,
-                                        contentPadding = PaddingValues(11.dp),
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                                    ) {
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                            Column {
-                                                Text(acc.displayName, style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
-                                                Text("#${acc.userId} · @${acc.username}", style = IgngTheme.type.badge, color = colors.textSecondary)
-                                            }
-                                            if (isCurrent) IgngBadge("当前使用", tone = IgngBadgeTone.Accent)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    IgngAccountVaultCard(
+                        activeAccount = activeAccount,
+                        accounts = accounts,
+                        sessionAuthStatus = sessionAuthStatus,
+                        familyAccounts = familyAccounts,
+                        onSignIn = { onStartOAuthLogin(false) },
+                        onAddAccount = { onStartOAuthLogin(true) },
+                        onSwitchAccount = { uid ->
+                            onSwitchAccount(uid)
+                            onShowMessage("已切换当前账户")
+                        },
+                        onRemoveAccount = { uid ->
+                            onRemoveAccount(uid)
+                            onShowMessage("已移除该账户记录")
+                        },
+                        onLogoutActive = onLogoutActive,
+                    )
                 }
 
-                // 2. Appearance & Motion
-                item(key = "appearance") {
-                    IgngTile(modifier = Modifier.fillMaxWidth()) {
-                        IgngSectionHeader(title = "IGNG 画布与动效")
-                        Spacer(Modifier.height(12.dp))
-                        Text("界面主题", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
-                        Spacer(Modifier.height(6.dp))
-                        IgngSegmentedTabs(
-                            items = ThemeMode.entries,
-                            selected = preferences.themeMode,
-                            labelOf = { it.label },
-                            onSelect = { mode -> scope.launch { container.settingsRepository.setThemeMode(mode) } },
-                        )
-
-                        Spacer(Modifier.height(14.dp))
-                        Text("动效强度", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
-                        Spacer(Modifier.height(6.dp))
-                        IgngSegmentedTabs(
-                            items = MotionIntensity.entries,
-                            selected = preferences.motionIntensity,
-                            labelOf = { it.label },
-                            onSelect = { level -> scope.launch { container.settingsRepository.setMotionIntensity(level) } },
-                        )
-
-                        Spacer(Modifier.height(14.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("触感反馈", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
-                                Text("图表滑动、下拉折角刷新与复制反馈微震动", style = IgngTheme.type.caption, color = colors.textSecondary)
-                            }
-                            Switch(
-                                checked = preferences.hapticsEnabled,
-                                onCheckedChange = { enabled -> scope.launch { container.settingsRepository.setHapticsEnabled(enabled) } },
-                            )
-                        }
-                    }
-                }
-
-                // 3. Cache & About
-                item(key = "cache") {
-                    IgngTile(modifier = Modifier.fillMaxWidth()) {
-                        IgngSectionHeader(
-                            title = "本地离线缓存",
-                            subtitle = "Wiki 离线文章与服务器目录快照：${IgngFormatters.formatBytes(cacheBytes)}",
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        IgngButton(
-                            text = "清理离线缓存",
-                            onClick = {
+                // 2. Unified Profile Identity & Login Devices Security (shared Client API v1)
+                if (activeAccount != null && !sessionAuthStatus.requiresReauth) {
+                    item(key = "profile_identity") {
+                        IgngProfileIdentityCard(
+                            activeAccount = activeAccount,
+                            usernameInput = usernameInput,
+                            onUsernameChange = { usernameInput = it },
+                            uploadingAvatar = uploadingAvatar,
+                            savingUsername = savingUsername,
+                            onPickAvatar = {
+                                avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            onSaveUsername = {
+                                val next = usernameInput.trim()
+                                if (next.isEmpty()) return@IgngProfileIdentityCard
                                 scope.launch {
-                                    container.clearAllCaches()
-                                    cacheBytes = container.cacheSizeBytes()
+                                    savingUsername = true
+                                    when (val res = container.accountRepository.updateUsername(next)) {
+                                        is ApiResult.Success -> {
+                                            container.sessionManager.updateActiveProfile(username = res.data.username)
+                                            onShowMessage("用户名已更新")
+                                        }
+                                        is ApiResult.Failure -> onShowMessage(res.error.message)
+                                    }
+                                    savingUsername = false
                                 }
                             },
-                            style = IgngButtonStyle.Secondary,
-                            icon = Icons.Rounded.DeleteOutline,
-                            compact = true,
                         )
                     }
+
+                    item(key = "devices") {
+                        IgngDevicesSecurityCard(
+                            devices = devices,
+                            loading = devicesLoading,
+                            error = devicesError,
+                            onRefresh = { scope.launch { loadDevices() } },
+                            onRenameDevice = { deviceId, newName ->
+                                scope.launch {
+                                    when (val res = container.accountRepository.renameDevice(deviceId, newName)) {
+                                        is ApiResult.Success -> {
+                                            onShowMessage("设备名称已更新")
+                                            loadDevices()
+                                        }
+                                        is ApiResult.Failure -> onShowMessage(res.error.message)
+                                    }
+                                }
+                            },
+                            onRevokeDevice = { deviceId ->
+                                scope.launch {
+                                    when (val res = container.accountRepository.revokeDevice(deviceId)) {
+                                        is ApiResult.Success -> {
+                                            onShowMessage("已吊销该设备会话")
+                                            loadDevices()
+                                        }
+                                        is ApiResult.Failure -> onShowMessage(res.error.message)
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+
+                // 3. Unified Appearance, 3-Tier Motion, Reader Canvas & Haptics
+                item(key = "appearance") {
+                    IgngAppearanceMotionSettingsCard(
+                        themeMode = preferences.themeMode,
+                        motionIntensity = preferences.motionIntensity,
+                        hapticsEnabled = preferences.hapticsEnabled,
+                        onThemeModeChange = { mode -> scope.launch { container.settingsRepository.setThemeMode(mode) } },
+                        onMotionIntensityChange = { level -> scope.launch { container.settingsRepository.setMotionIntensity(level) } },
+                        onHapticsEnabledChange = { enabled -> scope.launch { container.settingsRepository.setHapticsEnabled(enabled) } },
+                        readerTypography = preferences.reader,
+                        onReaderToneChange = { tone ->
+                            scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = tone) } }
+                        },
+                    )
+                }
+
+                // 4. Unified Cache & About
+                item(key = "cache") {
+                    IgngCacheCard(
+                        cacheBytes = cacheBytes,
+                        subtitlePrefix = "Wiki 离线文章、服务器目录与本地图片缓存",
+                        clearing = clearingCache,
+                        onClearCache = {
+                            scope.launch {
+                                clearingCache = true
+                                container.clearAllCaches()
+                                cacheBytes = container.cacheSizeBytes()
+                                clearingCache = false
+                                onShowMessage("本地缓存已清理")
+                            }
+                        },
+                    )
                 }
 
                 item(key = "about") {
-                    IgngTile(modifier = Modifier.fillMaxWidth()) {
-                        Text("IGNGmc", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Kotlin + Jetpack Compose 原生构建",
-                            style = IgngTheme.type.caption,
-                            color = colors.textSecondary,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "统一网关：www.igng.net/api/v1 · OAuth 2.1 PKCE：sso.igng.net",
-                            style = IgngTheme.type.mono,
-                            color = colors.textMuted,
-                        )
-                    }
+                    IgngAboutAppCard(
+                        appName = "IGNGmc",
+                        packageName = BuildConfig.APPLICATION_ID,
+                        versionName = BuildConfig.VERSION_NAME,
+                        versionCode = BuildConfig.VERSION_CODE,
+                    )
                 }
             }
         }
-    }
-
-    if (showLogoutConfirm && activeAccount != null) {
-        IgngConfirmDialog(
-            title = "退出账户 ${activeAccount.displayName}",
-            message = "将吊销本机当前会话令牌并从本地安全存储移除；不会影响你的游戏数据或其他设备的登录状态。",
-            confirmLabel = "退出登录",
-            danger = true,
-            onDismiss = { showLogoutConfirm = false },
-            onConfirm = {
-                showLogoutConfirm = false
-                onLogoutActive()
-            },
-        )
     }
 }

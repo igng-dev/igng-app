@@ -54,7 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.ExploreRepository
 import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.mcstatus.core.data.ServerSeasonDto
@@ -218,7 +218,7 @@ fun WorldMapScreen(
                             .size(40.dp)
                             .clip(IgngTheme.radii.pill)
                             .clickable {
-                                CustomTabsLauncher.openExternalUrl(
+                                IgngBrowserLauncher.openExternalUrl(
                                     context,
                                     endpoints.liveMapWebUrl(selected!!.family.slug, selected!!.season.slug),
                                     colors.isDark,
@@ -358,6 +358,7 @@ private fun LiveConfluxMapWebView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.cacheMode = WebSettings.LOAD_DEFAULT

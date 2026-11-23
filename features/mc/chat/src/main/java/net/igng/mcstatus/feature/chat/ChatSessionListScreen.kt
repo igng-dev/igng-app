@@ -111,12 +111,13 @@ fun ChatSessionListScreen(
         loadSources(isRefresh = false, silent = false)
     }
 
-    // Background foreground refresh every 60s matching chat.igng.net
-    LaunchedEffect(activeAccount?.userId, sessionEpoch, sessionAuthStatus) {
-        while (true) {
-            delay(60_000L)
-            loadSources(silent = true)
-        }
+    // Lifecycle-aware foreground refresh every 60s matching chat.igng.net (pauses in background)
+    net.igng.core.data.LaunchedForegroundPollingEffect(
+        intervalMs = 60_000L,
+        key1 = activeAccount?.userId,
+        key2 = sessionEpoch,
+    ) {
+        loadSources(silent = true)
     }
 
     val allSessions = remember(sources) { sources?.let(::buildUnifiedSessions).orEmpty() }

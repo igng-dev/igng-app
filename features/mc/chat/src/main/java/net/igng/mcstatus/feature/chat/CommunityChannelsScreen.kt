@@ -33,7 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import net.igng.core.auth.CustomTabsLauncher
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngBadge
 import net.igng.core.designsystem.IgngBadgeTone
@@ -182,7 +182,7 @@ fun CommunityChannelsScreen(
                     IgngInteractiveTile(
                         onClick = {
                             ch.url?.let { url ->
-                                CustomTabsLauncher.openExternalUrl(context, url, colors.isDark)
+                                IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark)
                             }
                         },
                         modifier = Modifier

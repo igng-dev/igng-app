@@ -30,6 +30,8 @@ dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:network"))
     implementation(project(":core:auth"))
+    implementation(project(":core:data"))
+    implementation(project(":core:markdown"))
     implementation(project(":features:mc:model"))
     implementation(project(":features:mc:common"))
     implementation(project(":features:mc:data"))

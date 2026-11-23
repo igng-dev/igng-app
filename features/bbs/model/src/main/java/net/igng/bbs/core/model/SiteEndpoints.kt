@@ -49,3 +49,10 @@ data class SiteEndpoints(
         fun extractHost(url: String): String? = IgngCoreEndpoints.extractHost(url)
     }
 }
+
+object BbsV1Id {
+    fun post(numericId: Int): String = net.igng.core.model.V1Id.format("post", numericId)
+    fun column(numericId: Int): String = net.igng.core.model.V1Id.format("col", numericId)
+    fun series(numericId: Int): String = net.igng.core.model.V1Id.format("ser", numericId)
+    fun comment(numericId: Int): String = net.igng.core.model.V1Id.format("cmt", numericId)
+}

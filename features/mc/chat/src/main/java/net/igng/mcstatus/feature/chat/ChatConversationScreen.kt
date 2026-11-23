@@ -83,6 +83,7 @@ import net.igng.core.designsystem.IgngHapticKind
 import net.igng.core.designsystem.IgngImageLightbox
 import net.igng.core.designsystem.IgngSkeletonRows
 import net.igng.core.designsystem.IgngStateBlock
+import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.copyTextToClipboard
 import net.igng.core.designsystem.rememberIgngHaptics
@@ -320,14 +321,15 @@ fun ChatConversationScreen(
         loadMessages(older = false, silent = false, activeFilter = filter)
     }
 
-    // Silent foreground polling every 6s when viewing live latest stream
-    LaunchedEffect(source, targetId, filter) {
-        if (filter.isActive) return@LaunchedEffect
-        while (true) {
-            delay(6_000L)
-            if (!loading && !loadingOlder) {
-                loadMessages(older = false, silent = true, activeFilter = filter)
-            }
+    // Lifecycle-aware silent foreground polling every 6s when viewing live latest stream
+    net.igng.core.data.LaunchedForegroundPollingEffect(
+        intervalMs = 6_000L,
+        key1 = source,
+        key2 = targetId,
+        enabled = !filter.isActive,
+    ) {
+        if (!loading && !loadingOlder) {
+            loadMessages(older = false, silent = true, activeFilter = filter)
         }
     }
 
@@ -468,7 +470,12 @@ fun ChatConversationScreen(
                 HorizontalDivider(thickness = 0.5.dp, color = colors.line)
 
                 // Active filter strip (shown only when any filter/focus is active)
-                AnimatedVisibility(visible = filter.isActive) {
+                val motionIntensity = IgngTheme.motionIntensity
+                AnimatedVisibility(
+                    visible = filter.isActive,
+                    enter = fadeIn(IgngMotion.microTween(motionIntensity)),
+                    exit = fadeOut(IgngMotion.microTween(motionIntensity)),
+                ) {
                     ActiveFilterStrip(
                         filter = filter,
                         source = source,
@@ -538,7 +545,10 @@ fun ChatConversationScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
-                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = colors.accent)
+                                        net.igng.core.designsystem.IgngFoldedCoreGlyph(
+                                            size = net.igng.core.designsystem.FoldedCoreSize.Sm,
+                                            color = colors.accent,
+                                        )
                                         Text("正在加载更早的消息…", style = IgngTheme.type.badge, color = colors.textMuted)
                                     }
                                     hasMore -> Row(
@@ -605,10 +615,11 @@ fun ChatConversationScreen(
             }
 
             // Floating "N new messages" pill when scrolled up during live updates
+            val pillIntensity = IgngTheme.motionIntensity
             AnimatedVisibility(
                 visible = newBelowCount > 0,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
+                enter = slideInVertically(IgngMotion.dockSpring(pillIntensity)) { it } + fadeIn(IgngMotion.microTween(pillIntensity)),
+                exit = slideOutVertically(IgngMotion.dockSpring(pillIntensity)) { it } + fadeOut(IgngMotion.microTween(pillIntensity)),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
@@ -619,6 +630,7 @@ fun ChatConversationScreen(
                         .clip(IgngTheme.radii.pill)
                         .background(colors.accent)
                         .clickable {
+                            haptic(IgngHapticKind.Tap)
                             newBelowCount = 0
                             scope.launch { scrollToMessageOrBottom(null, smooth = true) }
                         }

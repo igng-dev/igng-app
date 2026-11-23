@@ -132,6 +132,7 @@ jobs:
             :core:model:testDebugUnitTest \
             :core:network:testDebugUnitTest \
             :core:auth:testDebugUnitTest \
+            :core:data:testDebugUnitTest \
             :core:markdown:testDebugUnitTest \
             --no-daemon --stacktrace
 
