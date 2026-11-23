@@ -60,12 +60,14 @@ import net.igng.core.designsystem.IgngBadge
 import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
+import net.igng.core.designsystem.IgngFamilySsoBanner
 import net.igng.core.designsystem.IgngInteractiveTile
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.igngStaggeredReveal
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.mcstatus.core.model.DailyExpStatus
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
@@ -93,6 +95,7 @@ fun PlayerCenterScreen(
     sessionAuthStatus: SessionAuthStatus = if (activeAccount != null) SessionAuthStatus.ACTIVE else SessionAuthStatus.SIGNED_OUT,
     sessionEpoch: Int = 0,
     dailyExp: DailyExpStatus?,
+    familyAccounts: List<FamilySharedAccountHint> = emptyList(),
     playerRepository: PlayerRepository,
     ticketRepository: TicketRepository,
     bottomPadding: PaddingValues,
@@ -148,6 +151,14 @@ fun PlayerCenterScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 if (activeAccount == null) {
+                    if (familyAccounts.isNotEmpty()) {
+                        item(key = "familySsoHero") {
+                            IgngFamilySsoBanner(
+                                familyAccounts = familyAccounts,
+                                onContinueWithFamilyAccount = { onSignIn() },
+                            )
+                        }
+                    }
                     item(key = "signedOutHero") {
                         IgngTile(modifier = Modifier.fillMaxWidth()) {
                             IgngBadge("OAuth 2.1 · PKCE 安全登录", tone = IgngBadgeTone.Accent)
@@ -155,7 +166,7 @@ fun PlayerCenterScreen(
                             Text("登录你的 IGNG 账户", style = IgngTheme.type.pageTitle, color = colors.textPrimary)
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "通过官方 SSO 页面完成授权，客户端不接触明文密码。若手机浏览器已登录任意 IGNG 站点，可一键完成授权并自动同步每日登录经验。",
+                                "通过官方 SSO 页面完成授权，客户端不接触明文密码。若本机其他 IGNG 应用或浏览器已登录，可一键完成授权并自动同步每日登录经验。",
                                 style = IgngTheme.type.body,
                                 color = colors.textSecondary,
                             )
@@ -163,7 +174,7 @@ fun PlayerCenterScreen(
                             IgngButton(
                                 text = "通过 IGNG SSO 登录",
                                 onClick = onSignIn,
-                                style = IgngButtonStyle.Primary,
+                                style = if (familyAccounts.isNotEmpty()) IgngButtonStyle.Secondary else IgngButtonStyle.Primary,
                                 icon = Icons.AutoMirrored.Rounded.Login,
                                 modifier = Modifier.fillMaxWidth(),
                             )

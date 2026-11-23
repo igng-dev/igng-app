@@ -74,6 +74,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.igngStaggeredReveal
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.ServerThemeKey
@@ -100,7 +101,7 @@ fun ServerFamilyDetailScreen(
             )
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = rememberIgngPageContentPadding(),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 if (family.description.isNotBlank()) {
@@ -310,7 +311,7 @@ fun GlobalSearchScreen(
                     IgngStateBlock(title = "没有找到匹配的玩家", description = "试试更短的关键词或角色原名。")
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     itemsIndexed(results, key = { i, r -> "${r.kind}:${r.igngId}:${r.mcUsername}:$i" }) { idx, item ->
@@ -413,7 +414,7 @@ fun PlayerPassportScreen(
                 profile != null -> {
                     val data = profile!!
                     LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = rememberIgngPageContentPadding(),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         item {
@@ -561,7 +562,7 @@ fun McCharacterPublicScreen(
                 profile != null -> {
                     val data = profile!!
                     LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = rememberIgngPageContentPadding(),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         item {
@@ -684,7 +685,7 @@ fun CommunityHallScreen(
                     )
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     val q = search.trim().lowercase()
@@ -862,7 +863,7 @@ fun PerfectRosterScreen(
                 roster != null -> {
                     val data = roster!!
                     LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = rememberIgngPageContentPadding(),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         if (data.benefits.isNotEmpty()) {

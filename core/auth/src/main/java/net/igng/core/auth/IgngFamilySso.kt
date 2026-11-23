@@ -26,18 +26,25 @@ internal data class PublicAccountDirectoryEntry(
 /**
  * Registry of official first-party IGNG Android packages allowed to query each other's
  * public (token-free) account identity directory for seamless Microsoft-style cross-app SSO.
+ *
+ * Loaded from Android XML resources (`R.array.igng_family_app_entries`) so `:core:auth` Kotlin
+ * sources stay strictly domain-agnostic and available even before `Application.onCreate()`.
  */
 object IgngFamilyApps {
-    private val knownPackages: Map<String, String> = mapOf(
-        "net.igng.bbs" to "IGNG BBS",
-        "net.igng.mcstatus" to "IGNGmc",
-        "net.igng.ink" to "IGNG Ink",
-    )
+    fun loadKnownPackages(context: Context): Map<String, String> = runCatching {
+        context.applicationContext.resources
+            .getStringArray(R.array.igng_family_app_entries)
+            .mapNotNull { entry ->
+                val parts = entry.split('|', limit = 2)
+                val pkg = parts.getOrNull(0)?.trim().orEmpty()
+                val label = parts.getOrNull(1)?.trim().orEmpty()
+                if (pkg.isEmpty()) null else pkg to label.ifEmpty { "IGNG 应用" }
+            }
+            .toMap()
+    }.getOrDefault(emptyMap())
 
-    val allowedPackages: Set<String> get() = knownPackages.keys
-
-    fun appNameFor(packageName: String): String =
-        knownPackages[packageName] ?: "IGNG 应用"
+    fun appNameFor(context: Context, packageName: String): String =
+        loadKnownPackages(context)[packageName] ?: "IGNG 应用"
 
     fun authorityFor(packageName: String): String = "$packageName.igng.family.sso"
 
@@ -111,13 +118,14 @@ class IgngFamilySsoProvider : ContentProvider() {
     ): Cursor? {
         val ctx = context ?: return null
         val caller = callingPackage ?: return null
-        if (caller !in IgngFamilyApps.allowedPackages) {
+        val known = IgngFamilyApps.loadKnownPackages(ctx)
+        if (caller !in known.keys) {
             return null
         }
         val entries = IgngFamilyDirectoryStore.read(ctx)
         val cursor = MatrixCursor(COLUMNS, entries.size)
         val selfPkg = ctx.packageName
-        val selfName = IgngFamilyApps.appNameFor(selfPkg)
+        val selfName = known[selfPkg] ?: "IGNG 应用"
         entries.forEach { entry ->
             cursor.addRow(
                 arrayOf<Any?>(
@@ -168,9 +176,10 @@ object IgngFamilyAccountDiscovery {
         withContext(Dispatchers.IO) {
             val appCtx = context.applicationContext
             val selfPackage = appCtx.packageName
+            val knownPackages = IgngFamilyApps.loadKnownPackages(appCtx)
             val discovered = mutableListOf<FamilySharedAccountHint>()
 
-            for (pkg in IgngFamilyApps.allowedPackages) {
+            for ((pkg, fallbackAppName) in knownPackages) {
                 if (pkg == selfPackage) continue
                 runCatching {
                     val uri = IgngFamilyApps.accountsUriFor(pkg)
@@ -193,9 +202,9 @@ object IgngFamilyAccountDiscovery {
                                 avatarUrl = if (idxAvatar >= 0) c.getString(idxAvatar)?.ifBlank { null } else null,
                                 sourcePackage = if (idxSrcPkg >= 0) c.getString(idxSrcPkg).orEmpty().ifBlank { pkg } else pkg,
                                 sourceAppName = if (idxSrcName >= 0) {
-                                    c.getString(idxSrcName).orEmpty().ifBlank { IgngFamilyApps.appNameFor(pkg) }
+                                    c.getString(idxSrcName).orEmpty().ifBlank { fallbackAppName }
                                 } else {
-                                    IgngFamilyApps.appNameFor(pkg)
+                                    fallbackAppName
                                 },
                                 isActiveInSource = idxActive >= 0 && c.getInt(idxActive) != 0,
                             )

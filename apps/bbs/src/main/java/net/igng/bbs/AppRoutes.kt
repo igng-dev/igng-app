@@ -1,79 +1,73 @@
 package net.igng.bbs
 
 import android.net.Uri
+import kotlinx.serialization.Serializable
 import net.igng.bbs.core.model.BbsV1Id
 
+/**
+ * Type-safe `@Serializable` Navigation routes for IGNG BBS (aligned with IGNGmc `AppRoute`).
+ */
+sealed interface BbsRoute {
+    // 4 primary floating dock tabs
+    @Serializable data object Feed : BbsRoute
+    @Serializable data object Columns : BbsRoute
+    @Serializable data object Creator : BbsRoute
+    @Serializable data object Profile : BbsRoute
+
+    // Discovery & Reading
+    @Serializable data object Search : BbsRoute
+    @Serializable data object Rules : BbsRoute
+    @Serializable data object Inbox : BbsRoute
+    @Serializable data class Category(val slug: String, val title: String) : BbsRoute
+    @Serializable data class Tag(val tag: String) : BbsRoute
+    @Serializable data class ColumnDetail(val columnId: String) : BbsRoute
+    @Serializable data class PostDetail(val postId: String) : BbsRoute
+    @Serializable data class UserProfile(val userId: String) : BbsRoute
+
+    // Creator studio
+    @Serializable data class CreatorEditor(val postId: String? = null, val columnId: String? = null) : BbsRoute
+    @Serializable data object CreatorPosts : BbsRoute
+    @Serializable data object CreatorColumns : BbsRoute
+    @Serializable data object CreatorSeries : BbsRoute
+    @Serializable data object CreatorComments : BbsRoute
+    @Serializable data object CreatorReviews : BbsRoute
+    @Serializable data object CreatorMedia : BbsRoute
+
+    // Profile, Account & Settings
+    @Serializable data object Favorites : BbsRoute
+    @Serializable data object Following : BbsRoute
+    @Serializable data object History : BbsRoute
+    @Serializable data object AccountSecurity : BbsRoute
+    @Serializable data object PrivacyPreferences : BbsRoute
+    @Serializable data object AppSettings : BbsRoute
+    @Serializable data object AdminConsole : BbsRoute
+}
+
 object AppRoutes {
-    const val FEED = "feed"
-    const val COLUMNS = "columns"
-    const val CREATOR = "creator"
-    const val PROFILE = "profile"
-
-    const val SEARCH = "search"
-    const val RULES = "rules"
-    const val INBOX = "inbox"
-    const val CATEGORY = "category/{slug}/{title}"
-    const val TAG = "tag/{tag}"
-    const val COLUMN_DETAIL = "column/{columnId}"
-    const val POST_DETAIL = "post/{postId}"
-    const val USER_PROFILE = "user/{userId}"
-
-    const val CREATOR_EDITOR = "creator/editor?postId={postId}&columnId={columnId}"
-    const val CREATOR_POSTS = "creator/posts"
-    const val CREATOR_COLUMNS = "creator/columns"
-    const val CREATOR_SERIES = "creator/series"
-    const val CREATOR_COMMENTS = "creator/comments"
-    const val CREATOR_REVIEWS = "creator/reviews"
-    const val CREATOR_MEDIA = "creator/media"
-
-    const val FAVORITES = "profile/favorites"
-    const val FOLLOWING = "profile/following"
-    const val HISTORY = "profile/history"
-    const val ACCOUNT_SECURITY = "profile/account"
-    const val PRIVACY_PREFERENCES = "profile/privacy"
-    const val APP_SETTINGS = "profile/settings"
-    const val ADMIN_CONSOLE = "admin"
-
-    val TOP_LEVEL_ROUTES = setOf(FEED, COLUMNS, CREATOR, PROFILE)
-
-    fun category(slug: String, title: String): String =
-        "category/${Uri.encode(slug)}/${Uri.encode(title)}"
-
-    fun tag(tag: String): String = "tag/${Uri.encode(tag)}"
-    fun column(columnId: String): String = "column/${Uri.encode(columnId)}"
-    fun post(postId: String): String = "post/${Uri.encode(postId)}"
-    fun user(userId: String): String = "user/${Uri.encode(userId)}"
-
-    fun editor(postId: String? = null, columnId: String? = null): String {
-        val p = Uri.encode(postId.orEmpty())
-        val c = Uri.encode(columnId.orEmpty())
-        return "creator/editor?postId=$p&columnId=$c"
-    }
-
     /**
      * Maps Android App Links (`https://www.igngbbs.net/...`) and app shortcuts (`igngbbs://open/...`)
-     * into in-app navigation destinations. Returns null for unrecognized URLs or OAuth callbacks.
+     * into type-safe [BbsRoute] destinations. Returns null for unrecognized URLs or OAuth callbacks.
      */
-    fun resolveDeepLink(uri: Uri?): String? {
+    fun resolveDeepLink(uri: Uri?): BbsRoute? {
         if (uri == null) return null
         val scheme = uri.scheme?.lowercase().orEmpty()
         val host = uri.host?.lowercase().orEmpty()
         val segments = uri.pathSegments.orEmpty()
 
         if (scheme == "igngbbs") {
-            if (host == "auth") return null // handled by OAuthManager
+            if (host == "auth") return null // handled by IgngSessionManager
             if (host == "open") {
                 return when (segments.firstOrNull()?.lowercase()) {
-                    "search" -> SEARCH
-                    "editor" -> editor()
-                    "inbox" -> INBOX
-                    "rules" -> RULES
+                    "search" -> BbsRoute.Search
+                    "editor" -> BbsRoute.CreatorEditor()
+                    "inbox" -> BbsRoute.Inbox
+                    "rules" -> BbsRoute.Rules
                     else -> null
                 }
             }
             if (host == "post" && segments.isNotEmpty()) {
                 val id = segments.first().toIntOrNull()?.let { BbsV1Id.post(it) } ?: segments.first()
-                return post(id)
+                return BbsRoute.PostDetail(id)
             }
             return null
         }
@@ -84,12 +78,12 @@ object AppRoutes {
             return when (first) {
                 "post" -> second?.let { raw ->
                     val normalized = raw.toIntOrNull()?.let { BbsV1Id.post(it) } ?: raw
-                    post(normalized)
+                    BbsRoute.PostDetail(normalized)
                 }
-                "user" -> second?.let { user(it) }
-                "columns" -> if (second != null) column(second) else COLUMNS
-                "tags" -> second?.let { tag(it) }
-                "pages" -> if (second?.lowercase() == "rules") RULES else null
+                "user" -> second?.let { BbsRoute.UserProfile(it) }
+                "columns" -> if (second != null) BbsRoute.ColumnDetail(second) else BbsRoute.Columns
+                "tags" -> second?.let { BbsRoute.Tag(it) }
+                "pages" -> if (second?.lowercase() == "rules") BbsRoute.Rules else null
                 else -> null
             }
         }

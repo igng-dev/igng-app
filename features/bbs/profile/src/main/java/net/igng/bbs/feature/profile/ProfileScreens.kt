@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -48,8 +51,14 @@ import net.igng.bbs.core.data.UpsertBlockRuleRequest
 import net.igng.bbs.common.BbsContinueReadingCard
 import net.igng.bbs.common.BbsPostRowCard
 import net.igng.core.designsystem.IgngAvatar
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
+import net.igng.core.designsystem.IgngConfirmDialog
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngFamilySsoBanner
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
@@ -65,6 +74,7 @@ import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.FavoriteItemDto
 import net.igng.bbs.core.model.FollowingItemDto
 import net.igng.bbs.core.model.UserProfileDto
+import net.igng.core.model.SessionAuthStatus
 import net.igng.core.network.ApiResult
 
 @Composable
@@ -85,9 +95,12 @@ fun ProfileCenterScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    val activeAccount by container.sessionStore.activeAccount.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val familyAccounts by container.familyAccounts.collectAsState()
     val bootstrap by container.bootstrap.collectAsState()
     var refreshing by remember { mutableStateOf(false) }
+    val sessionExpired = activeAccount != null && sessionAuthStatus.requiresReauth
 
     Column(
         modifier = Modifier
@@ -95,12 +108,20 @@ fun ProfileCenterScreen(
             .background(colors.canvas)
             .statusBarsPadding(),
     ) {
-        IgngTopBar(title = "我的")
+        IgngTopBar(
+            title = "我的",
+            subtitle = when {
+                sessionExpired -> "登录会话已失效 · 仅展示本地缓存与公开入口"
+                activeAccount != null -> "IGNG BBS 创作者与账户中心"
+                else -> "登录以解锁互动、创作与跨端同步"
+            },
+        )
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = {
                 scope.launch {
                     refreshing = true
+                    container.refreshFamilyAccounts()
                     container.refreshBootstrap()
                     refreshing = false
                 }
@@ -116,10 +137,57 @@ fun ProfileCenterScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Cross-app family SSO discovery card when signed out
+                if (activeAccount == null && familyAccounts.isNotEmpty()) {
+                    item(key = "family_sso") {
+                        IgngFamilySsoBanner(
+                            familyAccounts = familyAccounts,
+                            onContinueWithFamilyAccount = { onLogin() },
+                        )
+                    }
+                }
+
+                // Non-destructive session expired banner (aligned with IGNGmc)
+                if (sessionExpired) {
+                    item(key = "session_expired") {
+                        val isLegacy = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
+                        IgngTile(
+                            borderColor = colors.warning.copy(alpha = 0.55f),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            IgngBadge(
+                                text = if (isLegacy) "需升级 OAuth 2.1 授权" else "登录会话已失效",
+                                tone = IgngBadgeTone.Warning,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = if (isLegacy) {
+                                    "当前账户仍保留旧版登录凭证，新版本需通过 IGNG SSO 重新授权以恢复收藏、私信与云端草稿同步。"
+                                } else {
+                                    "当前仅展示本地缓存的账户标识；互动、创作同步与通知需重新授权后恢复。"
+                                },
+                                style = IgngTheme.type.caption,
+                                color = colors.textSecondary,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            IgngButton(
+                                text = "立即重新授权",
+                                onClick = onLogin,
+                                style = IgngButtonStyle.Primary,
+                                icon = Icons.AutoMirrored.Rounded.Login,
+                                compact = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+
                 // Identity Bento Hero
                 item(key = "identity") {
                     if (activeAccount == null) {
                         IgngTile {
+                            IgngBadge("OAuth 2.1 · PKCE 安全登录", tone = IgngBadgeTone.Accent)
+                            Spacer(Modifier.height(10.dp))
                             Text("登录你的 IGNG 账户", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
                             Spacer(Modifier.height(6.dp))
                             Text(
@@ -128,7 +196,13 @@ fun ProfileCenterScreen(
                                 color = colors.textSecondary,
                             )
                             Spacer(Modifier.height(14.dp))
-                            IgngPrimaryButton(text = "前往登录", icon = Icons.AutoMirrored.Rounded.Login, onClick = onLogin)
+                            IgngButton(
+                                text = "通过 IGNG SSO 登录",
+                                icon = Icons.AutoMirrored.Rounded.Login,
+                                style = if (familyAccounts.isNotEmpty()) IgngButtonStyle.Secondary else IgngButtonStyle.Primary,
+                                onClick = onLogin,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                     } else {
                         val acc = activeAccount!!
@@ -137,7 +211,12 @@ fun ProfileCenterScreen(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 IgngAvatar(avatarUrl = viewer?.user?.avatarUrl ?: acc.avatarUrl, displayName = acc.displayName, size = 56.dp)
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(acc.displayName, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(acc.displayName, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
+                                        if (sessionExpired) {
+                                            IgngBadge("已失效", tone = IgngBadgeTone.Warning)
+                                        }
+                                    }
                                     Text("@${acc.username} · 账户编号 #${acc.userId}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
                                     Spacer(Modifier.height(6.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -258,7 +337,11 @@ fun UserProfileScreen(
             }
             profile != null -> {
                 val p = profile!!
-                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                LazyColumn(
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
                     item {
                         IgngTile {
@@ -404,9 +487,15 @@ fun FavoritesScreen(
             loading -> IgngLoadingCenter(loading = true)
             error != null -> Box(Modifier.padding(16.dp)) { IgngErrorTile(error!!, onRetry = { scope.launch { load() } }) }
             items.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngEmptyTile("收藏夹还是空的", "在阅读文章时点击底部书签图标即可收藏。") }
-            else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(items, key = { it.post.id }) { fav ->
-                    BbsPostRowCard(post = fav.post, onClick = { onOpenPost(fav.post.id) })
+            else -> {
+                val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                LazyColumn(
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(items, key = { it.post.id }) { fav ->
+                        BbsPostRowCard(post = fav.post, onClick = { onOpenPost(fav.post.id) })
+                    }
                 }
             }
         }
@@ -450,7 +539,11 @@ fun FollowingScreen(
         } else if (list.isEmpty()) {
             Box(Modifier.padding(16.dp)) { IgngEmptyTile("列表为空", "暂时还没有相关用户记录。") }
         } else {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 items(list, key = { it.user.id }) { row ->
                     IgngTile(padding = PaddingValues(14.dp), onClick = { onOpenUser(row.user.id) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -487,6 +580,8 @@ fun ReadingHistoryScreen(
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val history by container.settingsRepository.readingHistory.collectAsState(initial = emptyList())
+    var confirmClear by remember { mutableStateOf(false) }
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
@@ -494,18 +589,35 @@ fun ReadingHistoryScreen(
             onBack = onBack,
             actions = {
                 if (history.isNotEmpty()) {
-                    IgngTagChip("清空记录", tone = IgngTone.DANGER, onClick = { scope.launch { container.settingsRepository.clearReadingHistory() } })
+                    IgngTagChip("清空记录", tone = IgngTone.DANGER, onClick = { confirmClear = true })
                 }
             },
         )
         if (history.isEmpty()) {
             Box(Modifier.padding(16.dp)) { IgngEmptyTile("暂无阅读记录", "你浏览过的文章进度会自动保存在本机，方便下次继续阅读。") }
         } else {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 items(history, key = { it.postId }) { entry ->
                     BbsContinueReadingCard(entry = entry, onResume = { onOpenPost(entry.postId) })
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        IgngConfirmDialog(
+            title = "清空本地阅读记录",
+            message = "将清除本机保存的所有阅读历史与断点进度，不会影响你的云端收藏。",
+            confirmLabel = "清空记录",
+            danger = true,
+            onDismiss = { confirmClear = false },
+            onConfirm = {
+                confirmClear = false
+                scope.launch { container.settingsRepository.clearReadingHistory() }
+            },
+        )
     }
 }

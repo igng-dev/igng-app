@@ -28,6 +28,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,6 +40,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.NavHost
@@ -109,6 +113,7 @@ fun IgngMcApp(
     val bootstrap by container.bootstrap.collectAsState()
     val sessionEpoch by container.sessionEpoch.collectAsState()
     val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val familyAccounts by container.familyAccounts.collectAsState()
     val incomingIntent by incomingIntentFlow.collectAsState()
 
     IgngTheme(
@@ -118,10 +123,24 @@ fun IgngMcApp(
     ) {
         val navController = rememberNavController()
         val context = LocalContext.current
+        val lifecycleOwner = LocalLifecycleOwner.current
         val scope = rememberCoroutineScope()
         val colors = IgngTheme.colors
         val intensity = IgngTheme.motionIntensity
         val snackbarHostState = remember { SnackbarHostState() }
+
+        LaunchedEffect(Unit) {
+            container.refreshFamilyAccounts()
+        }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    scope.launch { container.refreshFamilyAccounts() }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
 
         var authExchanging by remember { mutableStateOf(false) }
         var authError by remember { mutableStateOf<String?>(null) }
@@ -386,6 +405,7 @@ fun IgngMcApp(
                             sessionAuthStatus = sessionAuthStatus,
                             sessionEpoch = sessionEpoch,
                             dailyExp = dailyExp,
+                            familyAccounts = familyAccounts,
                             playerRepository = container.playerRepository,
                             ticketRepository = container.ticketRepository,
                             bottomPadding = bottomBarPadding,
@@ -586,15 +606,18 @@ fun IgngMcApp(
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
                             accounts = accounts,
+                            familyAccounts = familyAccounts,
                             onBack = { navController.popBackStack() },
                             onStartOAuthLogin = { force -> startOAuth(forceLogin = force) },
                             onSwitchAccount = { uid -> container.switchAccount(uid) },
+                            onRemoveAccount = { uid -> container.removeAccount(uid) },
                             onLogoutActive = {
                                 scope.launch {
                                     container.logoutActive()
                                     snackbarHostState.showSnackbar("已退出当前账户")
                                 }
                             },
+                            onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
                         )
                     }
                 }

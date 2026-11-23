@@ -29,6 +29,7 @@ class BbsAppContainer(
     context: Context,
     val endpoints: SiteEndpoints,
     val appVersion: String,
+    val appVersionCode: Int = 0,
 ) {
     val appContext: Context = context.applicationContext
 

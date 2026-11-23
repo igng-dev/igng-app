@@ -40,7 +40,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +77,8 @@ import net.igng.core.designsystem.IgngBadge
 import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
+import net.igng.core.designsystem.IgngSwitch
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.designsystem.IgngConfirmDialog
 import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngImageLightbox
@@ -172,7 +173,7 @@ fun TicketsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("含已结单", style = IgngTheme.type.caption, color = colors.textSecondary)
                         Spacer(Modifier.width(4.dp))
-                        Switch(checked = includeClosed, onCheckedChange = { includeClosed = it })
+                        IgngSwitch(checked = includeClosed, onCheckedChange = { includeClosed = it })
                     }
                 }
             }
@@ -196,7 +197,7 @@ fun TicketsScreen(
                             onAction = onCreateTicket,
                         )
                     }
-                    else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         itemsIndexed(tickets, key = { _, t -> t.id }) { idx, t ->
                             val isClosed = t.status.equals("CLOSED", ignoreCase = true)
                             IgngInteractiveTile(
@@ -756,6 +757,7 @@ fun CreateTicketScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.navigationBarsPadding())
             }
         }
     }

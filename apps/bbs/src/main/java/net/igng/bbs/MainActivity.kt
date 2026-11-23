@@ -12,7 +12,7 @@ import net.igng.core.auth.OAuthCallbackResult
 
 class MainActivity : ComponentActivity() {
 
-    private val deepLinkEvents = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    private val deepLinkEvents = MutableSharedFlow<BbsRoute>(extraBufferCapacity = 4)
     private val authMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
     override fun onCreate(savedInstanceState: Bundle?) {

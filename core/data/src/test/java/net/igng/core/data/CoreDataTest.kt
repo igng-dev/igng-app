@@ -53,8 +53,8 @@ class CoreDataTest {
             userId = 1024L,
             username = "linmo",
             nickname = "林墨",
-            sourcePackage = "net.igng.bbs",
-            sourceAppName = "IGNG BBS",
+            sourcePackage = "org.example.sibling",
+            sourceAppName = "IGNG Sibling",
             isActiveInSource = true,
         )
         assertEquals("林墨", hint.displayName)

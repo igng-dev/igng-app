@@ -268,26 +268,6 @@ class ProfileRepository(private val http: IgngHttpClient) {
 
     suspend fun deleteBlockRule(targetUserId: String): ApiResult<Unit> =
         http.deleteNoContent("/bbs/me/block-rules/$targetUserId")
-
-    suspend fun getMe(): ApiResult<UserMeDto> = http.get("/users/me", requireAuth = true)
-
-    suspend fun updateUsername(username: String): ApiResult<UserMeDto> =
-        http.patch("/users/me", UpdateProfileMeRequest(username))
-
-    suspend fun uploadAvatar(fileName: String, mimeType: String, bytes: ByteArray): ApiResult<AvatarUploadResponseDto> =
-        http.uploadMultipart("/users/me/avatar", fieldName = "file", fileName = fileName, mimeType = mimeType, bytes = bytes)
-
-    suspend fun listDevices(page: Int = 1, pageSize: Int = 30): ApiResult<PaginatedResponseDto<DeviceSessionDto>> =
-        http.get("/devices", mapOf("page" to page.toString(), "page_size" to pageSize.toString()), requireAuth = true)
-
-    suspend fun renameDevice(deviceId: String, newName: String): ApiResult<DeviceSessionDto> =
-        http.patch("/devices/$deviceId", RenameDeviceRequest(newName))
-
-    suspend fun revokeDevice(deviceId: String): ApiResult<Unit> =
-        http.deleteNoContent("/devices/$deviceId")
-
-    suspend fun settleDailyLogin(): ApiResult<DailyLoginDto> =
-        http.postEmpty("/users/me/daily-login")
 }
 
 class CreatorRepository(private val http: IgngHttpClient) {

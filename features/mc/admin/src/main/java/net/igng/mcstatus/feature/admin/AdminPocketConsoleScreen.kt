@@ -67,6 +67,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.igngStaggeredReveal
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.McAdminRole
 import net.igng.mcstatus.core.model.SiteEndpoints
@@ -167,7 +168,7 @@ fun AdminPocketConsoleScreen(
                 error != null -> Box(Modifier.padding(16.dp)) {
                     IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { loadSection() } })
                 }
-                section == AdminSection.TICKETS -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                section == AdminSection.TICKETS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (adminTickets.isEmpty()) {
                         item { IgngStateBlock(title = "一切正常", description = "当前没有待处理的全站工单。") }
                     } else {
@@ -192,7 +193,7 @@ fun AdminPocketConsoleScreen(
                         }
                     }
                 }
-                section == AdminSection.AUDIT -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                section == AdminSection.AUDIT -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
                         IgngSearchField(
                             value = playerQuery,
@@ -248,7 +249,7 @@ fun AdminPocketConsoleScreen(
                         }
                     }
                 }
-                section == AdminSection.HISTORIAN -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                section == AdminSection.HISTORIAN -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val serverNames = historianList?.servers.orEmpty().associate { it.serverId to it.serverName }
                     val reports = historianList?.items.orEmpty()
                     if (reports.isEmpty()) {
@@ -281,7 +282,7 @@ fun AdminPocketConsoleScreen(
                         }
                     }
                 }
-                section == AdminSection.OPS -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                section == AdminSection.OPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
                         IgngSegmentedTabs(
                             items = listOf(1L, 0L, 24L, 168L),

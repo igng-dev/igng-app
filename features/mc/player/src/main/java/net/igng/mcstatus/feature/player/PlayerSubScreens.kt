@@ -28,7 +28,6 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.LockReset
 import androidx.compose.material.icons.rounded.OpenInBrowser
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,6 +76,9 @@ import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngHorizontalBarList
 import net.igng.core.designsystem.IgngInteractiveTile
 import net.igng.core.designsystem.IgngLoadingBlock
+import net.igng.core.designsystem.IgngSwitch
+import net.igng.core.designsystem.IgngSwitchRow
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.common.IgngMcFormattedText
 import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSectionHeader
@@ -169,7 +171,7 @@ fun CharactersScreen(
                         onAction = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
                     )
                 }
-                else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(accounts, key = { _, a -> a.id }) { idx, acc ->
                         val isPub = acc.isPublic
                         IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
@@ -189,7 +191,7 @@ fun CharactersScreen(
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(if (isPub) "公开" else "私密", style = IgngTheme.type.caption, color = colors.textSecondary)
-                                    Switch(
+                                    IgngSwitch(
                                         checked = isPub,
                                         onCheckedChange = { next ->
                                             scope.launch {
@@ -563,7 +565,7 @@ fun VaultScreen(
                         }
                     }
                     Spacer(Modifier.height(10.dp))
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (tab == VaultTab.ITEMS) {
                             val groups = itemsData?.groups.orEmpty()
                             if (groups.isEmpty()) {
@@ -716,7 +718,7 @@ fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                 loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
                 error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { reload() } }) }
                 lands.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有领地记录") }
-                else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     itemsIndexed(lands, key = { _, l -> l.id }) { idx, land ->
                         IgngInteractiveTile(
                             onClick = { editingLand = land; descDraft = land.description },
@@ -749,23 +751,21 @@ fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
             IgngCopyPill(value = coord, label = "中心坐标：$coord", modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(12.dp))
             if (land.can_edit) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("在社区大厅公开展示", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
-                    Switch(
-                        checked = land.is_public,
-                        onCheckedChange = { next ->
-                            scope.launch {
-                                saving = true
-                                runCatching { playerRepository.updateLand(land.id, isPublic = next) }
-                                    .onSuccess {
-                                        editingLand = land.copy(is_public = next)
-                                        reload()
-                                    }
-                                saving = false
-                            }
-                        },
-                    )
-                }
+                IgngSwitchRow(
+                    title = "在社区大厅公开展示",
+                    checked = land.is_public,
+                    onCheckedChange = { next ->
+                        scope.launch {
+                            saving = true
+                            runCatching { playerRepository.updateLand(land.id, isPublic = next) }
+                                .onSuccess {
+                                    editingLand = land.copy(is_public = next)
+                                    reload()
+                                }
+                            saving = false
+                        }
+                    },
+                )
                 Spacer(Modifier.height(8.dp))
                 IgngTextField(value = descDraft, onValueChange = { descDraft = it }, label = "领地介绍", singleLine = false, minLines = 3)
                 Spacer(Modifier.height(10.dp))
@@ -821,7 +821,7 @@ fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                 loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
                 error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
                 list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有传送点") }
-                else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     itemsIndexed(list, key = { _, tp -> tp.id }) { idx, tp ->
                         IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -863,7 +863,7 @@ fun MyFakePlayersScreen(playerRepository: PlayerRepository, onBack: () -> Unit) 
                 loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
                 error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
                 list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "当前没有在线假人") }
-                else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     itemsIndexed(list, key = { _, fp -> fp.id }) { idx, fp ->
                         IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -975,7 +975,7 @@ fun LoginActivityScreen(
                 }
                 else -> {
                     val res = data
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (verifiedAccounts.size > 1) {
                             item {
                                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1132,7 +1132,7 @@ fun VanillaStatsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                 error != null && stats == null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
                 stats != null -> {
                     val data = stats!!
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         if (data.servers.isNotEmpty()) {
                             item {
                                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1232,7 +1232,7 @@ fun MyMedalsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                 error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { reload() } }) }
                 profile != null -> {
                     val data = profile!!
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (data.customMedals.isNotEmpty()) {
                             item { IgngSectionHeader(title = "自定义勋章称号", subtitle = "修改后将与游戏内同步") }
                             items(data.customMedals, key = { it.ownerName }) { slot ->
@@ -1350,7 +1350,7 @@ fun PersonalPerfectScreen(playerRepository: PlayerRepository, onBack: () -> Unit
                 error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
                 data != null -> {
                     val info = data!!
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         item {
                             IgngTile(modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1504,7 +1504,7 @@ fun PermissionsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
             when {
                 loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
                 error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                tab == PermTab.GROUPS -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                tab == PermTab.GROUPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     val accounts = perms?.accounts.orEmpty()
                     if (accounts.isEmpty()) {
                         item { IgngStateBlock(title = "还没有权限记录") }
@@ -1566,7 +1566,7 @@ fun PermissionsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                         }
                     }
                 }
-                else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val expList = insights?.accounts.orEmpty().flatMap { acc -> acc.expiring.map { acc.username to it } }
                     val changes = insights?.accounts.orEmpty().flatMap { acc -> acc.history.map { acc.username to it } }
                     if (expList.isEmpty() && changes.isEmpty()) {

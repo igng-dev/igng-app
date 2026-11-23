@@ -58,6 +58,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.designsystem.igngBentoEnter
 import net.igng.bbs.core.model.ColumnDetailDto
 import net.igng.bbs.core.model.ColumnSummaryDto
@@ -319,7 +320,7 @@ fun ColumnDetailScreen(
                     val col = detail!!
                     val vs = col.viewerState
                     LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = rememberIgngPageContentPadding(),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         feedback?.let { msg ->

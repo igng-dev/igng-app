@@ -6,8 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -26,11 +29,63 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.igng.core.model.MotionIntensity
 import net.igng.core.model.ReaderCanvasTone
 import net.igng.core.model.ReaderTypographyPrefs
 import net.igng.core.model.ThemeMode
+
+/**
+ * Standard edge-to-edge list content padding for secondary screens without the floating dock.
+ * Always reserves clearance above the system gesture / 3-button navigation bar.
+ */
+@Composable
+fun rememberIgngPageContentPadding(
+    horizontal: Dp = 16.dp,
+    top: Dp = 16.dp,
+    bottom: Dp = 24.dp,
+): PaddingValues {
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    return PaddingValues(
+        start = horizontal,
+        end = horizontal,
+        top = top,
+        bottom = bottom + navBottom,
+    )
+}
+
+/**
+ * Unified Bento 2.0 switch control using IGNG semantic tokens (zero M3 purple bleed)
+ * and consistent Tick haptic feedback.
+ */
+@Composable
+fun IgngSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val colors = IgngTheme.colors
+    val haptic = rememberIgngHaptics()
+    Switch(
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = { next ->
+            haptic(IgngHapticKind.Tick)
+            onCheckedChange(next)
+        },
+        modifier = modifier,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = colors.onAccent,
+            checkedTrackColor = colors.accent,
+            checkedBorderColor = Color.Transparent,
+            uncheckedThumbColor = colors.textSecondary,
+            uncheckedTrackColor = colors.tileSoft,
+            uncheckedBorderColor = colors.lineStrong,
+        ),
+    )
+}
 
 /**
  * Unified Bento 2.0 switch row with full-row tap target, IGNG color tokens (no M3 purple),
@@ -73,21 +128,10 @@ fun IgngSwitchRow(
                 )
             }
         }
-        Switch(
+        IgngSwitch(
             checked = checked,
             enabled = enabled,
-            onCheckedChange = { next ->
-                haptic(IgngHapticKind.Tick)
-                onCheckedChange(next)
-            },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.onAccent,
-                checkedTrackColor = colors.accent,
-                checkedBorderColor = Color.Transparent,
-                uncheckedThumbColor = colors.textSecondary,
-                uncheckedTrackColor = colors.tileSoft,
-                uncheckedBorderColor = colors.lineStrong,
-            ),
+            onCheckedChange = onCheckedChange,
         )
     }
 }

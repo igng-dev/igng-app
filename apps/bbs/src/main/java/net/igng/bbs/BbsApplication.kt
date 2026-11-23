@@ -22,6 +22,7 @@ class BbsApplication : Application(), SingletonImageLoader.Factory {
                 bbsWebBaseUrl = BuildConfig.IGNG_BBS_BASE_URL,
             ),
             appVersion = BuildConfig.VERSION_NAME,
+            appVersionCode = BuildConfig.VERSION_CODE,
         )
     }
 

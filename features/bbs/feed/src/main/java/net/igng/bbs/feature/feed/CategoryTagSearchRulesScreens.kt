@@ -58,6 +58,7 @@ import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
@@ -195,7 +196,7 @@ private fun FilteredPostListScreen(
                     IgngEmptyTile(title = "暂无相关文章", subtitle = "这里暂时还没有符合条件的内容。")
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     itemsIndexed(posts, key = { _, p -> p.id }) { idx, post ->
@@ -325,7 +326,7 @@ fun SearchScreen(
                 IgngErrorTile(message = error!!, onRetry = { executeSearch(query) })
             }
             result == null -> LazyColumn(
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = rememberIgngPageContentPadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
@@ -353,7 +354,7 @@ fun SearchScreen(
             else -> {
                 val res = result!!
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (res.users.isNotEmpty()) {
@@ -448,7 +449,7 @@ fun RulesScreen(
             rules != null -> {
                 val r = rules!!
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (r.principles.isNotEmpty()) {

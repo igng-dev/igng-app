@@ -4,32 +4,29 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,55 +41,88 @@ import kotlinx.coroutines.withContext
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.data.UpdateMySettingsRequest
 import net.igng.bbs.core.data.UpdateUserPreferencesPatch
-import net.igng.core.designsystem.IgngAvatar
+import net.igng.bbs.core.model.AppPreferences
+import net.igng.bbs.core.model.BbsUserSettingsDto
+import net.igng.bbs.core.model.BlockRuleDto
+import net.igng.core.designsystem.IgngAboutAppCard
+import net.igng.core.designsystem.IgngAccountVaultCard
+import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
+import net.igng.core.designsystem.IgngCacheCard
+import net.igng.core.designsystem.IgngConfirmDialog
+import net.igng.core.designsystem.IgngDevicesSecurityCard
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
-import net.igng.core.designsystem.IgngSecondaryButton
+import net.igng.core.designsystem.IgngProfileIdentityCard
 import net.igng.core.designsystem.IgngSectionHeader
+import net.igng.core.designsystem.IgngSwitchRow
 import net.igng.core.designsystem.IgngTagChip
+import net.igng.core.designsystem.IgngTextField
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.bbs.core.model.AppPreferences
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.BbsUserSettingsDto
-import net.igng.bbs.core.model.DeviceSessionDto
-import net.igng.core.model.MotionIntensity
-import net.igng.core.model.ReaderCanvasTone
-import net.igng.core.model.ThemeMode
+import net.igng.core.model.CoreDeviceSessionDto
 import net.igng.core.network.ApiResult
 
 @Composable
 fun AccountSecurityScreen(
     container: BbsAppContainer,
     onBack: () -> Unit,
+    onSignIn: () -> Unit,
     onAddAccount: () -> Unit,
+    onShowMessage: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
-    val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    val accounts by container.sessionStore.accounts.collectAsState()
-    val activeAccount by container.sessionStore.activeAccount.collectAsState()
+    val accounts by container.accounts.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val familyAccounts by container.familyAccounts.collectAsState()
+    val bootstrap by container.bootstrap.collectAsState()
 
-    var devices by remember { mutableStateOf<List<DeviceSessionDto>>(emptyList()) }
+    var devices by remember { mutableStateOf<List<CoreDeviceSessionDto>>(emptyList()) }
+    var devicesLoading by remember { mutableStateOf(false) }
+    var devicesError by remember { mutableStateOf<String?>(null) }
+
     var usernameInput by remember(activeAccount?.username) { mutableStateOf(activeAccount?.username.orEmpty()) }
+    var uploadingAvatar by remember { mutableStateOf(false) }
+    var savingUsername by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var renameDeviceTarget by remember { mutableStateOf<DeviceSessionDto?>(null) }
-    var renameText by remember { mutableStateOf("") }
+
+    fun report(msg: String) {
+        notice = msg
+        onShowMessage(msg)
+    }
 
     suspend fun loadDevices() {
-        when (val r = container.profileRepository.listDevices()) {
-            is ApiResult.Success -> devices = r.data.data
-            is ApiResult.Failure -> notice = r.error.message
+        if (activeAccount == null || sessionAuthStatus.requiresReauth) {
+            devices = emptyList()
+            devicesError = null
+            return
         }
+        devicesLoading = true
+        devicesError = null
+        when (val r = container.accountRepository.listDevices()) {
+            is ApiResult.Success -> devices = r.data.data
+            is ApiResult.Failure -> devicesError = r.error.message
+        }
+        devicesLoading = false
     }
-    LaunchedEffect(activeAccount?.userId) { if (activeAccount != null) loadDevices() }
+
+    LaunchedEffect(Unit) {
+        container.refreshFamilyAccounts()
+    }
+
+    LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
+        loadDevices()
+    }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            uploadingAvatar = true
             val payload = withContext(Dispatchers.IO) {
                 runCatching {
                     val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
@@ -101,154 +131,128 @@ fun AccountSecurityScreen(
                 }.getOrNull()
             }
             if (payload != null) {
-                when (val r = container.profileRepository.uploadAvatar(payload.third, payload.second, payload.first)) {
+                when (val r = container.accountRepository.uploadAvatar(payload.third, payload.second, payload.first)) {
                     is ApiResult.Success -> {
-                        container.sessionStore.updateActiveProfile(avatarUrl = r.data.avatarUrl)
+                        container.sessionManager.updateActiveProfile(avatarUrl = r.data.avatarUrl)
                         container.refreshBootstrap()
-                        notice = "头像已更新"
+                        report("头像已更新并同步")
                     }
-                    is ApiResult.Failure -> notice = r.error.message
+                    is ApiResult.Failure -> report(r.error.message)
                 }
+            } else {
+                report("无法读取所选图片")
             }
+            uploadingAvatar = false
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
-        IgngTopBar(title = "账户与设备安全", onBack = onBack)
-        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-            // Multi-account switcher
-            item {
-                IgngTile {
-                    Text("已保存账户（${accounts.size}）", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                    Spacer(Modifier.height(10.dp))
-                    accounts.forEach { acc ->
-                        val isCurrent = acc.userId == activeAccount?.userId
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            IgngAvatar(acc.avatarUrl, acc.displayName, size = 36.dp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(acc.displayName, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                Text("@${acc.username} · #${acc.userId}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                            }
-                            if (isCurrent) {
-                                IgngTagChip("当前使用", tone = IgngTone.SUCCESS)
-                            } else {
-                                IgngTagChip("切换", tone = IgngTone.ACCENT, onClick = {
-                                    scope.launch { container.switchAccount(acc.userId); notice = "已切换到 ${acc.displayName}" }
-                                })
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        IgngSecondaryButton(text = "添加其他账户", onClick = onAddAccount, modifier = Modifier.weight(1f))
-                        if (activeAccount != null) {
-                            IgngSecondaryButton(
-                                text = "退出当前账户",
-                                onClick = { scope.launch { container.logoutActive(); notice = "已退出当前账户" } },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-            }
+    IgngAmbientCanvas {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            IgngTopBar(title = "账户与设备安全", subtitle = "多账户、跨应用共享登录与设备会话管理", onBack = onBack)
+            LazyColumn(
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 24.dp + navBottom,
+                ),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                notice?.let { item(key = "notice") { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
 
-            // Profile identity edit (avatar & username)
-            if (activeAccount != null) {
-                item {
-                    IgngTile {
-                        Text("头像与用户名", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                        Spacer(Modifier.height(10.dp))
-                        IgngSecondaryButton(
-                            text = "从相册更换头像",
-                            onClick = { avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = usernameInput,
-                            onValueChange = { usernameInput = it },
-                            label = { Text("用户名") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        IgngPrimaryButton(text = "保存用户名", onClick = {
+                item(key = "accounts") {
+                    IgngAccountVaultCard(
+                        activeAccount = activeAccount,
+                        accounts = accounts,
+                        sessionAuthStatus = sessionAuthStatus,
+                        familyAccounts = familyAccounts,
+                        onSignIn = onSignIn,
+                        onAddAccount = onAddAccount,
+                        onSwitchAccount = { uid ->
                             scope.launch {
-                                when (val r = container.profileRepository.updateUsername(usernameInput.trim())) {
-                                    is ApiResult.Success -> {
-                                        container.sessionStore.updateActiveProfile(username = r.data.username)
-                                        container.refreshBootstrap()
-                                        notice = "用户名已保存"
-                                    }
-                                    is ApiResult.Failure -> notice = r.error.message
-                                }
+                                container.switchAccount(uid)
+                                report("已切换当前账户")
                             }
-                        })
-                    }
+                        },
+                        onRemoveAccount = { uid ->
+                            container.removeAccount(uid)
+                            report("已移除该账户记录")
+                        },
+                        onLogoutActive = {
+                            scope.launch {
+                                container.logoutActive()
+                                report("已退出当前账户")
+                            }
+                        },
+                    )
                 }
 
-                // Active Login Devices
-                item { IgngSectionHeader("登录设备管理（${devices.size}）") }
-                items(devices, key = { it.id }) { dev ->
-                    IgngTile(padding = PaddingValues(14.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(dev.deviceName, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                Text(
-                                    "${dev.clientLabel ?: "登录会话"} · 最近活跃 ${BbsFormatters.relativeTime(dev.lastActiveAt)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.textMuted,
-                                )
-                            }
-                            if (dev.isCurrent) {
-                                IgngTagChip("本机", tone = IgngTone.SUCCESS)
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IgngTagChip("重命名", onClick = { renameDeviceTarget = dev; renameText = dev.deviceName })
-                            if (!dev.isCurrent) {
-                                IgngTagChip("吊销会话", tone = IgngTone.DANGER, onClick = {
-                                    scope.launch {
-                                        when (val r = container.profileRepository.revokeDevice(dev.id)) {
-                                            is ApiResult.Success -> { notice = "已吊销该设备登录状态"; loadDevices() }
-                                            is ApiResult.Failure -> notice = r.error.message
+                if (activeAccount != null && !sessionAuthStatus.requiresReauth) {
+                    item(key = "profile_identity") {
+                        IgngProfileIdentityCard(
+                            activeAccount = activeAccount!!,
+                            avatarUrlOverride = bootstrap?.viewer?.user?.avatarUrl ?: activeAccount?.avatarUrl,
+                            usernameInput = usernameInput,
+                            onUsernameChange = { usernameInput = it },
+                            uploadingAvatar = uploadingAvatar,
+                            savingUsername = savingUsername,
+                            onPickAvatar = {
+                                avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            onSaveUsername = {
+                                val next = usernameInput.trim()
+                                if (next.isEmpty()) return@IgngProfileIdentityCard
+                                scope.launch {
+                                    savingUsername = true
+                                    when (val r = container.accountRepository.updateUsername(next)) {
+                                        is ApiResult.Success -> {
+                                            container.sessionManager.updateActiveProfile(username = r.data.username)
+                                            container.refreshBootstrap()
+                                            report("用户名已保存")
                                         }
+                                        is ApiResult.Failure -> report(r.error.message)
                                     }
-                                })
-                            }
-                        }
+                                    savingUsername = false
+                                }
+                            },
+                        )
+                    }
+
+                    item(key = "devices") {
+                        IgngDevicesSecurityCard(
+                            devices = devices,
+                            loading = devicesLoading,
+                            error = devicesError,
+                            onRefresh = { scope.launch { loadDevices() } },
+                            onRenameDevice = { deviceId, newName ->
+                                scope.launch {
+                                    when (val r = container.accountRepository.renameDevice(deviceId, newName)) {
+                                        is ApiResult.Success -> {
+                                            report("设备名称已更新")
+                                            loadDevices()
+                                        }
+                                        is ApiResult.Failure -> report(r.error.message)
+                                    }
+                                }
+                            },
+                            onRevokeDevice = { deviceId ->
+                                scope.launch {
+                                    when (val r = container.accountRepository.revokeDevice(deviceId)) {
+                                        is ApiResult.Success -> {
+                                            report("已吊销该设备登录状态")
+                                            loadDevices()
+                                        }
+                                        is ApiResult.Failure -> report(r.error.message)
+                                    }
+                                }
+                            },
+                        )
                     }
                 }
             }
         }
-    }
-
-    renameDeviceTarget?.let { dev ->
-        AlertDialog(
-            onDismissRequest = { renameDeviceTarget = null },
-            title = { Text("重命名登录设备") },
-            text = { OutlinedTextField(value = renameText, onValueChange = { renameText = it }, label = { Text("设备名称") }) },
-            confirmButton = {
-                TextButton(onClick = {
-                    val trimmed = renameText.trim()
-                    if (trimmed.isEmpty()) return@TextButton
-                    renameDeviceTarget = null
-                    scope.launch {
-                        when (val r = container.profileRepository.renameDevice(dev.id, trimmed)) {
-                            is ApiResult.Success -> { notice = "设备名称已更新"; loadDevices() }
-                            is ApiResult.Failure -> notice = r.error.message
-                        }
-                    }
-                }) { Text("保存") }
-            },
-            dismissButton = { TextButton(onClick = { renameDeviceTarget = null }) { Text("取消") } },
-        )
     }
 }
 
@@ -270,7 +274,9 @@ fun PrivacyPreferencesScreen(
     var excludedCats by remember { mutableStateOf<Set<String>>(emptySet()) }
     var excludedTagsText by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
+    var saving by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var unblockTarget by remember { mutableStateOf<BlockRuleDto?>(null) }
 
     suspend fun load() {
         loading = true
@@ -290,96 +296,153 @@ fun PrivacyPreferencesScreen(
     }
     LaunchedEffect(Unit) { load() }
 
-    Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
-        IgngTopBar(title = "隐私与内容偏好", onBack = onBack)
-        if (loading && settings == null) {
-            IgngLoadingCenter(loading = true)
-        } else {
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                item {
-                    IgngTile {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("个人简介", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                            settings?.bioStatus?.let { st ->
-                                if (st == 1) IgngTagChip("简介审核中", tone = IgngTone.WARNING)
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(value = bio, onValueChange = { bio = it }, label = { Text("向社区介绍你自己（修改后将进入审核）") }, minLines = 2, modifier = Modifier.fillMaxWidth())
-                        Spacer(Modifier.height(12.dp))
-                        SwitchRow("公开我的粉丝与关注列表", allowFollowers) { allowFollowers = it }
-                        SwitchRow("公开我的收藏夹", allowFavorites) { allowFavorites = it }
-                        SwitchRow("在信息流隐藏 AI 辅助生成内容", hideAi) { hideAi = it }
-                    }
-                }
-                item {
-                    IgngTile {
-                        Text("排除的分区与标签", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                        Spacer(Modifier.height(8.dp))
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            bootstrap?.categories.orEmpty().forEach { cat ->
-                                val selected = cat.id in excludedCats
-                                IgngTagChip(
-                                    text = cat.name,
-                                    selected = selected,
-                                    tone = if (selected) IgngTone.DANGER else IgngTone.NEUTRAL,
-                                    onClick = {
-                                        excludedCats = if (selected) excludedCats - cat.id else excludedCats + cat.id
-                                    },
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedTextField(
-                            value = excludedTagsText,
-                            onValueChange = { excludedTagsText = it },
-                            label = { Text("屏蔽标签（逗号分隔）") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        IgngPrimaryButton(text = "保存隐私与偏好设置", onClick = {
-                            val tags = excludedTagsText.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
-                            scope.launch {
-                                when (val r = container.profileRepository.updateMySettings(
-                                    UpdateMySettingsRequest(
-                                        bio = bio,
-                                        allowFollowersVisibility = allowFollowers,
-                                        allowFavoritesVisibility = allowFavorites,
-                                        preferences = UpdateUserPreferencesPatch(
-                                            excludedCategoryIds = excludedCats.toList(),
-                                            excludedTags = tags,
-                                            hideAi = hideAi,
-                                        ),
-                                    ),
-                                )) {
-                                    is ApiResult.Success -> { settings = r.data; notice = "隐私与偏好已同步到云端" }
-                                    is ApiResult.Failure -> notice = r.error.message
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    IgngAmbientCanvas {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            IgngTopBar(title = "隐私与内容偏好", onBack = onBack)
+            if (loading && settings == null) {
+                IgngLoadingCenter(loading = true)
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 12.dp,
+                        bottom = 24.dp + navBottom,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                    item {
+                        IgngTile {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("个人简介", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                settings?.bioStatus?.let { st ->
+                                    if (st == 1) IgngTagChip("简介审核中", tone = IgngTone.WARNING)
                                 }
                             }
-                        })
+                            Spacer(Modifier.height(8.dp))
+                            IgngTextField(
+                                value = bio,
+                                onValueChange = { bio = it },
+                                label = "向社区介绍你自己（修改后将进入审核）",
+                                singleLine = false,
+                                minLines = 2,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            IgngSwitchRow("公开我的粉丝与关注列表", allowFollowers, { allowFollowers = it })
+                            IgngSwitchRow("公开我的收藏夹", allowFavorites, { allowFavorites = it })
+                            IgngSwitchRow("在信息流隐藏 AI 辅助生成内容", hideAi, { hideAi = it })
+                        }
                     }
-                }
-                val rules = settings?.blockRules.orEmpty()
-                if (rules.isNotEmpty()) {
-                    item { IgngSectionHeader("已屏蔽用户（${rules.size}）") }
-                    items(rules, key = { it.id }) { rule ->
-                        IgngTile(padding = PaddingValues(12.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("${rule.targetUser.displayName} (@${rule.targetUser.username})", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                IgngTagChip("解除屏蔽", tone = IgngTone.DANGER, onClick = {
+                    item {
+                        IgngTile {
+                            Text("排除的分区与标签", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                            Spacer(Modifier.height(8.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                bootstrap?.categories.orEmpty().forEach { cat ->
+                                    val selected = cat.id in excludedCats
+                                    IgngTagChip(
+                                        text = cat.name,
+                                        selected = selected,
+                                        tone = if (selected) IgngTone.DANGER else IgngTone.NEUTRAL,
+                                        onClick = {
+                                            excludedCats = if (selected) excludedCats - cat.id else excludedCats + cat.id
+                                        },
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            IgngTextField(
+                                value = excludedTagsText,
+                                onValueChange = { excludedTagsText = it },
+                                label = "屏蔽标签（逗号分隔）",
+                                placeholder = "例如：剧透, 水贴",
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            IgngPrimaryButton(
+                                text = "保存隐私与偏好设置",
+                                loading = saving,
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    val tags = excludedTagsText.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
                                     scope.launch {
-                                        container.profileRepository.deleteBlockRule(rule.targetUser.id)
-                                        load()
+                                        saving = true
+                                        when (
+                                            val r = container.profileRepository.updateMySettings(
+                                                UpdateMySettingsRequest(
+                                                    bio = bio,
+                                                    allowFollowersVisibility = allowFollowers,
+                                                    allowFavoritesVisibility = allowFavorites,
+                                                    preferences = UpdateUserPreferencesPatch(
+                                                        excludedCategoryIds = excludedCats.toList(),
+                                                        excludedTags = tags,
+                                                        hideAi = hideAi,
+                                                    ),
+                                                ),
+                                            )
+                                        ) {
+                                            is ApiResult.Success -> {
+                                                settings = r.data
+                                                notice = "隐私与偏好已同步到云端"
+                                            }
+                                            is ApiResult.Failure -> notice = r.error.message
+                                        }
+                                        saving = false
                                     }
-                                })
+                                },
+                            )
+                        }
+                    }
+                    val rules = settings?.blockRules.orEmpty()
+                    if (rules.isNotEmpty()) {
+                        item { IgngSectionHeader("已屏蔽用户（${rules.size}）") }
+                        items(rules, key = { it.id }) { rule ->
+                            IgngTile(padding = PaddingValues(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        "${rule.targetUser.displayName} (@${rule.targetUser.username})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = colors.textPrimary,
+                                    )
+                                    IgngTagChip("解除屏蔽", tone = IgngTone.DANGER, onClick = { unblockTarget = rule })
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    unblockTarget?.let { rule ->
+        IgngConfirmDialog(
+            title = "解除对 ${rule.targetUser.displayName} 的屏蔽",
+            message = "解除后该用户的帖子与互动将恢复正常展示。",
+            confirmLabel = "解除屏蔽",
+            danger = false,
+            onDismiss = { unblockTarget = null },
+            onConfirm = {
+                val targetId = rule.targetUser.id
+                unblockTarget = null
+                scope.launch {
+                    container.profileRepository.deleteBlockRule(targetId)
+                    load()
+                }
+            },
+        )
     }
 }
 
@@ -387,84 +450,94 @@ fun PrivacyPreferencesScreen(
 fun AppSettingsScreen(
     container: BbsAppContainer,
     onBack: () -> Unit,
+    onShowMessage: (String) -> Unit = {},
 ) {
-    val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val prefs by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
-    var cacheCleared by remember { mutableStateOf(false) }
+    var cacheBytes by remember { mutableLongStateOf(0L) }
+    var clearingCache by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
-        IgngTopBar(title = "应用设置", onBack = onBack)
-        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item {
-                IgngTile {
-                    Text("外观主题", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IgngTagChip("跟随系统", selected = prefs.themeMode == ThemeMode.SYSTEM, onClick = { scope.launch { container.settingsRepository.setThemeMode(ThemeMode.SYSTEM) } })
-                        IgngTagChip("浅色", selected = prefs.themeMode == ThemeMode.LIGHT, onClick = { scope.launch { container.settingsRepository.setThemeMode(ThemeMode.LIGHT) } })
-                        IgngTagChip("深色", selected = prefs.themeMode == ThemeMode.DARK, onClick = { scope.launch { container.settingsRepository.setThemeMode(ThemeMode.DARK) } })
+    LaunchedEffect(Unit) {
+        cacheBytes = container.cacheSizeBytes()
+    }
+
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    IgngAmbientCanvas {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            IgngTopBar(title = "应用设置", subtitle = "外观画布、动效触感、通知与缓存", onBack = onBack)
+            LazyColumn(
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 24.dp + navBottom,
+                ),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item(key = "appearance") {
+                    IgngAppearanceMotionSettingsCard(
+                        themeMode = prefs.themeMode,
+                        motionIntensity = prefs.motionIntensity,
+                        hapticsEnabled = prefs.hapticsEnabled,
+                        onThemeModeChange = { scope.launch { container.settingsRepository.setThemeMode(it) } },
+                        onMotionIntensityChange = { scope.launch { container.settingsRepository.setMotionIntensity(it) } },
+                        onHapticsEnabledChange = { scope.launch { container.settingsRepository.setHapticsEnabled(it) } },
+                        readerTypography = prefs.reader,
+                        onReaderToneChange = { tone ->
+                            scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = tone) } }
+                        },
+                    )
+                }
+
+                item(key = "bbs_preferences") {
+                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                        IgngSectionHeader(
+                            title = "社区与后台同步",
+                            subtitle = "IGNG BBS 专属浏览与通知偏好",
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        IgngSwitchRow(
+                            title = "首页自动折叠同系列文章",
+                            subtitle = "减少长连载在社区信息流中的刷屏感",
+                            checked = prefs.collapseSeriesInFeed,
+                            onCheckedChange = { scope.launch { container.settingsRepository.setCollapseSeriesInFeed(it) } },
+                        )
+                        IgngSwitchRow(
+                            title = "后台定期同步未读消息通知",
+                            subtitle = "通过系统 WorkManager 低功耗轮询未读提醒",
+                            checked = prefs.backgroundNotificationsEnabled,
+                            onCheckedChange = { scope.launch { container.settingsRepository.setBackgroundNotificationsEnabled(it) } },
+                        )
                     }
                 }
-            }
-            item {
-                IgngTile {
-                    Text("动效与触感反馈", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                    Spacer(Modifier.height(6.dp))
-                    Text("默认采用舒适柔和的物理减速曲线，也可按个人习惯降低动效强度。", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IgngTagChip("完整动效", selected = prefs.motionIntensity == MotionIntensity.FULL, onClick = { scope.launch { container.settingsRepository.setMotionIntensity(MotionIntensity.FULL) } })
-                        IgngTagChip("轻柔动效", selected = prefs.motionIntensity == MotionIntensity.CALM, onClick = { scope.launch { container.settingsRepository.setMotionIntensity(MotionIntensity.CALM) } })
-                        IgngTagChip("减少动态", selected = prefs.motionIntensity == MotionIntensity.REDUCED, onClick = { scope.launch { container.settingsRepository.setMotionIntensity(MotionIntensity.REDUCED) } })
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    SwitchRow("交互微触感反馈", prefs.hapticsEnabled) { scope.launch { container.settingsRepository.setHapticsEnabled(it) } }
-                    SwitchRow("首页自动折叠同系列文章", prefs.collapseSeriesInFeed) { scope.launch { container.settingsRepository.setCollapseSeriesInFeed(it) } }
-                    SwitchRow("后台定期同步未读消息通知", prefs.backgroundNotificationsEnabled) { scope.launch { container.settingsRepository.setBackgroundNotificationsEnabled(it) } }
-                }
-            }
-            item {
-                IgngTile {
-                    Text("默认阅读画布", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IgngTagChip("跟随主题", selected = prefs.reader.canvasTone == ReaderCanvasTone.DEFAULT, onClick = { scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = ReaderCanvasTone.DEFAULT) } } })
-                        IgngTagChip("暖纸护眼", selected = prefs.reader.canvasTone == ReaderCanvasTone.WARM_PAPER, onClick = { scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = ReaderCanvasTone.WARM_PAPER) } } })
-                        IgngTagChip("深墨夜间", selected = prefs.reader.canvasTone == ReaderCanvasTone.INK_DARK, onClick = { scope.launch { container.settingsRepository.updateReaderPrefs { it.copy(canvasTone = ReaderCanvasTone.INK_DARK) } } })
-                    }
-                }
-            }
-            item {
-                IgngTile {
-                    Text("缓存与版本", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                    Spacer(Modifier.height(8.dp))
-                    Text("IGNG BBS Android 客户端 · 版本 ${container.appVersion}（net.igng.bbs）", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                    Spacer(Modifier.height(10.dp))
-                    IgngSecondaryButton(
-                        text = if (cacheCleared) "本地缓存已清理" else "清理本地文章与图片缓存",
-                        onClick = {
+
+                item(key = "cache") {
+                    IgngCacheCard(
+                        cacheBytes = cacheBytes,
+                        subtitlePrefix = "社区快照与本地图片缓存",
+                        clearing = clearingCache,
+                        onClearCache = {
                             scope.launch {
-                                container.settingsRepository.clearLocalCache()
-                                cacheCleared = true
+                                clearingCache = true
+                                container.clearAllCaches()
+                                cacheBytes = container.cacheSizeBytes()
+                                clearingCache = false
+                                onShowMessage("本地缓存已清理")
                             }
                         },
                     )
                 }
+
+                item(key = "about") {
+                    IgngAboutAppCard(
+                        appName = "IGNG BBS",
+                        packageName = "net.igng.bbs",
+                        versionName = container.appVersion,
+                        versionCode = container.appVersionCode,
+                    )
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    val colors = IgngTheme.colors
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
