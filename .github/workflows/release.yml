@@ -212,12 +212,10 @@ jobs:
           BBS_KS_PASS: ${{ secrets.BBS_ANDROID_KEYSTORE_PASSWORD }}
           BBS_KEY_ALIAS: ${{ secrets.BBS_ANDROID_KEY_ALIAS }}
           BBS_KEY_PASS: ${{ secrets.BBS_ANDROID_KEY_PASSWORD }}
-          BBS_CERT_SHA256: ${{ secrets.BBS_ANDROID_SIGNING_CERT_SHA256 }}
           MC_KS_B64: ${{ secrets.MC_ANDROID_KEYSTORE_BASE64 }}
           MC_KS_PASS: ${{ secrets.MC_ANDROID_KEYSTORE_PASSWORD }}
           MC_KEY_ALIAS: ${{ secrets.MC_ANDROID_KEY_ALIAS }}
           MC_KEY_PASS: ${{ secrets.MC_ANDROID_KEY_PASSWORD }}
-          MC_CERT_SHA256: ${{ secrets.MC_ANDROID_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
           case "$SIGN_PREFIX" in
@@ -226,14 +224,12 @@ jobs:
               KS_PASS="$BBS_KS_PASS"
               K_ALIAS="$BBS_KEY_ALIAS"
               K_PASS="$BBS_KEY_PASS"
-              EXPECTED_SHA="$BBS_CERT_SHA256"
               ;;
             MC)
               KS_B64="$MC_KS_B64"
               KS_PASS="$MC_KS_PASS"
               K_ALIAS="$MC_KEY_ALIAS"
               K_PASS="$MC_KEY_PASS"
-              EXPECTED_SHA="$MC_CERT_SHA256"
               ;;
             *)
               echo "::error::未知签名配置前缀：$SIGN_PREFIX"
@@ -250,7 +246,6 @@ jobs:
           printf '%s' "$KS_B64" | tr -d '\r\n ' | base64 --decode > "$KS_PATH"
           chmod 600 "$KS_PATH"
           echo "keystore_path=$KS_PATH" >> "$GITHUB_OUTPUT"
-          echo "expected_cert_sha256=$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -286,11 +281,19 @@ jobs:
         env:
           APP_ID: ${{ steps.meta.outputs.app_id }}
           ASSET_PREFIX: ${{ steps.meta.outputs.asset_prefix }}
+          SIGN_PREFIX: ${{ steps.meta.outputs.sign_prefix }}
           VERSION_NAME: ${{ steps.meta.outputs.version_name }}
           VERSION_CODE: ${{ steps.meta.outputs.version_code }}
-          EXPECTED_CERT_SHA256: ${{ steps.signing.outputs.expected_cert_sha256 }}
+          BBS_CERT_SHA256: ${{ secrets.BBS_ANDROID_SIGNING_CERT_SHA256 }}
+          MC_CERT_SHA256: ${{ secrets.MC_ANDROID_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
+          case "$SIGN_PREFIX" in
+            BBS) EXPECTED_CERT_SHA256="$BBS_CERT_SHA256" ;;
+            MC)  EXPECTED_CERT_SHA256="$MC_CERT_SHA256" ;;
+            *)   EXPECTED_CERT_SHA256="" ;;
+          esac
+
           RAW_APK="apps/${APP_KEY}/build/outputs/apk/release/${APP_KEY}-release.apk"
           if [ ! -f "$RAW_APK" ]; then
             RAW_APK=$(ls "apps/${APP_KEY}/build/outputs/apk/release/"*-release.apk | head -n 1)
@@ -307,15 +310,15 @@ jobs:
           echo "=== apksigner verify ==="
           SIGNER_OUT=$("$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$FINAL_APK")
           printf '%s\n' "$SIGNER_OUT"
-          CERT_SHA256=$(printf '%s\n' "$SIGNER_OUT" | sed -nE 's/.*SHA-256[^0-9a-fA-F]*([0-9a-fA-F]{64}).*/\1/p' | head -n 1 | tr 'A-Z' 'a-z')
-          if [ -z "$CERT_SHA256" ]; then
+          CERT_SHA256=$(printf '%s\n' "$SIGNER_OUT" | awk '/certificate SHA-256 digest:/ { print $NF; exit }' | tr -d ':\r\n ' | tr 'A-Z' 'a-z')
+          if ! printf '%s' "$CERT_SHA256" | grep -qE '^[0-9a-f]{64}$'; then
             echo "::error::无法从 apksigner 输出中解析签名证书 SHA-256 摘要"
             exit 1
           fi
           if [ -n "$EXPECTED_CERT_SHA256" ]; then
             NORM_EXPECTED=$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':\r\n ' | tr 'A-Z' 'a-z')
             if [ "$CERT_SHA256" != "$NORM_EXPECTED" ]; then
-              echo "::error::签名证书 SHA-256 不匹配（实际=$CERT_SHA256，期望=$NORM_EXPECTED），中止发布以保护覆盖升级链路"
+              echo "::error::签名证书 SHA-256 不匹配，中止发布以保护覆盖升级链路"
               exit 1
             fi
             echo "Signing certificate SHA-256 matches expected fingerprint."
@@ -333,13 +336,16 @@ jobs:
           echo "=== dexdump verify ==="
           python3 scripts/verify-release-dex.py --app "$APP_KEY" "$FINAL_APK" --dexdump "$BUILD_TOOLS/dexdump"
 
+          # Store cert metadata on disk in RUNNER_TEMP (not GITHUB_OUTPUT) so secret-masking never drops outputs
+          printf '%s\n' "$CERT_SHA256" > "${OUT_DIR}/cert.sha256"
+          printf '%s\n' "$APP_LINKS_FP" > "${OUT_DIR}/applinks.fp"
+
           {
             echo "asset_name=$ASSET_NAME"
             echo "apk_path=$FINAL_APK"
             echo "sha_path=${FINAL_APK}.sha256"
             echo "apk_sha256=$APK_SHA256"
-            echo "cert_sha256=$CERT_SHA256"
-            echo "app_links_fp=$APP_LINKS_FP"
+            echo "meta_dir=$OUT_DIR"
           } >> "$GITHUB_OUTPUT"
 
       - name: 清理临时签名密钥
@@ -362,10 +368,11 @@ jobs:
           APK_PATH: ${{ steps.verify_apk.outputs.apk_path }}
           SHA_PATH: ${{ steps.verify_apk.outputs.sha_path }}
           APK_SHA256: ${{ steps.verify_apk.outputs.apk_sha256 }}
-          CERT_SHA256: ${{ steps.verify_apk.outputs.cert_sha256 }}
-          APP_LINKS_FP: ${{ steps.verify_apk.outputs.app_links_fp }}
+          META_DIR: ${{ steps.verify_apk.outputs.meta_dir }}
         run: |
           set -euo pipefail
+          CERT_SHA256=$(cat "${META_DIR}/cert.sha256")
+          APP_LINKS_FP=$(cat "${META_DIR}/applinks.fp")
           NOTES_FILE="${RUNNER_TEMP}/release-notes-${APP_KEY}.md"
           {
             echo "## ${APP_TITLE} Android v${VERSION_NAME} (\`${TAG}\`)"
@@ -429,13 +436,14 @@ jobs:
           DRY_RUN: ${{ steps.meta.outputs.dry_run }}
           ASSET_NAME: ${{ steps.verify_apk.outputs.asset_name }}
           APK_SHA256: ${{ steps.verify_apk.outputs.apk_sha256 }}
-          CERT_SHA256: ${{ steps.verify_apk.outputs.cert_sha256 }}
+          META_DIR: ${{ steps.verify_apk.outputs.meta_dir }}
         run: |
+          CERT_SHA256=$(cat "${META_DIR}/cert.sha256")
           {
             echo "### ${APP_TITLE} Release 构建结果"
             echo "- Tag: \`${TAG}\`"
             echo "- 模式: \`$( [ "$DRY_RUN" = "true" ] && echo "dry-run（未发布 Release）" || echo "正式发布" )\`"
             echo "- APK: \`${ASSET_NAME}\`"
             echo "- APK SHA-256: \`${APK_SHA256}\`"
-            echo "- 签名证书 SHA-256: \`${CERT_SHA256}\`"
+            echo "- 签名证书 SHA-256 校验: 已通过（\`${CERT_SHA256}\`）"
           } >> "$GITHUB_STEP_SUMMARY"
