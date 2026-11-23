@@ -3,14 +3,12 @@ package net.igng.bbs.core.data
 import android.content.Context
 import android.net.Uri
 import net.igng.bbs.core.model.SiteEndpoints
-import net.igng.core.auth.IgngOAuthClient
+import net.igng.core.auth.IgngSessionManager
 import net.igng.core.auth.OAuthCallbackResult
 import net.igng.core.auth.OAuthClientConfig
 import net.igng.core.auth.SecureSessionStore
 import net.igng.core.auth.VaultStorageConfig
-import net.igng.core.network.ApiException
 import net.igng.core.network.SingleFlightTokenRefresher
-import net.igng.core.network.TokenRefreshResult
 
 object BbsErrorMapper {
     fun map(status: Int, code: String, serverMessage: String): String = when (code) {
@@ -33,17 +31,37 @@ object BbsErrorMapper {
 }
 
 /**
- * Thin BBS adapter over shared [IgngOAuthClient] + [SingleFlightTokenRefresher].
+ * Thin BBS facade over the shared non-destructive [IgngSessionManager].
  * Preserves existing BBS v2.0.0/v2.0.1 SharedPreferences vault & Keystore alias for seamless
  * over-the-top upgrades.
  */
 class BbsOAuthManager(
-    endpoints: SiteEndpoints,
-    appVersion: String,
-    val sessionStore: SecureSessionStore,
+    val sessionManager: IgngSessionManager,
 ) {
-    private val oauthClient = IgngOAuthClient(
-        config = OAuthClientConfig(
+    val sessionStore: SecureSessionStore get() = sessionManager.sessionStore
+    val tokenRefresher: SingleFlightTokenRefresher get() = sessionManager.tokenRefresher
+
+    fun launchLogin(context: Context, isDark: Boolean = false, forceSwitchAccount: Boolean = false) {
+        sessionManager.launchLogin(context = context, isDark = isDark, forceSwitchAccount = forceSwitchAccount)
+    }
+
+    suspend fun handleCallbackUri(uri: Uri?): OAuthCallbackResult =
+        sessionManager.handleCallbackUri(uri)
+
+    suspend fun logoutActive() {
+        sessionManager.logoutActive()
+    }
+
+    companion object {
+        val VAULT_CONFIG = VaultStorageConfig(
+            prefsName = "igngbbs_secure_vault",
+            pendingPrefsName = "igngbbs_oauth_pending",
+            keyAlias = "net.igng.bbs.vault.aes256",
+            deviceIdKey = "device_id",
+            legacyPerFieldCompat = false,
+        )
+
+        fun oauthConfig(endpoints: SiteEndpoints, appVersion: String) = OAuthClientConfig(
             clientId = SiteEndpoints.CLIENT_ID,
             redirectUri = SiteEndpoints.OAUTH_REDIRECT_URI,
             callbackScheme = "igngbbs",
@@ -54,67 +72,6 @@ class BbsOAuthManager(
             endpoints = endpoints,
             clientVersion = appVersion,
             userAgent = "IGNGbbs-Android/$appVersion",
-        ),
-        sessionStore = sessionStore,
-    )
-
-    val tokenRefresher = SingleFlightTokenRefresher(
-        currentTokenProvider = { sessionStore.currentAccessToken() },
-        refreshBlock = { failedAccessToken ->
-            val active = sessionStore.activeAccount.value ?: return@SingleFlightTokenRefresher TokenRefreshResult.Invalidated
-            if (active.accessToken != failedAccessToken && active.accessToken.isNotBlank()) {
-                return@SingleFlightTokenRefresher TokenRefreshResult.Refreshed(active.accessToken)
-            }
-            if (active.refreshToken.isNullOrBlank()) {
-                sessionStore.clearActiveAccount()
-                return@SingleFlightTokenRefresher TokenRefreshResult.Invalidated
-            }
-            try {
-                val rotated = oauthClient.refreshSession(active)
-                if (rotated == null) {
-                    sessionStore.clearActiveAccount()
-                    TokenRefreshResult.Invalidated
-                } else {
-                    sessionStore.upsertAccount(rotated, makeActive = true)
-                    TokenRefreshResult.Refreshed(rotated.accessToken)
-                }
-            } catch (e: ApiException) {
-                if (e.statusCode in listOf(400, 401, 403)) {
-                    sessionStore.clearActiveAccount()
-                    TokenRefreshResult.Invalidated
-                } else {
-                    TokenRefreshResult.TransientFailure
-                }
-            } catch (_: Exception) {
-                TokenRefreshResult.TransientFailure
-            }
-        },
-    )
-
-    fun launchLogin(context: Context, isDark: Boolean = false, forceSwitchAccount: Boolean = false) {
-        oauthClient.launchLogin(context = context, isDark = isDark, forceSwitchAccount = forceSwitchAccount)
-    }
-
-    suspend fun handleCallbackUri(uri: Uri?): OAuthCallbackResult {
-        val result = oauthClient.handleCallbackUri(uri)
-        if (result is OAuthCallbackResult.Success) {
-            sessionStore.upsertAccount(result.account, makeActive = true)
-        }
-        return result
-    }
-
-    suspend fun logoutActive() {
-        oauthClient.logout(sessionStore.currentAccessToken())
-        sessionStore.clearActiveAccount()
-    }
-
-    companion object {
-        val VAULT_CONFIG = VaultStorageConfig(
-            prefsName = "igngbbs_secure_vault",
-            pendingPrefsName = "igngbbs_oauth_pending",
-            keyAlias = "net.igng.bbs.vault.aes256",
-            deviceIdKey = "device_id",
-            legacyPerFieldCompat = false,
         )
     }
 }

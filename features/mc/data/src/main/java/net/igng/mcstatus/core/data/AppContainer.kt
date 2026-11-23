@@ -1,43 +1,46 @@
 package net.igng.mcstatus.core.data
 
 import android.content.Context
-import android.os.Build
+import android.net.Uri
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import coil3.ImageLoader
-import coil3.gif.AnimatedImageDecoder
-import coil3.gif.GifDecoder
-import coil3.network.okhttp.OkHttpNetworkFetcherFactory
-import java.io.File
-import java.util.Collections
-import kotlinx.coroutines.Dispatchers
+import java.time.LocalDate
+import java.time.ZoneOffset
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import net.igng.core.auth.IgngOAuthClient
+import net.igng.core.auth.IgngSessionManager
+import net.igng.core.auth.OAuthCallbackResult
 import net.igng.core.auth.OAuthClientConfig
 import net.igng.core.auth.SecureSessionStore
+import net.igng.core.data.IgngAccountRepository
+import net.igng.core.data.IgngImageLoaderFactory
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.MotionIntensity
 import net.igng.core.model.ReaderTypographyPrefs
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
 import net.igng.core.model.ThemeMode
-import net.igng.core.network.ApiException
+import net.igng.core.network.ApiResult
 import net.igng.core.network.IgngClientConfig
 import net.igng.core.network.IgngHttpClient
 import net.igng.core.network.IgngJson
 import net.igng.core.network.SessionExpiredNotifier
 import net.igng.core.network.SingleFlightTokenRefresher
-import net.igng.core.network.TokenRefreshResult
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.mcstatus.core.model.BootstrapResponse
 import net.igng.mcstatus.core.model.DailyExpStatus
+import net.igng.mcstatus.core.model.McAdminRole
 import net.igng.mcstatus.core.model.SiteEndpoints
 
 private val Context.igngPrefsDataStore by preferencesDataStore(name = "igng_mc_v2_prefs")
@@ -91,69 +94,61 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    suspend fun getCachedDailyExp(userId: Long, periodUtc: String): DailyExpStatus? {
+        val raw = context.igngPrefsDataStore.data.first()[KEY_DAILY_EXP_CACHE] ?: return null
+        val map = decodeDailyMap(raw)
+        return map[userId.toString()]?.takeIf { it.period == periodUtc }
+    }
+
+    suspend fun saveCachedDailyExp(userId: Long, status: DailyExpStatus) {
+        context.igngPrefsDataStore.edit { prefs ->
+            val map = decodeDailyMap(prefs[KEY_DAILY_EXP_CACHE]).toMutableMap()
+            map[userId.toString()] = status
+            prefs[KEY_DAILY_EXP_CACHE] = IgngJson.instance.encodeToString(
+                MapSerializer(String.serializer(), DailyExpStatus.serializer()),
+                map,
+            )
+        }
+    }
+
+    private fun decodeDailyMap(raw: String?): Map<String, DailyExpStatus> = raw?.let {
+        runCatching {
+            IgngJson.instance.decodeFromString(
+                MapSerializer(String.serializer(), DailyExpStatus.serializer()),
+                it,
+            )
+        }.getOrNull()
+    }.orEmpty()
+
     private companion object {
         val KEY_THEME = stringPreferencesKey("theme_mode")
         val KEY_MOTION = stringPreferencesKey("motion_intensity")
         val KEY_HAPTICS = booleanPreferencesKey("haptics_enabled")
         val KEY_READER_PREFS = stringPreferencesKey("reader_typography_prefs_v1")
         val KEY_RECENT_WIKI = stringPreferencesKey("recent_wiki_ids")
+        val KEY_DAILY_EXP_CACHE = stringPreferencesKey("daily_exp_cache_v1")
         val KEY_SESSION_EPOCH = intPreferencesKey("session_epoch")
     }
 }
 
 /**
- * Central application dependency container (zero annotation-processor overhead).
+ * Central application dependency container unified on [IgngSessionManager], [IgngAccountRepository],
+ * and [IgngImageLoaderFactory].
  */
-
 class IgngAppContainer(
     val appContext: Context,
     val endpoints: SiteEndpoints,
     val clientVersion: String,
 ) {
-    val sessionStore = SecureSessionStore(appContext, AuthRepository.VAULT_CONFIG)
-    val oauthPendingStore = OAuthPendingStore(sessionStore)
-    val sessionExpiredNotifier = SessionExpiredNotifier()
-
-    private val invalidatedTokens: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
-
-    private val _activeAccount = MutableStateFlow(sessionStore.activeAccountSnapshot())
-    val activeAccount: StateFlow<SavedAccount?> = _activeAccount.asStateFlow()
-
-    private val _accounts = MutableStateFlow(sessionStore.accountsSnapshot())
-    val accounts: StateFlow<List<SavedAccount>> = _accounts.asStateFlow()
-
-    private val _sessionAuthStatus = MutableStateFlow(computeSessionAuthStatus(_activeAccount.value))
-    val sessionAuthStatus: StateFlow<SessionAuthStatus> = _sessionAuthStatus.asStateFlow()
-
     private val _dailyExp = MutableStateFlow<DailyExpStatus?>(null)
     val dailyExp: StateFlow<DailyExpStatus?> = _dailyExp.asStateFlow()
 
     private val _bootstrap = MutableStateFlow<BootstrapResponse?>(null)
     val bootstrap: StateFlow<BootstrapResponse?> = _bootstrap.asStateFlow()
 
-    private val _sessionEpoch = MutableStateFlow(0)
-    val sessionEpoch: StateFlow<Int> = _sessionEpoch.asStateFlow()
-
-    private fun computeSessionAuthStatus(account: SavedAccount?): SessionAuthStatus = when {
-        account == null -> SessionAuthStatus.SIGNED_OUT
-        account.refreshToken.isNullOrBlank() -> SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
-        invalidatedTokens.contains(account.accessToken) -> SessionAuthStatus.EXPIRED
-        else -> SessionAuthStatus.ACTIVE
-    }
-
-    private fun syncSessionAuthStatus() {
-        _sessionAuthStatus.value = computeSessionAuthStatus(_activeAccount.value)
-    }
-
-    fun isActiveSessionInvalidated(): Boolean = _sessionAuthStatus.value.requiresReauth
-
-    fun activeUsableToken(): String? {
-        val account = _activeAccount.value ?: return null
-        return account.accessToken.takeIf { !computeSessionAuthStatus(account).requiresReauth }
-    }
-
-    private val oauthClient = IgngOAuthClient(
-        config = OAuthClientConfig(
+    val sessionManager = IgngSessionManager(
+        context = appContext,
+        oauthConfig = OAuthClientConfig(
             clientId = AuthRepository.CLIENT_ID,
             redirectUri = AuthRepository.REDIRECT_URI,
             callbackScheme = AuthRepository.CALLBACK_SCHEME,
@@ -165,70 +160,25 @@ class IgngAppContainer(
             clientVersion = clientVersion,
             userAgent = "IGNGmc-Android/$clientVersion",
         ),
-        sessionStore = sessionStore,
+        vaultConfig = AuthRepository.VAULT_CONFIG,
+        onSessionInvalidated = { _dailyExp.value = null },
     )
 
-    private val authHttpClient = IgngHttpClient(
-        config = IgngClientConfig(
-            clientId = AuthRepository.CLIENT_ID,
-            clientVersion = clientVersion,
-            userAgent = "IGNGmc-Android/$clientVersion",
-            endpoints = endpoints,
-        ),
-        deviceIdProvider = { sessionStore.getOrCreateDeviceId() },
-        tokenProvider = { activeUsableToken() },
-    )
+    val sessionStore: SecureSessionStore get() = sessionManager.sessionStore
+    val oauthPendingStore = OAuthPendingStore(sessionStore)
+    val sessionExpiredNotifier: SessionExpiredNotifier get() = sessionManager.sessionExpiredNotifier
 
-    val authRepository = AuthRepository(endpoints, ApiClient(authHttpClient), oauthClient)
+    val activeAccount: StateFlow<SavedAccount?> get() = sessionManager.activeAccount
+    val accounts: StateFlow<List<SavedAccount>> get() = sessionManager.accounts
+    val sessionAuthStatus: StateFlow<SessionAuthStatus> get() = sessionManager.sessionAuthStatus
+    val sessionEpoch: StateFlow<Int> get() = sessionManager.sessionEpoch
+    val familyAccounts: StateFlow<List<FamilySharedAccountHint>> get() = sessionManager.familyAccounts
 
-    val tokenRefresher = SingleFlightTokenRefresher(
-        currentTokenProvider = { activeUsableToken() },
-        isTokenInvalidated = { invalidatedTokens.contains(it) },
-        refreshBlock = { failedAccessToken ->
-            val current = sessionStore.activeAccountSnapshot()
-            if (current == null) {
-                syncSessionAuthStatus()
-                return@SingleFlightTokenRefresher TokenRefreshResult.Invalidated
-            }
-            if (current.accessToken != failedAccessToken && !invalidatedTokens.contains(current.accessToken)) {
-                _activeAccount.value = current
-                syncSessionAuthStatus()
-                return@SingleFlightTokenRefresher TokenRefreshResult.Refreshed(current.accessToken)
-            }
-            if (current.refreshToken.isNullOrBlank()) {
-                invalidatedTokens.add(failedAccessToken)
-                _dailyExp.value = null
-                syncSessionAuthStatus()
-                return@SingleFlightTokenRefresher TokenRefreshResult.Invalidated
-            }
-            try {
-                val rotated = authRepository.refreshSession(current)
-                if (rotated == null) {
-                    invalidatedTokens.add(failedAccessToken)
-                    _dailyExp.value = null
-                    syncSessionAuthStatus()
-                    return@SingleFlightTokenRefresher TokenRefreshResult.Invalidated
-                }
-                invalidatedTokens.remove(rotated.accessToken)
-                sessionStore.upsertAccount(rotated, makeActive = true)
-                _activeAccount.value = sessionStore.activeAccountSnapshot()
-                _accounts.value = sessionStore.accountsSnapshot()
-                syncSessionAuthStatus()
-                TokenRefreshResult.Refreshed(rotated.accessToken)
-            } catch (error: ApiException) {
-                if (error.statusCode in listOf(400, 401, 403)) {
-                    invalidatedTokens.add(failedAccessToken)
-                    _dailyExp.value = null
-                    syncSessionAuthStatus()
-                    TokenRefreshResult.Invalidated
-                } else {
-                    TokenRefreshResult.TransientFailure
-                }
-            } catch (_: Exception) {
-                TokenRefreshResult.TransientFailure
-            }
-        },
-    )
+    val tokenRefresher: SingleFlightTokenRefresher get() = sessionManager.tokenRefresher
+    private val oauthClient: IgngOAuthClient get() = sessionManager.oauthClient
+
+    fun isActiveSessionInvalidated(): Boolean = sessionManager.isActiveSessionInvalidated()
+    fun activeUsableToken(): String? = sessionManager.activeUsableToken()
 
     val httpClient = IgngHttpClient(
         config = IgngClientConfig(
@@ -238,31 +188,27 @@ class IgngAppContainer(
             endpoints = endpoints,
         ),
         deviceIdProvider = { sessionStore.getOrCreateDeviceId() },
-        tokenProvider = { activeUsableToken() },
-        tokenRefresher = tokenRefresher,
+        tokenProvider = { sessionManager.activeUsableToken() },
+        tokenRefresher = sessionManager.tokenRefresher,
         sessionExpiredNotifier = sessionExpiredNotifier,
-        hasInvalidatedSession = { isActiveSessionInvalidated() },
+        hasInvalidatedSession = { sessionManager.isActiveSessionInvalidated() },
     )
 
     val apiClient = ApiClient(httpClient)
     val mediaOkHttpClient = httpClient.mediaOkHttpClient
 
-    val imageLoader: ImageLoader = ImageLoader.Builder(appContext)
-        .components {
-            add(OkHttpNetworkFetcherFactory(callFactory = { mediaOkHttpClient }))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                add(AnimatedImageDecoder.Factory())
-            } else {
-                add(GifDecoder.Factory())
-            }
-        }
-        .build()
+    val imageLoader: ImageLoader = IgngImageLoaderFactory.create(
+        context = appContext,
+        mediaOkHttpClient = mediaOkHttpClient,
+    )
 
     val exploreCache = LocalJsonCache(appContext, "igng_explore_cache")
     val wikiCache = LocalJsonCache(appContext, "igng_wiki_cache")
     val draftCache = LocalJsonCache(appContext, "igng_draft_cache")
 
     val settingsRepository = SettingsRepository(appContext)
+    val accountRepository = IgngAccountRepository(httpClient)
+    val authRepository = AuthRepository(endpoints, apiClient, oauthClient)
     val exploreRepository = ExploreRepository(endpoints, apiClient, exploreCache)
     val statusRepository = StatusRepository(endpoints, apiClient)
     val chatRepository = ChatRepository(endpoints, apiClient)
@@ -270,6 +216,35 @@ class IgngAppContainer(
     val playerRepository = PlayerRepository(endpoints, apiClient, authRepository)
     val ticketRepository = TicketRepository(endpoints, apiClient, draftCache)
     val adminRepository = AdminRepository(endpoints, apiClient)
+
+    suspend fun refreshFamilyAccounts() {
+        sessionManager.refreshFamilyAccounts()
+    }
+
+    suspend fun handleOAuthCallback(uri: Uri?): OAuthCallbackResult {
+        val result = sessionManager.handleCallbackUri(uri) { baseAccount ->
+            val boot = runCatching { authRepository.fetchBootstrap(baseAccount.accessToken) }.getOrNull()
+            val viewerUser = boot?.viewer?.user
+            val adminRole = McAdminRole.fromWire(boot?.viewer?.adminRole)
+            baseAccount.copy(
+                userId = viewerUser?.resolvedNumericId?.takeIf { it > 0 }?.toLong() ?: baseAccount.userId,
+                username = viewerUser?.username?.takeIf { it.isNotBlank() } ?: baseAccount.username,
+                nickname = viewerUser?.nickname ?: baseAccount.nickname,
+                avatarUrl = viewerUser?.avatarUrl ?: baseAccount.avatarUrl,
+                deviceName = "IGNGmc Android",
+                adminRoleWire = adminRole?.name,
+            )
+        }
+        if (result is OAuthCallbackResult.Success) {
+            _dailyExp.value = null
+        }
+        return result
+    }
+
+    suspend fun logoutActive() {
+        sessionManager.logoutActive()
+        _dailyExp.value = null
+    }
 
     suspend fun fetchBootstrapForCurrentSession(): BootstrapResponse =
         apiClient.json.decodeFromString(
@@ -280,41 +255,55 @@ class IgngAppContainer(
         )
 
     suspend fun settleDailyLoginForCurrentSession(): DailyExpStatus? {
-        val token = activeUsableToken() ?: return null
-        return authRepository.settleDailyLogin(token)
+        val active = activeAccount.value ?: return null
+        if (activeUsableToken().isNullOrBlank()) return null
+        val todayUtc = LocalDate.now(ZoneOffset.UTC).toString()
+        settingsRepository.getCachedDailyExp(active.userId, todayUtc)?.let { cached ->
+            return cached
+        }
+        return when (val res = accountRepository.settleDailyLogin()) {
+            is ApiResult.Success -> {
+                val period = res.data.period.ifBlank { todayUtc }
+                val status = DailyExpStatus(
+                    loggedIn = true,
+                    awarded = res.data.awarded,
+                    exp = res.data.exp,
+                    baseExp = res.data.baseExp,
+                    level = res.data.level,
+                    multiplier = res.data.multiplier,
+                    period = period,
+                )
+                settingsRepository.saveCachedDailyExp(active.userId, status)
+                status
+            }
+            is ApiResult.Failure -> null
+        }
     }
 
     fun saveAndActivateAccount(account: SavedAccount, resetDailyExp: Boolean = true) {
-        invalidatedTokens.remove(account.accessToken)
-        sessionStore.upsertAccount(account, makeActive = true)
-        _activeAccount.value = sessionStore.activeAccountSnapshot()
-        _accounts.value = sessionStore.accountsSnapshot()
-        syncSessionAuthStatus()
+        sessionManager.saveAndActivateAccount(account, bumpEpoch = resetDailyExp)
         if (resetDailyExp) {
             _dailyExp.value = null
-            _sessionEpoch.value += 1
         }
     }
 
     fun switchAccount(userId: Long) {
-        sessionStore.switchAccount(userId)
-        _activeAccount.value = sessionStore.activeAccountSnapshot()
-        _accounts.value = sessionStore.accountsSnapshot()
-        syncSessionAuthStatus()
+        sessionManager.switchAccount(userId)
         _dailyExp.value = null
-        _sessionEpoch.value += 1
     }
 
     fun switchAccount(userId: Int) = switchAccount(userId.toLong())
 
+    fun removeAccount(userId: Long) {
+        val wasActive = activeAccount.value?.userId == userId
+        sessionManager.removeAccount(userId)
+        if (wasActive) {
+            _dailyExp.value = null
+        }
+    }
+
     fun removeActiveAccount() {
-        _activeAccount.value?.accessToken?.let { invalidatedTokens.remove(it) }
-        sessionStore.clearActiveAccount()
-        _activeAccount.value = sessionStore.activeAccountSnapshot()
-        _accounts.value = sessionStore.accountsSnapshot()
-        syncSessionAuthStatus()
-        _dailyExp.value = null
-        _sessionEpoch.value += 1
+        activeAccount.value?.let { removeAccount(it.userId) }
     }
 
     fun updateDailyExp(status: DailyExpStatus?) {
@@ -328,8 +317,12 @@ class IgngAppContainer(
     suspend fun clearAllCaches() {
         exploreCache.clearAll()
         wikiCache.clearAll()
+        IgngImageLoaderFactory.clearCaches(appContext, imageLoader)
     }
 
     suspend fun cacheSizeBytes(): Long =
-        exploreCache.sizeBytes() + wikiCache.sizeBytes() + draftCache.sizeBytes()
+        exploreCache.sizeBytes() +
+            wikiCache.sizeBytes() +
+            draftCache.sizeBytes() +
+            IgngImageLoaderFactory.diskCacheSizeBytes(appContext)
 }

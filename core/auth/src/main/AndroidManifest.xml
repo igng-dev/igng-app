@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 11+ package visibility for IGNG family cross-app SSO account discovery -->
+    <queries>
+        <package android:name="net.igng.bbs" />
+        <package android:name="net.igng.mcstatus" />
+        <package android:name="net.igng.ink" />
+    </queries>
+
+    <application>
+        <!-- Read-only public identity directory provider (never exposes tokens/secrets) -->
+        <provider
+            android:name="net.igng.core.auth.IgngFamilySsoProvider"
+            android:authorities="${applicationId}.igng.family.sso"
+            android:exported="true"
+            android:multiprocess="false" />
+    </application>
+
+</manifest>

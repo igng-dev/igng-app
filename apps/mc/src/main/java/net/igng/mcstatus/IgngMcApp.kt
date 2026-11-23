@@ -48,9 +48,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import net.igng.mcstatus.core.data.AuthRepository
-import net.igng.core.auth.CustomTabsLauncher
-import net.igng.core.auth.PkceGenerator
+import net.igng.core.auth.OAuthCallbackResult
 import net.igng.mcstatus.core.data.IgngAppContainer
 import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.core.designsystem.IgngBadge
@@ -133,42 +131,30 @@ fun IgngMcApp(
 
         fun startOAuth(forceLogin: Boolean) {
             authError = null
-            val pair = PkceGenerator.generate()
-            container.oauthPendingStore.save(pair)
-            val uri = container.authRepository.buildAuthorizeUri(pair, forceLogin = forceLogin)
-            CustomTabsLauncher.launchOAuth(context, uri, colors.isDark)
+            container.sessionManager.launchLogin(
+                context = context,
+                isDark = colors.isDark,
+                forceSwitchAccount = forceLogin,
+            )
         }
 
-        // Handle OAuth callbacks & App Shortcut intents
+        // Handle OAuth callbacks & App Shortcut intents via unified IgngSessionManager
         LaunchedEffect(incomingIntent) {
             val intent = incomingIntent ?: return@LaunchedEffect
             onIntentConsumed()
             val data = intent.data
-            if (data != null && data.scheme == AuthRepository.CALLBACK_SCHEME && data.host == AuthRepository.CALLBACK_HOST) {
-                val err = data.getQueryParameter("error")
-                val code = data.getQueryParameter("code")
-                val state = data.getQueryParameter("state")
-                if (!err.isNullOrBlank()) {
-                    container.oauthPendingStore.clear()
-                    authError = if (err == "access_denied") "你已取消本次授权" else "授权未完成（$err）"
-                    return@LaunchedEffect
-                }
-                if (code.isNullOrBlank() || state.isNullOrBlank()) {
-                    authError = "回调参数不完整，请重新登录"
-                    return@LaunchedEffect
-                }
-                val verifier = container.oauthPendingStore.consume(state)
-                if (verifier == null) {
-                    authError = "登录状态校验失败或已过期，请重新授权"
-                    return@LaunchedEffect
-                }
+            if (container.sessionManager.isMatchingCallback(data)) {
                 authExchanging = true
-                runCatching { container.authRepository.exchangeAuthorizationCode(code, verifier) }
-                    .onSuccess { account ->
-                        container.saveAndActivateAccount(account)
+                when (val result = container.handleOAuthCallback(data)) {
+                    is OAuthCallbackResult.Success -> {
                         sessionExpiredPrompt = false
+                        snackbarHostState.showSnackbar("欢迎回来，${result.account.displayName}")
                     }
-                    .onFailure { authError = it.message ?: "换取登录会话失败" }
+                    is OAuthCallbackResult.Error -> {
+                        authError = result.message
+                    }
+                    OAuthCallbackResult.Ignored -> Unit
+                }
                 authExchanging = false
                 return@LaunchedEffect
             }
@@ -604,12 +590,9 @@ fun IgngMcApp(
                             onStartOAuthLogin = { force -> startOAuth(forceLogin = force) },
                             onSwitchAccount = { uid -> container.switchAccount(uid) },
                             onLogoutActive = {
-                                val token = container.activeUsableToken()
                                 scope.launch {
-                                    if (!token.isNullOrBlank()) {
-                                        runCatching { container.authRepository.logout(token) }
-                                    }
-                                    container.removeActiveAccount()
+                                    container.logoutActive()
+                                    snackbarHostState.showSnackbar("已退出当前账户")
                                 }
                             },
                         )

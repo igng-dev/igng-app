@@ -1,0 +1,1 @@
+-keep class net.igng.core.auth.IgngFamilySsoProvider { *; }

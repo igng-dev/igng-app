@@ -321,14 +321,15 @@ fun ChatConversationScreen(
         loadMessages(older = false, silent = false, activeFilter = filter)
     }
 
-    // Silent foreground polling every 6s when viewing live latest stream
-    LaunchedEffect(source, targetId, filter) {
-        if (filter.isActive) return@LaunchedEffect
-        while (true) {
-            delay(6_000L)
-            if (!loading && !loadingOlder) {
-                loadMessages(older = false, silent = true, activeFilter = filter)
-            }
+    // Lifecycle-aware silent foreground polling every 6s when viewing live latest stream
+    net.igng.core.data.LaunchedForegroundPollingEffect(
+        intervalMs = 6_000L,
+        key1 = source,
+        key2 = targetId,
+        enabled = !filter.isActive,
+    ) {
+        if (!loading && !loadingOlder) {
+            loadMessages(older = false, silent = true, activeFilter = filter)
         }
     }
 

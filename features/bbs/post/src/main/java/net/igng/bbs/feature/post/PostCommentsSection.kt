@@ -110,19 +110,21 @@ fun PostCommentsSection(
 
     LaunchedEffect(postId, sortBy, activeAccount?.userId) { loadComments() }
 
-    // Subtle 15-second poll for new comments without interrupting scroll
-    LaunchedEffect(postId, latestCommentId) {
-        while (true) {
-            delay(15_000L)
-            val anchor = latestCommentId ?: continue
-            when (val res = container.postRepository.listComments(postId = postId, pageSize = 5, afterId = anchor)) {
-                is ApiResult.Success -> {
-                    if (res.data.data.isNotEmpty() || (res.data.latestCommentId != null && res.data.latestCommentId != anchor)) {
-                        hasNewComments = true
-                    }
+    // Lifecycle-aware 15-second foreground poll for new comments (pauses automatically in background)
+    net.igng.core.data.LaunchedForegroundPollingEffect(
+        intervalMs = 15_000L,
+        key1 = postId,
+        key2 = latestCommentId,
+        enabled = latestCommentId != null,
+    ) {
+        val anchor = latestCommentId ?: return@LaunchedForegroundPollingEffect
+        when (val res = container.postRepository.listComments(postId = postId, pageSize = 5, afterId = anchor)) {
+            is ApiResult.Success -> {
+                if (res.data.data.isNotEmpty() || (res.data.latestCommentId != null && res.data.latestCommentId != anchor)) {
+                    hasNewComments = true
                 }
-                is ApiResult.Failure -> Unit
             }
+            is ApiResult.Failure -> Unit
         }
     }
 

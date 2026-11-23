@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -116,9 +117,11 @@ object CustomTabsLauncher {
 class IgngOAuthClient(
     val config: OAuthClientConfig,
     val sessionStore: SecureSessionStore,
+    baseOkHttpClient: OkHttpClient? = null,
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val oauthHttp = OkHttpClient.Builder()
+    private val oauthHttp: OkHttpClient = (baseOkHttpClient?.newBuilder() ?: OkHttpClient.Builder())
+        .apply { interceptors().clear() }
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
@@ -273,7 +276,7 @@ class IgngOAuthClient(
                 .header("X-Client-Version", config.clientVersion)
                 .header("X-Device-Id", sessionStore.getOrCreateDeviceId())
                 .header("Accept", "application/json")
-                .header("Idempotency-Key", "logout_${System.currentTimeMillis()}")
+                .header("Idempotency-Key", UUID.randomUUID().toString().replace("-", ""))
                 .header("Authorization", "Bearer $token")
                 .post("{}".toRequestBody(jsonMediaType))
                 .build()

@@ -170,8 +170,10 @@ class SecureSessionStore(
             }.getOrNull()
             if (payload != null) {
                 _accounts.value = payload.accounts
-                _activeAccount.value = payload.accounts.firstOrNull { it.userId == payload.activeUserId }
+                val resolvedActive = payload.accounts.firstOrNull { it.userId == payload.activeUserId }
                     ?: payload.accounts.firstOrNull()
+                _activeAccount.value = resolvedActive
+                runCatching { IgngFamilyDirectoryStore.write(appContext, payload.accounts, resolvedActive?.userId) }
                 return
             }
             vaultPrefs.edit().remove(KEY_VAULT_BLOB).apply()
@@ -228,8 +230,10 @@ class SecureSessionStore(
         val encrypted = encryptString(encoded)
         vaultPrefs.edit().putString(KEY_VAULT_BLOB, encrypted).apply()
         _accounts.value = payload.accounts
-        _activeAccount.value = payload.accounts.firstOrNull { it.userId == payload.activeUserId }
+        val resolvedActive = payload.accounts.firstOrNull { it.userId == payload.activeUserId }
             ?: payload.accounts.firstOrNull()
+        _activeAccount.value = resolvedActive
+        runCatching { IgngFamilyDirectoryStore.write(appContext, payload.accounts, resolvedActive?.userId) }
     }
 
     private fun getOrCreateKey(): SecretKey {

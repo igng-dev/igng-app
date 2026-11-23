@@ -33,6 +33,7 @@ include(
     ":core:designsystem",
     ":core:network",
     ":core:auth",
+    ":core:data",
     ":core:markdown",
 )
 

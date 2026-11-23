@@ -1,68 +1,32 @@
 package net.igng.mcstatus.core.model
 
-import java.text.NumberFormat
-import java.time.Duration
 import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.intOrNull
+import net.igng.core.model.IgngCoreFormatters
 
 object IgngFormatters {
-    private val localZone: ZoneId get() = ZoneId.systemDefault()
-    private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.CHINA)
-    private val shortDateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.CHINA)
-    private val timeOnlyFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA)
-    private val numberFormat = NumberFormat.getIntegerInstance(Locale.US)
+    fun formatNumber(value: Long?): String = IgngCoreFormatters.formatNumber(value)
+    fun formatNumber(value: Int?): String = IgngCoreFormatters.formatNumber(value)
+    fun formatDecimal(value: Double?, digits: Int = 1, suffix: String = ""): String =
+        IgngCoreFormatters.formatDecimal(value, digits, suffix)
 
-    fun formatNumber(value: Long?): String =
-        if (value == null) "—" else numberFormat.format(value)
+    fun formatIsoDateTime(iso: String?, short: Boolean = false): String =
+        if (short) IgngCoreFormatters.shortDateTime(iso, emptyFallback = "—")
+        else IgngCoreFormatters.fullDateTime(iso, emptyFallback = "—")
 
-    fun formatNumber(value: Int?): String = formatNumber(value?.toLong())
-
-    fun formatDecimal(value: Double?, digits: Int = 1, suffix: String = ""): String {
-        if (value == null || !value.isFinite()) return "—"
-        return String.format(Locale.US, "%.${digits}f%s", value, suffix)
-    }
-
-    fun formatIsoDateTime(iso: String?, short: Boolean = false): String {
-        if (iso.isNullOrBlank()) return "—"
-        return runCatching {
-            val instant = Instant.parse(iso)
-            val formatter = if (short) shortDateTimeFormatter else dateTimeFormatter
-            formatter.withZone(localZone).format(instant)
-        }.getOrElse { iso.take(16).replace('T', ' ') }
-    }
-
-    fun formatEpochMillis(millis: Long?): String {
-        if (millis == null || millis <= 0L) return "—"
-        return runCatching {
-            dateTimeFormatter.withZone(localZone).format(Instant.ofEpochMilli(millis))
-        }.getOrDefault("—")
-    }
-
-    fun formatTimeOnly(iso: String?): String {
-        if (iso.isNullOrBlank()) return "—"
-        return runCatching {
-            timeOnlyFormatter.withZone(localZone).format(Instant.parse(iso))
-        }.getOrElse { iso }
-    }
+    fun formatEpochMillis(millis: Long?): String = IgngCoreFormatters.formatEpochMillis(millis)
+    fun formatTimeOnly(iso: String?): String = IgngCoreFormatters.formatTimeOnly(iso)
 
     fun formatRelativeTime(iso: String?, now: Instant = Instant.now()): String {
         if (iso.isNullOrBlank()) return "—"
-        val instant = runCatching { Instant.parse(iso) }.getOrNull() ?: return formatIsoDateTime(iso, short = true)
-        val seconds = Duration.between(instant, now).seconds
+        val instant = IgngCoreFormatters.parseInstant(iso) ?: return formatIsoDateTime(iso, short = true)
+        val seconds = java.time.Duration.between(instant, now).seconds
         return when {
             seconds < 45 -> "刚刚"
             seconds < 3600 -> "${seconds / 60} 分钟前"
             seconds < 86400 -> "${seconds / 3600} 小时前"
             seconds < 86400 * 7 -> "${seconds / 86400} 天前"
-            else -> shortDateTimeFormatter.withZone(localZone).format(instant)
+            else -> IgngCoreFormatters.shortDateTime(iso, emptyFallback = "—")
         }
     }
 
@@ -87,17 +51,7 @@ object IgngFormatters {
         }
     }
 
-    fun formatBytes(bytes: Long?): String {
-        if (bytes == null || bytes < 0L) return "—"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        var value = bytes.toDouble()
-        var index = 0
-        while (value >= 1024.0 && index < units.lastIndex) {
-            value /= 1024.0
-            index++
-        }
-        return if (index == 0) "${bytes} B" else String.format(Locale.US, "%.2f %s", value, units[index])
-    }
+    fun formatBytes(bytes: Long?): String = IgngCoreFormatters.formatBytesDetailed(bytes)
 
     fun formatCoordinate(x: Double?, y: Double?, z: Double?): String {
         if (x == null || z == null) return "—"

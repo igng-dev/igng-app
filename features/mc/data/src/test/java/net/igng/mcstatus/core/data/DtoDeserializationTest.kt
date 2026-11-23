@@ -4,6 +4,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import net.igng.core.auth.OAuthTokenResponse
+import net.igng.core.model.CoreDailyLoginDto
+import net.igng.core.network.IgngJson
 import net.igng.mcstatus.core.model.BootstrapResponse
 import net.igng.mcstatus.core.data.ApiClient
 import org.junit.Assert.assertEquals
@@ -19,12 +21,7 @@ import org.junit.Test
  */
 class DtoDeserializationTest {
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-        coerceInputValues = true
-        explicitNulls = false
-    }
+    private val json = IgngJson.instance
 
     private fun fixture(name: String): String =
         requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/v1/$name")) {
@@ -52,10 +49,11 @@ class DtoDeserializationTest {
         assertFalse(token.refreshToken.isNullOrBlank())
         assertEquals(1024L, token.user?.id)
 
-        val dailyObj = json.parseToJsonElement(fixture("daily_login.json")).jsonObject
-        assertEquals("true", dailyObj["awarded"]?.jsonPrimitive?.content)
-        assertEquals("1250", dailyObj["exp"]?.jsonPrimitive?.content)
-        assertEquals("13", dailyObj["level"]?.jsonPrimitive?.content)
+        val dailyDto = json.decodeFromString<CoreDailyLoginDto>(fixture("daily_login.json"))
+        assertTrue(dailyDto.awarded)
+        assertEquals(1250, dailyDto.exp)
+        assertEquals(13, dailyDto.level)
+        assertEquals(1.25, dailyDto.multiplier, 0.0001)
 
         val errObj = json.parseToJsonElement(fixture("error_envelope.json")).jsonObject
         val nested = errObj["error"]?.jsonObject
