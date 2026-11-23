@@ -64,15 +64,15 @@ fun IgngLineChart(
     maxY: Double? = null,
 ) {
     val colors = IgngTheme.colors
-    val reduced = IgngTheme.motionReduced
+    val intensity = IgngTheme.motionIntensity
     val haptic = rememberIgngHaptics()
     var selectedIndex by remember(points) { mutableStateOf<Int?>(null) }
 
-    val drawProgress = remember(points) { Animatable(if (reduced) 1f else 0f) }
-    LaunchedEffect(points, reduced) {
-        if (!reduced) {
+    val drawProgress = remember(points) { Animatable(if (intensity == net.igng.core.model.MotionIntensity.REDUCED) 1f else 0f) }
+    LaunchedEffect(points, intensity) {
+        if (intensity != net.igng.core.model.MotionIntensity.REDUCED) {
             drawProgress.snapTo(0f)
-            drawProgress.animateTo(1f, tween(380, easing = IgngMotion.Ease))
+            drawProgress.animateTo(1f, IgngMotion.easeTween(380, intensity))
         } else {
             drawProgress.snapTo(1f)
         }
@@ -332,7 +332,7 @@ data class IgngBarMetric(
 )
 
 /**
- * Clean horizontal distribution bar chart for Vanilla Stats & Traffic Top IPs.
+ * Clean horizontal distribution bar chart shared across IGNG apps.
  */
 @Composable
 fun IgngHorizontalBarList(
@@ -340,12 +340,12 @@ fun IgngHorizontalBarList(
     modifier: Modifier = Modifier,
 ) {
     val colors = IgngTheme.colors
-    val reduced = IgngTheme.motionReduced
-    val anim = remember(items) { Animatable(if (reduced) 1f else 0f) }
-    LaunchedEffect(items, reduced) {
-        if (!reduced) {
+    val intensity = IgngTheme.motionIntensity
+    val anim = remember(items) { Animatable(if (intensity == net.igng.core.model.MotionIntensity.REDUCED) 1f else 0f) }
+    LaunchedEffect(items, intensity) {
+        if (intensity != net.igng.core.model.MotionIntensity.REDUCED) {
             anim.snapTo(0f)
-            anim.animateTo(1f, tween(340, easing = IgngMotion.Ease))
+            anim.animateTo(1f, IgngMotion.easeTween(340, intensity))
         } else {
             anim.snapTo(1f)
         }

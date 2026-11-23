@@ -1,5 +1,9 @@
 package net.igng.core.designsystem
 
+import android.database.ContentObserver
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.ContentTransform
@@ -25,23 +29,33 @@ import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.igng.core.model.MotionIntensity
 
 /**
  * Unified IGNG Bento 2.0 motion grammar synced with `packages/theme/dashboard.css` & `loading.css`.
+ * Every animation respects all 3 tiers of [MotionIntensity]: FULL, CALM, and REDUCED.
  */
 object IgngMotion {
     val Ease = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
@@ -55,13 +69,120 @@ object IgngMotion {
     const val QuickMs = 150
     const val StandardMs = 240
     const val SpatialMs = 340
-    const val StaggerStepMs = 36
+    const val StaggerStepMs = 32
     const val MaxStaggerIndex = 5
 
     const val LOADING_DELAY_MS = 140L
     const val LOADING_FADE_IN_MS = 160
     const val LOADING_MIN_SHOW_MS = 240L
     const val LOADING_FADE_OUT_MS = 180
+
+    // --- 3-tier MotionIntensity primary API ---
+
+    fun <T> microTween(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(durationMillis = 120, easing = Ease)
+        MotionIntensity.FULL -> tween(durationMillis = DURATION_MICRO, easing = Ease)
+    }
+
+    fun <T> normalTween(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(durationMillis = 180, easing = Ease)
+        MotionIntensity.FULL -> tween(durationMillis = DURATION_NORMAL, easing = Ease)
+    }
+
+    fun <T> macroTween(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(durationMillis = 220, easing = Ease)
+        MotionIntensity.FULL -> tween(durationMillis = DURATION_MACRO, easing = Ease)
+    }
+
+    fun <T> ambientTween(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(durationMillis = 280, easing = Ease)
+        MotionIntensity.FULL -> tween(durationMillis = DURATION_AMBIENT, easing = Ease)
+    }
+
+    fun <T> quickSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(QuickMs, easing = Ease)
+        MotionIntensity.FULL -> spring(dampingRatio = 0.86f, stiffness = 620f)
+    }
+
+    fun <T> standardSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(StandardMs, easing = Ease)
+        MotionIntensity.FULL -> spring(dampingRatio = 0.88f, stiffness = 420f)
+    }
+
+    fun <T> spatialSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(SpatialMs, easing = Ease)
+        MotionIntensity.FULL -> spring(dampingRatio = 0.90f, stiffness = 360f)
+    }
+
+    /**
+     * Critically-damped monotonic spring for layout-coupled dock & capsule geometry:
+     * zero overshoot and symmetric 0->1 / 1->0 trajectories so pill total width never twitches.
+     */
+    fun <T> dockSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween(durationMillis = 210, easing = Ease)
+        MotionIntensity.FULL -> spring(dampingRatio = 1.0f, stiffness = 460f)
+    }
+
+    fun <T> easeTween(durationMs: Int = StandardMs, intensity: MotionIntensity = MotionIntensity.FULL): FiniteAnimationSpec<T> = when (intensity) {
+        MotionIntensity.REDUCED -> snap()
+        MotionIntensity.CALM -> tween((durationMs * 0.8f).toInt().coerceAtLeast(80), easing = Ease)
+        MotionIntensity.FULL -> tween(durationMs, easing = Ease)
+    }
+
+    // --- Navigation transitions (top-level tab switch vs detail push/pop) ---
+
+    fun tabEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
+        MotionIntensity.REDUCED -> fadeIn(snap())
+        MotionIntensity.CALM -> fadeIn(tween(160, easing = Ease))
+        MotionIntensity.FULL -> fadeIn(tween(200, easing = Ease)) + scaleIn(tween(220, easing = Ease), initialScale = 0.99f)
+    }
+
+    fun tabExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
+        MotionIntensity.REDUCED -> fadeOut(snap())
+        MotionIntensity.CALM -> fadeOut(tween(120, easing = Ease))
+        MotionIntensity.FULL -> fadeOut(tween(140, easing = Ease))
+    }
+
+    fun tabTransition(intensity: MotionIntensity): ContentTransform =
+        tabEnter(intensity) togetherWith tabExit(intensity)
+
+    fun pushEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
+        MotionIntensity.REDUCED -> fadeIn(snap())
+        MotionIntensity.CALM -> fadeIn(tween(200, easing = Ease))
+        MotionIntensity.FULL -> slideInHorizontally(tween(280, easing = Ease)) { (it * 0.12f).toInt() } +
+            fadeIn(tween(220, easing = Ease))
+    }
+
+    fun pushExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
+        MotionIntensity.REDUCED -> fadeOut(snap())
+        MotionIntensity.CALM -> fadeOut(tween(160, easing = Ease))
+        MotionIntensity.FULL -> slideOutHorizontally(tween(240, easing = Ease)) { -(it * 0.04f).toInt() } +
+            fadeOut(tween(170, easing = Ease))
+    }
+
+    fun popEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
+        MotionIntensity.REDUCED -> fadeIn(snap())
+        MotionIntensity.CALM -> fadeIn(tween(180, easing = Ease))
+        MotionIntensity.FULL -> slideInHorizontally(tween(240, easing = Ease)) { -(it * 0.04f).toInt() } +
+            fadeIn(tween(190, easing = Ease))
+    }
+
+    fun popExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
+        MotionIntensity.REDUCED -> fadeOut(snap())
+        MotionIntensity.CALM -> fadeOut(tween(160, easing = Ease))
+        MotionIntensity.FULL -> slideOutHorizontally(tween(260, easing = Ease)) { (it * 0.12f).toInt() } +
+            fadeOut(tween(180, easing = Ease))
+    }
+
+    // --- Legacy boolean overloads retained for compatibility ---
 
     fun <T> microTween(reduced: Boolean = false): TweenSpec<T> =
         tween(durationMillis = if (reduced) 0 else DURATION_MICRO, easing = Ease)
@@ -83,76 +204,40 @@ object IgngMotion {
     fun <T> quickSpring(reduced: Boolean = false): SpringSpec<T> =
         if (reduced) spring(dampingRatio = 1f, stiffness = 10_000f)
         else spring(dampingRatio = 0.84f, stiffness = 620f)
-
-    fun <T> quickSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
-        MotionIntensity.REDUCED -> snap()
-        MotionIntensity.CALM -> tween(QuickMs, easing = Ease)
-        MotionIntensity.FULL -> spring(dampingRatio = 0.86f, stiffness = 620f)
-    }
-
-    fun <T> standardSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
-        MotionIntensity.REDUCED -> snap()
-        MotionIntensity.CALM -> tween(StandardMs, easing = Ease)
-        MotionIntensity.FULL -> spring(dampingRatio = 0.88f, stiffness = 420f)
-    }
-
-    fun <T> spatialSpring(intensity: MotionIntensity): FiniteAnimationSpec<T> = when (intensity) {
-        MotionIntensity.REDUCED -> snap()
-        MotionIntensity.CALM -> tween(SpatialMs, easing = Ease)
-        MotionIntensity.FULL -> spring(dampingRatio = 0.90f, stiffness = 360f)
-    }
-
-    fun <T> easeTween(durationMs: Int = StandardMs, intensity: MotionIntensity = MotionIntensity.FULL): FiniteAnimationSpec<T> =
-        if (intensity == MotionIntensity.REDUCED) snap() else tween(durationMs, easing = Ease)
-
-    fun tabTransition(intensity: MotionIntensity): ContentTransform = when (intensity) {
-        MotionIntensity.REDUCED -> fadeIn(snap()) togetherWith fadeOut(snap())
-        MotionIntensity.CALM -> fadeIn(tween(180, easing = Ease)) togetherWith fadeOut(tween(140, easing = Ease))
-        MotionIntensity.FULL -> (fadeIn(tween(220, easing = Ease)) + scaleIn(tween(240, easing = Ease), initialScale = 0.988f))
-            .togetherWith(fadeOut(tween(150, easing = Ease)))
-    }
-
-    fun pushEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
-        MotionIntensity.REDUCED -> fadeIn(snap())
-        MotionIntensity.CALM -> fadeIn(tween(200, easing = Ease))
-        MotionIntensity.FULL -> slideInHorizontally(tween(300, easing = Ease)) { (it * 0.14f).toInt() } +
-            fadeIn(tween(240, easing = Ease))
-    }
-
-    fun pushExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
-        MotionIntensity.REDUCED -> fadeOut(snap())
-        MotionIntensity.CALM -> fadeOut(tween(160, easing = Ease))
-        MotionIntensity.FULL -> slideOutHorizontally(tween(260, easing = Ease)) { -(it * 0.05f).toInt() } +
-            fadeOut(tween(180, easing = Ease))
-    }
-
-    fun popEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
-        MotionIntensity.REDUCED -> fadeIn(snap())
-        MotionIntensity.CALM -> fadeIn(tween(180, easing = Ease))
-        MotionIntensity.FULL -> slideInHorizontally(tween(260, easing = Ease)) { -(it * 0.05f).toInt() } +
-            fadeIn(tween(200, easing = Ease))
-    }
-
-    fun popExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
-        MotionIntensity.REDUCED -> fadeOut(snap())
-        MotionIntensity.CALM -> fadeOut(tween(160, easing = Ease))
-        MotionIntensity.FULL -> slideOutHorizontally(tween(280, easing = Ease)) { (it * 0.14f).toInt() } +
-            fadeOut(tween(200, easing = Ease))
-    }
 }
 
 @Composable
 fun rememberSystemReducedMotion(): Boolean {
     val context = LocalContext.current
-    return remember(context) {
+    fun readScaleZero(): Boolean = runCatching {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
+    }.getOrDefault(false)
+
+    var reduced by remember(context) { mutableStateOf(readScaleZero()) }
+
+    DisposableEffect(context) {
+        val resolver = context.contentResolver
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                reduced = readScaleZero()
+            }
+        }
         runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1f,
-            ) == 0f
-        }.getOrDefault(false)
+            resolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE),
+                false,
+                observer,
+            )
+        }
+        onDispose {
+            runCatching { resolver.unregisterContentObserver(observer) }
+        }
     }
+    return reduced
 }
 
 enum class IgngHapticKind {
@@ -162,6 +247,10 @@ enum class IgngHapticKind {
     Warning,
 }
 
+/**
+ * Single unified haptic engine shared by all IGNG apps.
+ * Includes graceful API 26–29 fallbacks for CONFIRM / REJECT (introduced in API 30).
+ */
 @Composable
 fun rememberIgngHaptics(): (IgngHapticKind) -> Unit {
     val view = LocalView.current
@@ -172,8 +261,16 @@ fun rememberIgngHaptics(): (IgngHapticKind) -> Unit {
                 val constant = when (kind) {
                     IgngHapticKind.Tap -> HapticFeedbackConstants.KEYBOARD_TAP
                     IgngHapticKind.Tick -> HapticFeedbackConstants.CLOCK_TICK
-                    IgngHapticKind.Confirm -> HapticFeedbackConstants.CONFIRM
-                    IgngHapticKind.Warning -> HapticFeedbackConstants.REJECT
+                    IgngHapticKind.Confirm -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        HapticFeedbackConstants.CONFIRM
+                    } else {
+                        HapticFeedbackConstants.CONTEXT_CLICK
+                    }
+                    IgngHapticKind.Warning -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        HapticFeedbackConstants.REJECT
+                    } else {
+                        HapticFeedbackConstants.LONG_PRESS
+                    }
                 }
                 view.performHapticFeedback(constant)
             }
@@ -185,11 +282,16 @@ fun Modifier.igngPressScale(
     interactionSource: InteractionSource,
     pressedScale: Float = 0.982f,
 ): Modifier = composed {
-    val reduced = IgngTheme.motionReduced
+    val intensity = IgngTheme.motionIntensity
     val pressed by interactionSource.collectIsPressedAsState()
+    val effectiveScale = when {
+        !pressed || intensity == MotionIntensity.REDUCED -> 1f
+        intensity == MotionIntensity.CALM -> 1f - (1f - pressedScale) * 0.55f
+        else -> pressedScale
+    }
     val scale by animateFloatAsState(
-        targetValue = if (pressed && !reduced) pressedScale else 1f,
-        animationSpec = IgngMotion.quickSpring(reduced),
+        targetValue = effectiveScale,
+        animationSpec = IgngMotion.quickSpring(intensity),
         label = "igngPressScale",
     )
     graphicsLayer {
@@ -202,16 +304,21 @@ fun Modifier.igngPressScale(
     enabled: Boolean = true,
     scaleDown: Float = 0.982f,
     haptic: Boolean = false,
+    hapticKind: IgngHapticKind = IgngHapticKind.Tap,
     role: Role? = null,
     onClick: () -> Unit,
 ): Modifier = composed {
     val intensity = IgngTheme.motionIntensity
-    val hapticsAllowed = IgngTheme.hapticsEnabled
-    val hapticFeedback = LocalHapticFeedback.current
+    val fireHaptic = rememberIgngHaptics()
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val effectiveScale = when {
+        !pressed || intensity == MotionIntensity.REDUCED -> 1f
+        intensity == MotionIntensity.CALM -> 1f - (1f - scaleDown) * 0.55f
+        else -> scaleDown
+    }
     val scale by animateFloatAsState(
-        targetValue = if (pressed && intensity != MotionIntensity.REDUCED) scaleDown else 1f,
+        targetValue = effectiveScale,
         animationSpec = IgngMotion.quickSpring(intensity),
         label = "igngPressScaleClick",
     )
@@ -226,46 +333,100 @@ fun Modifier.igngPressScale(
             enabled = enabled,
             role = role,
         ) {
-            if (haptic && hapticsAllowed) {
-                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            }
+            if (haptic) fireHaptic(hapticKind)
             onClick()
         }
+}
+
+/**
+ * Unified first-screen staggered list entrance modifier.
+ * Only animates indices 0..[IgngMotion.MaxStaggerIndex] once per [key], preventing scrolled-in
+ * items from waiting invisible or replaying on LazyColumn recycling.
+ */
+fun Modifier.igngStaggeredEnter(
+    index: Int,
+    key: Any? = Unit,
+): Modifier = composed {
+    val intensity = IgngTheme.motionIntensity
+    if (intensity == MotionIntensity.REDUCED || index > IgngMotion.MaxStaggerIndex) {
+        return@composed this
+    }
+    var played by rememberSaveable(key, index) { mutableStateOf(false) }
+    if (played) return@composed this
+
+    val startOffset = if (intensity == MotionIntensity.FULL) 16f else 8f
+    val alpha = remember(key, index) { Animatable(0f) }
+    val offsetY = remember(key, index) { Animatable(startOffset) }
+    LaunchedEffect(key, index, intensity) {
+        if (index > 0) delay(index * IgngMotion.StaggerStepMs.toLong())
+        val durAlpha = if (intensity == MotionIntensity.FULL) 220 else 160
+        val durMove = if (intensity == MotionIntensity.FULL) 260 else 180
+        launch { alpha.animateTo(1f, tween(durAlpha, easing = IgngMotion.Ease)) }
+        launch { offsetY.animateTo(0f, tween(durMove, easing = IgngMotion.Ease)) }.join()
+        played = true
+    }
+    graphicsLayer {
+        this.alpha = alpha.value
+        translationY = offsetY.value
+    }
 }
 
 fun Modifier.igngStaggeredReveal(
     index: Int,
     key: Any? = Unit,
-): Modifier = composed {
-    val reduced = IgngTheme.motionReduced
-    if (reduced || index > 5) return@composed this
-    val progress = remember(key) { Animatable(0f) }
-    LaunchedEffect(key) {
-        delay(index * 28L)
-        progress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = IgngMotion.DURATION_MACRO, easing = IgngMotion.Ease),
-        )
+): Modifier = igngStaggeredEnter(index = index, key = key)
+
+fun Modifier.igngBentoEnter(index: Int = 0): Modifier = igngStaggeredEnter(index = index)
+
+/**
+ * Hysteresis-gated NestedScroll visibility controller for floating reader/action bars.
+ * Eliminates index-based jitter caused by micro-rebounds, overscroll, or async image height reflow.
+ */
+@Stable
+class IgngScrollBarVisibilityState(
+    private val hideThresholdPx: Float,
+    private val showThresholdPx: Float,
+) {
+    var visible by mutableStateOf(true)
+        private set
+
+    private var accumulatedDeltaPx = 0f
+
+    fun forceShow() {
+        accumulatedDeltaPx = 0f
+        visible = true
     }
-    graphicsLayer {
-        alpha = progress.value
-        translationY = (1f - progress.value) * 20f
+
+    val nestedScrollConnection = object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            val dy = available.y
+            if (dy == 0f) return Offset.Zero
+            // Reset accumulator on direction reversal so tiny jitters never cross thresholds
+            if ((dy < 0f && accumulatedDeltaPx > 0f) || (dy > 0f && accumulatedDeltaPx < 0f)) {
+                accumulatedDeltaPx = 0f
+            }
+            accumulatedDeltaPx += dy
+            if (accumulatedDeltaPx <= -hideThresholdPx && visible) {
+                visible = false
+                accumulatedDeltaPx = 0f
+            } else if (accumulatedDeltaPx >= showThresholdPx && !visible) {
+                visible = true
+                accumulatedDeltaPx = 0f
+            }
+            return Offset.Zero
+        }
     }
 }
 
-fun Modifier.igngBentoEnter(index: Int = 0): Modifier = composed {
-    val intensity = IgngTheme.motionIntensity
-    if (intensity == MotionIntensity.REDUCED) return@composed this
-    val clamped = index.coerceIn(0, IgngMotion.MaxStaggerIndex)
-    val alpha = remember { Animatable(0f) }
-    val offsetY = remember { Animatable(if (intensity == MotionIntensity.FULL) 18f else 8f) }
-    LaunchedEffect(clamped, intensity) {
-        if (clamped > 0) delay((clamped * IgngMotion.StaggerStepMs).toLong())
-        launch { alpha.animateTo(1f, tween(220, easing = IgngMotion.Ease)) }
-        launch { offsetY.animateTo(0f, tween(280, easing = IgngMotion.Ease)) }
-    }
-    graphicsLayer {
-        this.alpha = alpha.value
-        translationY = offsetY.value
+@Composable
+fun rememberIgngScrollBarVisibility(
+    hideThreshold: Dp = 32.dp,
+    showThreshold: Dp = 20.dp,
+): IgngScrollBarVisibilityState {
+    val density = LocalDensity.current
+    val hidePx = with(density) { hideThreshold.toPx() }
+    val showPx = with(density) { showThreshold.toPx() }
+    return remember(hidePx, showPx) {
+        IgngScrollBarVisibilityState(hideThresholdPx = hidePx, showThresholdPx = showPx)
     }
 }

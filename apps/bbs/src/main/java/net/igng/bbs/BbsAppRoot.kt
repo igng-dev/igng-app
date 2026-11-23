@@ -33,6 +33,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -55,11 +56,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import net.igng.bbs.core.data.BbsAppContainer
-import net.igng.bbs.common.BbsFloatingNavBar
-import net.igng.bbs.common.BbsNavTabItem
+import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.designsystem.IgngDockHost
 import net.igng.core.designsystem.IgngMotion
+import net.igng.core.designsystem.IgngNavTabItem
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngTheme
+import net.igng.core.designsystem.LocalIgngDockBottomPadding
+import net.igng.core.designsystem.rememberIgngDockBottomPadding
 import net.igng.bbs.core.model.AppPreferences
 import net.igng.bbs.core.model.DailyLoginDto
 import net.igng.bbs.feature.admin.AdminConsoleScreen
@@ -171,38 +176,50 @@ fun BbsAppRoot(
             if (internal != null) {
                 navController.navigate(internal)
             } else if (uri != null && (uri.scheme == "https" || uri.scheme == "http")) {
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
+                IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark)
             }
         }
 
         val currentBackStack by navController.currentBackStackEntryAsState()
         val currentRoute = currentBackStack?.destination?.route ?: AppRoutes.FEED
         val showBottomBar = currentRoute in AppRoutes.TOP_LEVEL_ROUTES
+        val dockBottomPadding = rememberIgngDockBottomPadding(dockVisible = showBottomBar)
 
         val creatorTodos = 0
         val tabs = remember(creatorTodos) {
             listOf(
-                BbsNavTabItem(AppRoutes.FEED, "首页", Icons.Rounded.Home),
-                BbsNavTabItem(AppRoutes.COLUMNS, "专栏", Icons.Rounded.FolderShared),
-                BbsNavTabItem(AppRoutes.CREATOR, "创作", Icons.Rounded.Create, badgeCount = creatorTodos),
-                BbsNavTabItem(AppRoutes.PROFILE, "我的", Icons.Rounded.Person),
+                IgngNavTabItem(AppRoutes.FEED, "首页", Icons.Rounded.Home),
+                IgngNavTabItem(AppRoutes.COLUMNS, "专栏", Icons.Rounded.FolderShared),
+                IgngNavTabItem(AppRoutes.CREATOR, "创作", Icons.Rounded.Create, badgeCount = creatorTodos),
+                IgngNavTabItem(AppRoutes.PROFILE, "我的", Icons.Rounded.Person),
             )
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(colors.canvas),
-        ) {
+        CompositionLocalProvider(LocalIgngDockBottomPadding provides dockBottomPadding) {
+        IgngAmbientCanvas(modifier = Modifier.fillMaxSize()) {
             NavHost(
                 navController = navController,
                 startDestination = AppRoutes.FEED,
-                enterTransition = { IgngMotion.pushEnter(intensity) },
-                exitTransition = { IgngMotion.pushExit(intensity) },
-                popEnterTransition = { IgngMotion.popEnter(intensity) },
-                popExitTransition = { IgngMotion.popExit(intensity) },
+                enterTransition = {
+                    val fromTop = initialState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    val toTop = targetState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    if (fromTop && toTop) IgngMotion.tabEnter(intensity) else IgngMotion.pushEnter(intensity)
+                },
+                exitTransition = {
+                    val fromTop = initialState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    val toTop = targetState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    if (fromTop && toTop) IgngMotion.tabExit(intensity) else IgngMotion.pushExit(intensity)
+                },
+                popEnterTransition = {
+                    val fromTop = initialState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    val toTop = targetState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    if (fromTop && toTop) IgngMotion.tabEnter(intensity) else IgngMotion.popEnter(intensity)
+                },
+                popExitTransition = {
+                    val fromTop = initialState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    val toTop = targetState.destination.route in AppRoutes.TOP_LEVEL_ROUTES
+                    if (fromTop && toTop) IgngMotion.tabExit(intensity) else IgngMotion.popExit(intensity)
+                },
             ) {
                 composable(AppRoutes.FEED) {
                     FeedHomeScreen(
@@ -214,6 +231,7 @@ fun BbsAppRoot(
                         onOpenSearch = { navController.navigate(AppRoutes.SEARCH) },
                         onOpenInbox = { navController.navigate(AppRoutes.INBOX) },
                         onOpenRules = { navController.navigate(AppRoutes.RULES) },
+                        bottomInsetPadding = dockBottomPadding,
                     )
                 }
 
@@ -222,6 +240,7 @@ fun BbsAppRoot(
                         container = container,
                         onOpenColumn = { navController.navigate(AppRoutes.column(it)) },
                         onOpenCreatorColumns = { navController.navigate(AppRoutes.CREATOR_COLUMNS) },
+                        bottomInsetPadding = dockBottomPadding,
                     )
                 }
 
@@ -236,14 +255,15 @@ fun BbsAppRoot(
                         onOpenComments = { navController.navigate(AppRoutes.CREATOR_COMMENTS) },
                         onOpenReviews = { navController.navigate(AppRoutes.CREATOR_REVIEWS) },
                         onOpenMedia = { navController.navigate(AppRoutes.CREATOR_MEDIA) },
-                        onRequireLogin = { container.oauthManager.launchLogin(context) },
+                        onRequireLogin = { container.oauthManager.launchLogin(context, isDark = colors.isDark) },
+                        bottomInsetPadding = dockBottomPadding,
                     )
                 }
 
                 composable(AppRoutes.PROFILE) {
                     ProfileCenterScreen(
                         container = container,
-                        onLogin = { container.oauthManager.launchLogin(context) },
+                        onLogin = { container.oauthManager.launchLogin(context, isDark = colors.isDark) },
                         onOpenMyProfile = { navController.navigate(AppRoutes.user(it)) },
                         onOpenFavorites = { navController.navigate(AppRoutes.FAVORITES) },
                         onOpenFollowing = { navController.navigate(AppRoutes.FOLLOWING) },
@@ -260,6 +280,7 @@ fun BbsAppRoot(
                         onOpenPrivacyPreferences = { navController.navigate(AppRoutes.PRIVACY_PREFERENCES) },
                         onOpenAppSettings = { navController.navigate(AppRoutes.APP_SETTINGS) },
                         onOpenRules = { navController.navigate(AppRoutes.RULES) },
+                        bottomInsetPadding = dockBottomPadding,
                     )
                 }
 
@@ -475,23 +496,22 @@ fun BbsAppRoot(
                 }
             }
 
-            // Floating 4-tab Bento Pill Bar
-            if (showBottomBar) {
-                BbsFloatingNavBar(
-                    tabs = tabs,
-                    selectedRoute = currentRoute,
-                    onSelect = { target ->
-                        if (target != currentRoute) {
-                            navController.navigate(target) {
-                                popUpTo(AppRoutes.FEED) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
+            // Unified Floating Compact Expanding-Pill Dock
+            IgngDockHost(
+                visible = showBottomBar,
+                items = tabs,
+                selectedId = currentRoute.takeIf { showBottomBar },
+                onSelect = { target ->
+                    if (target != currentRoute) {
+                        navController.navigate(target) {
+                            popUpTo(AppRoutes.FEED) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                    },
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
-            }
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
 
             // Animated Daily EXP Reward Pill
             AnimatedVisibility(
@@ -526,8 +546,9 @@ fun BbsAppRoot(
                 hostState = snackbarHostState,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (showBottomBar) 88.dp else 16.dp),
+                    .padding(bottom = dockBottomPadding.calculateBottomPadding() + 8.dp),
             )
+        }
         }
 
         // Global 401 Session Expired Dialog

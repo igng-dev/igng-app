@@ -153,7 +153,14 @@ fun PostCommentsSection(
             }
         }
 
-        AnimatedVisibility(visible = hasNewComments) {
+        val cmtIntensity = IgngTheme.motionIntensity
+        AnimatedVisibility(
+            visible = hasNewComments,
+            enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(cmtIntensity)) +
+                androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(cmtIntensity)),
+            exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(cmtIntensity)) +
+                androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(cmtIntensity)),
+        ) {
             IgngInfoBanner(
                 title = "有新评论发表",
                 message = "点击刷新即可查看最新讨论，不会打断当前阅读位置。",
@@ -259,7 +266,14 @@ fun PostCommentsSection(
                     )
                 }
 
-                AnimatedVisibility(visible = showMentionPicker) {
+                val mentionIntensity = IgngTheme.motionIntensity
+                AnimatedVisibility(
+                    visible = showMentionPicker,
+                    enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(mentionIntensity)) +
+                        androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(mentionIntensity)),
+                    exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(mentionIntensity)) +
+                        androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(mentionIntensity)),
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()

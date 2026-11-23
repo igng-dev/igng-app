@@ -255,7 +255,7 @@ fun ChatMessageGroupBlock(
 
             val focusBg by animateColorAsState(
                 targetValue = if (isFocused) colors.accentSoft else Color.Transparent,
-                animationSpec = IgngMotion.normalTween(IgngTheme.motionReduced),
+                animationSpec = IgngMotion.normalTween(IgngTheme.motionIntensity),
                 label = "msgFocusBg",
             )
 

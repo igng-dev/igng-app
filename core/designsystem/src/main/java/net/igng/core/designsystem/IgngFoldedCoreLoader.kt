@@ -255,7 +255,7 @@ fun IgngLoadingBlock(
             },
         contentAlignment = Alignment.Center,
     ) {
-        IgngFoldedCoreGlyph(size = if (compact) FoldedCoreSize.Md else FoldedCoreSize.Md)
+        IgngFoldedCoreGlyph(size = if (compact) FoldedCoreSize.Sm else FoldedCoreSize.Md)
     }
 }
 
@@ -319,11 +319,12 @@ fun IgngPullToRefreshBox(
         state = state,
         modifier = modifier,
         indicator = {
+            val intensity = IgngTheme.motionIntensity
             val fraction = state.distanceFraction.coerceIn(0f, 1.3f)
             val show = isRefreshing || fraction > 0.04f
             val alpha by animateFloatAsState(
                 targetValue = if (show) 1f else 0f,
-                animationSpec = IgngMotion.microTween(IgngTheme.motionReduced),
+                animationSpec = IgngMotion.microTween(intensity),
                 label = "ptrAlpha",
             )
             if (alpha > 0.01f) {
@@ -333,7 +334,7 @@ fun IgngPullToRefreshBox(
                         .padding(top = 12.dp)
                         .graphicsLayer {
                             this.alpha = alpha
-                            translationY = if (isRefreshing) 12f else (fraction * 42f).coerceAtMost(56f)
+                            translationY = if (isRefreshing) 4.dp.toPx() else (fraction * 14.dp.toPx()).coerceAtMost(20.dp.toPx())
                         },
                     contentAlignment = Alignment.Center,
                 ) {

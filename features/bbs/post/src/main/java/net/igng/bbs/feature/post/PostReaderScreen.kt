@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -24,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Edit
@@ -77,7 +81,9 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.ProvideIgngReaderSurface
 import net.igng.core.designsystem.readerSurfaceColors
+import net.igng.core.designsystem.rememberIgngScrollBarVisibility
 import net.igng.core.markdown.BbsMarkdownBlockView
 import net.igng.core.markdown.MarkdownParser
 import net.igng.bbs.core.model.AppPreferences
@@ -178,17 +184,17 @@ fun PostReaderScreen(
         }
     }
 
-    var lastIndex by remember { mutableIntStateOf(0) }
-    var barVisible by remember { mutableStateOf(true) }
+    val barVisibility = rememberIgngScrollBarVisibility(hideThreshold = 32.dp, showThreshold = 20.dp)
     LaunchedEffect(listState.firstVisibleItemIndex) {
-        val cur = listState.firstVisibleItemIndex
-        barVisible = cur <= lastIndex || cur <= 1
-        lastIndex = cur
+        if (listState.firstVisibleItemIndex <= 1) {
+            barVisibility.forceShow()
+        }
     }
 
-    // Save local reading history periodically
+    // Save local reading history with debounce to prevent frame drops during active scrolling
     LaunchedEffect(detail?.id, listState.firstVisibleItemIndex) {
         val d = detail ?: return@LaunchedEffect
+        delay(500L)
         container.settingsRepository.recordReadingProgress(
             LocalReadingHistoryEntry(
                 postId = d.id,
@@ -202,10 +208,14 @@ fun PostReaderScreen(
         )
     }
 
+    val navBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    ProvideIgngReaderSurface(tone = prefs.reader.canvasTone) {
+    val surfaceColors = IgngTheme.colors
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(readerBg)
+            .background(surfaceColors.canvas)
             .statusBarsPadding(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -284,8 +294,15 @@ fun PostReaderScreen(
                     } else {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 104.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .nestedScroll(barVisibility.nestedScrollConnection),
+                            contentPadding = PaddingValues(
+                                start = 18.dp,
+                                end = 18.dp,
+                                top = 12.dp,
+                                bottom = navBottomPadding + 96.dp,
+                            ),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             // Item 0: Title, Author, Collaborators, Meta
@@ -479,7 +496,7 @@ fun PostReaderScreen(
         // Auto-hiding Floating Article Action Bar
         if (detail != null && (!detail!!.restrictedWarning || acknowledgedRestriction)) {
             BbsFloatingArticleBar(
-                visible = barVisible,
+                visible = barVisibility.visible,
                 liked = liked,
                 likeCount = likeCount,
                 favorited = favorited,
@@ -525,6 +542,7 @@ fun PostReaderScreen(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+    }
     }
 
     // Image Lightbox

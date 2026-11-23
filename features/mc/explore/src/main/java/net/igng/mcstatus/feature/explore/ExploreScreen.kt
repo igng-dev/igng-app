@@ -279,14 +279,15 @@ fun ExploreScreen(
                                         val isSelected = family.slug == selectedFamily.slug
                                         val key = ServerThemeKey.resolve(family.themeKey)
                                         val visual = serverFamilyVisual(key, colors.isDark)
+                                        val intensity = IgngTheme.motionIntensity
                                         val pillBg by animateColorAsState(
                                             targetValue = if (isSelected) visual.softTint else colors.tile,
-                                            animationSpec = IgngMotion.microTween(IgngTheme.motionReduced),
+                                            animationSpec = IgngMotion.microTween(intensity),
                                             label = "famPillBg",
                                         )
                                         val pillBorder by animateColorAsState(
                                             targetValue = if (isSelected) visual.accent else colors.line,
-                                            animationSpec = IgngMotion.microTween(IgngTheme.motionReduced),
+                                            animationSpec = IgngMotion.microTween(intensity),
                                             label = "famPillBorder",
                                         )
                                         Row(
@@ -471,11 +472,12 @@ private fun ServerFamilyHeroCard(
     ) {
         IgngServerBackdropCanvas(themeKey = themeKey, modifier = Modifier.matchParentSize())
 
+        val heroIntensity = IgngTheme.motionIntensity
         AnimatedContent(
             targetState = "${family.slug}:${season?.slug}",
             transitionSpec = {
-                fadeIn(IgngMotion.normalTween(motionReduced)) togetherWith
-                    fadeOut(IgngMotion.microTween(motionReduced))
+                fadeIn(IgngMotion.normalTween(heroIntensity)) togetherWith
+                    fadeOut(IgngMotion.microTween(heroIntensity))
             },
             label = "heroSwap",
         ) { _ ->
@@ -563,7 +565,15 @@ private fun ServerFamilyHeroCard(
                                 Text(
                                     text = s.label.ifBlank { s.slug },
                                     style = IgngTheme.type.badge,
-                                    color = if (picked) Color.White else colors.textSecondary,
+                                    color = if (picked) {
+                                        if (androidx.compose.ui.graphics.Color(visual.accent.value).run { (red * 0.299f + green * 0.587f + blue * 0.114f) > 0.62f }) {
+                                            Color(0xFF0D1117)
+                                        } else {
+                                            Color.White
+                                        }
+                                    } else {
+                                        colors.textSecondary
+                                    },
                                 )
                             }
                         }

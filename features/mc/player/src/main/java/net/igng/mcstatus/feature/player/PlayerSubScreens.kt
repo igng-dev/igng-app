@@ -1530,7 +1530,14 @@ fun PermissionsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                                             Text(grp.displayName ?: grp.name, style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
                                             IgngBadge("${grp.permissions.size} 节点")
                                         }
-                                        AnimatedVisibility(visible = expanded) {
+                                        val permIntensity = IgngTheme.motionIntensity
+                                        AnimatedVisibility(
+                                            visible = expanded,
+                                            enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(permIntensity)) +
+                                                androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(permIntensity)),
+                                            exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(permIntensity)) +
+                                                androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(permIntensity)),
+                                        ) {
                                             Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                                 grp.permissions.take(30).forEach { node ->
                                                     Text(

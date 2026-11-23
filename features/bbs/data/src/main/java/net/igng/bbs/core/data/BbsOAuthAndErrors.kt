@@ -91,8 +91,8 @@ class BbsOAuthManager(
         },
     )
 
-    fun launchLogin(context: Context, forceSwitchAccount: Boolean = false) {
-        oauthClient.launchLogin(context = context, isDark = false, forceSwitchAccount = forceSwitchAccount)
+    fun launchLogin(context: Context, isDark: Boolean = false, forceSwitchAccount: Boolean = false) {
+        oauthClient.launchLogin(context = context, isDark = isDark, forceSwitchAccount = forceSwitchAccount)
     }
 
     suspend fun handleCallbackUri(uri: Uri?): OAuthCallbackResult {

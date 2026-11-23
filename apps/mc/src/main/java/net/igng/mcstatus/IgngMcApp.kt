@@ -23,8 +23,11 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -54,11 +58,13 @@ import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngDetailSheet
-import net.igng.core.designsystem.IgngFloatingNavBar
+import net.igng.core.designsystem.IgngDockHost
 import net.igng.core.designsystem.IgngLoadingVeil
 import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngNavTabItem
 import net.igng.core.designsystem.IgngTheme
+import net.igng.core.designsystem.LocalIgngDockBottomPadding
+import net.igng.core.designsystem.rememberIgngDockBottomPadding
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.core.model.SessionAuthStatus
 import net.igng.mcstatus.feature.admin.AdminPocketConsoleScreen
@@ -116,7 +122,8 @@ fun IgngMcApp(
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val colors = IgngTheme.colors
-        val reduced = IgngTheme.motionReduced
+        val intensity = IgngTheme.motionIntensity
+        val snackbarHostState = remember { SnackbarHostState() }
 
         var authExchanging by remember { mutableStateOf(false) }
         var authError by remember { mutableStateOf<String?>(null) }
@@ -225,6 +232,12 @@ fun IgngMcApp(
             }
         }
 
+        fun NavDestination?.isTopLevelTab(): Boolean =
+            this?.hasRoute<AppRoute.Explore>() == true ||
+                this?.hasRoute<AppRoute.Chat>() == true ||
+                this?.hasRoute<AppRoute.Wiki>() == true ||
+                this?.hasRoute<AppRoute.PlayerCenter>() == true
+
         val backStackEntry by navController.currentBackStackEntryAsState()
         val dest = backStackEntry?.destination
         val activeTabId = when {
@@ -244,8 +257,9 @@ fun IgngMcApp(
             )
         }
 
-        val bottomBarPadding = PaddingValues(bottom = if (activeTabId != null) 88.dp else 0.dp)
+        val bottomBarPadding = rememberIgngDockBottomPadding(dockVisible = activeTabId != null)
 
+        CompositionLocalProvider(LocalIgngDockBottomPadding provides bottomBarPadding) {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 containerColor = colors.canvas,
@@ -255,17 +269,32 @@ fun IgngMcApp(
                     navController = navController,
                     startDestination = AppRoute.Explore,
                     enterTransition = {
-                        fadeIn(IgngMotion.normalTween(reduced)) +
-                            slideInHorizontally(IgngMotion.standardSpring(reduced)) { it / 14 }
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabEnter(intensity)
+                        } else {
+                            IgngMotion.pushEnter(intensity)
+                        }
                     },
-                    exitTransition = { fadeOut(IgngMotion.microTween(reduced)) },
+                    exitTransition = {
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabExit(intensity)
+                        } else {
+                            IgngMotion.pushExit(intensity)
+                        }
+                    },
                     popEnterTransition = {
-                        fadeIn(IgngMotion.normalTween(reduced)) +
-                            slideInHorizontally(IgngMotion.standardSpring(reduced)) { -it / 16 }
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabEnter(intensity)
+                        } else {
+                            IgngMotion.popEnter(intensity)
+                        }
                     },
                     popExitTransition = {
-                        fadeOut(IgngMotion.microTween(reduced)) +
-                            slideOutHorizontally(IgngMotion.standardSpring(reduced)) { it / 14 }
+                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
+                            IgngMotion.tabExit(intensity)
+                        } else {
+                            IgngMotion.popExit(intensity)
+                        }
                     },
                 ) {
                     composable<AppRoute.Explore> {
@@ -588,31 +617,33 @@ fun IgngMcApp(
                 }
             }
 
-            // Floating Glass Bottom Navigation Pill (visible only on the 4 top-level tabs)
-            AnimatedVisibility(
+            // Unified Floating Compact Expanding-Pill Dock (visible only on the 4 top-level tabs)
+            IgngDockHost(
                 visible = activeTabId != null,
-                enter = slideInVertically(IgngMotion.standardSpring(reduced)) { it } + fadeIn(IgngMotion.microTween(reduced)),
-                exit = slideOutVertically(IgngMotion.standardSpring(reduced)) { it } + fadeOut(IgngMotion.microTween(reduced)),
+                items = navItems,
+                selectedId = activeTabId,
+                onSelect = { id ->
+                    val route: AppRoute = when (id) {
+                        "chat" -> AppRoute.Chat
+                        "wiki" -> AppRoute.Wiki
+                        "player" -> AppRoute.PlayerCenter
+                        else -> AppRoute.Explore
+                    }
+                    navController.navigate(route) {
+                        popUpTo(AppRoute.Explore) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
                 modifier = Modifier.align(Alignment.BottomCenter),
-            ) {
-                IgngFloatingNavBar(
-                    items = navItems,
-                    selectedId = activeTabId ?: "explore",
-                    onSelect = { id ->
-                        val route: AppRoute = when (id) {
-                            "chat" -> AppRoute.Chat
-                            "wiki" -> AppRoute.Wiki
-                            "player" -> AppRoute.PlayerCenter
-                            else -> AppRoute.Explore
-                        }
-                        navController.navigate(route) {
-                            popUpTo(AppRoute.Explore) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                )
-            }
+            )
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomBarPadding.calculateBottomPadding() + 8.dp),
+            )
 
             // Full-screen Folded Core veil during OAuth PKCE token exchange
             IgngLoadingVeil(visible = authExchanging)
@@ -669,6 +700,7 @@ fun IgngMcApp(
                     )
                 }
             }
+        }
         }
     }
 }

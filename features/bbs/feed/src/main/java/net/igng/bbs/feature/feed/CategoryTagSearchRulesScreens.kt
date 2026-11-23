@@ -486,7 +486,14 @@ fun RulesScreen(
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(clause.description, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                            AnimatedVisibility(visible = isOpen) {
+                            val ruleIntensity = IgngTheme.motionIntensity
+                            AnimatedVisibility(
+                                visible = isOpen,
+                                enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
+                                    androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
+                                exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
+                                    androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
+                            ) {
                                 Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     if (clause.elements.isNotEmpty()) {
                                         Text("构成要件", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
