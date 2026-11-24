@@ -259,6 +259,7 @@ fun BbsAppRoot(
         val activeTabId = dest.resolveTabId()
         val showBottomBar = activeTabId != null
         val dockBottomPadding = rememberIgngDockBottomPadding(dockVisible = showBottomBar)
+        val topLevelDockBottomPadding = rememberIgngDockBottomPadding(dockVisible = true)
         val predictiveBackState = rememberIgngPredictiveBackState()
 
         val tabs = remember {
@@ -292,7 +293,7 @@ fun BbsAppRoot(
                             onOpenSearch = { navController.navigate(BbsRoute.Search) },
                             onOpenInbox = { navController.navigate(BbsRoute.Inbox) },
                             onOpenRules = { navController.navigate(BbsRoute.Rules) },
-                            bottomInsetPadding = dockBottomPadding,
+                            bottomInsetPadding = topLevelDockBottomPadding,
                         )
                     }
 
@@ -301,7 +302,7 @@ fun BbsAppRoot(
                             container = container,
                             onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
                             onOpenCreatorColumns = { navController.navigate(BbsRoute.CreatorColumns) },
-                            bottomInsetPadding = dockBottomPadding,
+                            bottomInsetPadding = topLevelDockBottomPadding,
                         )
                     }
 
@@ -317,7 +318,7 @@ fun BbsAppRoot(
                             onOpenReviews = { navController.navigate(BbsRoute.CreatorReviews) },
                             onOpenMedia = { navController.navigate(BbsRoute.CreatorMedia) },
                             onRequireLogin = { launchSso() },
-                            bottomInsetPadding = dockBottomPadding,
+                            bottomInsetPadding = topLevelDockBottomPadding,
                         )
                     }
 
@@ -341,7 +342,7 @@ fun BbsAppRoot(
                             onOpenPrivacyPreferences = { navController.navigate(BbsRoute.PrivacyPreferences) },
                             onOpenAppSettings = { navController.navigate(BbsRoute.AppSettings) },
                             onOpenRules = { navController.navigate(BbsRoute.Rules) },
-                            bottomInsetPadding = dockBottomPadding,
+                            bottomInsetPadding = topLevelDockBottomPadding,
                         )
                     }
 
