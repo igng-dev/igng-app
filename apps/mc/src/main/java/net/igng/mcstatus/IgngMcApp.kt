@@ -41,11 +41,12 @@ import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import net.igng.core.auth.OAuthCallbackResult
+import net.igng.core.data.LaunchedAppForegroundResumeEffect
 import net.igng.mcstatus.core.data.IgngAppContainer
-import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.core.designsystem.IgngBadge
 import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngButton
@@ -141,7 +142,6 @@ fun IgngMcApp(
         var authError by remember { mutableStateOf<String?>(null) }
         var sessionExpiredPrompt by remember { mutableStateOf(false) }
         var promptedLegacyUserId by remember { mutableStateOf<Int?>(null) }
-        var selectedFamilyCache by remember { mutableStateOf<Map<String, ServerFamilyDto>>(emptyMap()) }
 
         fun startOAuth(forceLogin: Boolean) {
             authError = null
@@ -187,8 +187,7 @@ fun IgngMcApp(
             }
         }
 
-        // Refresh bootstrap state, user metadata, admin role & settle daily login EXP whenever active session changes
-        LaunchedEffect(activeAccount?.userId, sessionEpoch) {
+        suspend fun refreshBootstrapAndDailyExp() {
             val boot = runCatching { container.fetchBootstrapForCurrentSession() }.getOrNull()
             if (boot != null) {
                 container.updateBootstrap(boot)
@@ -209,9 +208,25 @@ fun IgngMcApp(
             if (boot?.viewer?.authenticated == true) {
                 val exp = container.settleDailyLoginForCurrentSession()
                 container.updateDailyExp(exp)
-            } else {
+            } else if (boot != null) {
                 container.updateDailyExp(null)
             }
+        }
+
+        // Refresh bootstrap state, user metadata, admin role & settle daily login EXP whenever active session changes
+        LaunchedEffect(activeAccount?.userId, sessionEpoch) {
+            refreshBootstrapAndDailyExp()
+        }
+
+        // Idle low-priority prefetch for sibling top-level tabs after first frame settles
+        LaunchedEffect(activeAccount?.userId, sessionEpoch, sessionAuthStatus) {
+            delay(750L)
+            container.prefetchIdleTabs()
+        }
+
+        // Silent bootstrap refresh when returning from background after >= 30s
+        LaunchedAppForegroundResumeEffect(minBackgroundMs = 30_000L) {
+            refreshBootstrapAndDailyExp()
         }
 
         // Prompt once for pre-v2.1.0 legacy sessions whose tokens are suppressed before hitting 401
@@ -285,7 +300,6 @@ fun IgngMcApp(
                             onOpenStatusWall = { navController.navigate(AppRoute.StatusWall) },
                             onOpenMap = { fam, season -> navController.navigate(AppRoute.WorldMap(fam, season)) },
                             onOpenFamilyDetail = { fam ->
-                                selectedFamilyCache = selectedFamilyCache + (fam.slug to fam)
                                 navController.navigate(AppRoute.FamilyDetail(fam.slug))
                             },
                             onOpenCommunityHall = { navController.navigate(AppRoute.CommunityHall) },
@@ -435,16 +449,12 @@ fun IgngMcApp(
 
                     igngComposable<AppRoute.FamilyDetail> { entry ->
                         val route = entry.toRoute<AppRoute.FamilyDetail>()
-                        val fam = selectedFamilyCache[route.familySlug]
-                        if (fam != null) {
-                            ServerFamilyDetailScreen(
-                                family = fam,
-                                onBack = { navController.popBackStack() },
-                                onOpenMap = { fSlug, sSlug -> navController.navigate(AppRoute.WorldMap(fSlug, sSlug)) },
-                            )
-                        } else {
-                            LaunchedEffect(Unit) { navController.popBackStack() }
-                        }
+                        ServerFamilyDetailScreen(
+                            familySlug = route.familySlug,
+                            exploreRepository = container.exploreRepository,
+                            onBack = { navController.popBackStack() },
+                            onOpenMap = { fSlug, sSlug -> navController.navigate(AppRoute.WorldMap(fSlug, sSlug)) },
+                        )
                     }
 
                     igngComposable<AppRoute.PlayerPassport> { entry ->

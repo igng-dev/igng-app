@@ -48,26 +48,43 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.CreateCommentRequest
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.CommentDto
+import net.igng.bbs.core.model.CommentsListResponseDto
+import net.igng.bbs.core.model.UserBriefDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngInfoBanner
+import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.CommentDto
-import net.igng.bbs.core.model.UserBriefDto
 import net.igng.core.network.ApiResult
+
+private class PostCommentsUiHolder {
+    val sortByState = mutableStateOf("oldest")
+    val draftTextState = mutableStateOf("")
+    val hasNewCommentsState = mutableStateOf(false)
+    val expandedFolded = mutableStateMapOf<String, Boolean>()
+}
 
 @Composable
 fun PostCommentsSection(
     container: BbsAppContainer,
     postId: String,
+    refreshSignal: Int = 0,
     onOpenUser: (String) -> Unit,
     onReportComment: (String) -> Unit,
     onRequireLogin: () -> Unit,
@@ -76,13 +93,28 @@ fun PostCommentsSection(
     val scope = rememberCoroutineScope()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
 
-    var sortBy by remember { mutableStateOf("oldest") }
-    var comments by remember { mutableStateOf<List<CommentDto>>(emptyList()) }
-    var latestCommentId by remember { mutableStateOf<String?>(null) }
-    var hasNewComments by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val holder = rememberScreenHolder("bbs_post_comments_ui_$postId") { PostCommentsUiHolder() }
+    var sortBy by holder.sortByState
+    var draftText by holder.draftTextState
+    var hasNewComments by holder.hasNewCommentsState
+    val expandedFolded = holder.expandedFolded
 
-    var draftText by remember { mutableStateOf("") }
+    val (commentsState, commentsHandle) = rememberSwrResource<CommentsListResponseDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.postComments(postId, sortBy),
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.COMMENTS),
+        slotKey = "bbs_post_comments_$postId",
+    ) {
+        container.postRepository.listComments(postId = postId, sortBy = sortBy, pageSize = 50).toKotlinResult()
+    }
+
+    val comments = commentsState.data?.data.orEmpty()
+    val latestCommentId = commentsState.data?.latestCommentId
+    val isInitialLoading = commentsState.isInitialLoading && commentsState.data == null
+    val error = if (commentsState.data == null) commentsState.error else null
+
     var replyTarget by remember { mutableStateOf<CommentDto?>(null) }
     var reEditTarget by remember { mutableStateOf<CommentDto?>(null) }
     var sending by remember { mutableStateOf(false) }
@@ -94,21 +126,16 @@ fun PostCommentsSection(
     var mentionCandidates by remember { mutableStateOf<List<UserBriefDto>>(emptyList()) }
     var selectedMentionIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    val expandedFolded = remember { mutableStateMapOf<String, Boolean>() }
-
-    suspend fun loadComments() {
-        error = null
-        when (val res = container.postRepository.listComments(postId = postId, sortBy = sortBy, pageSize = 50)) {
-            is ApiResult.Success -> {
-                comments = res.data.data
-                latestCommentId = res.data.latestCommentId
-                hasNewComments = false
-            }
-            is ApiResult.Failure -> error = res.error.message
-        }
+    fun reloadComments() {
+        hasNewComments = false
+        commentsHandle.silentRefresh()
     }
 
-    LaunchedEffect(postId, sortBy, activeAccount?.userId) { loadComments() }
+    LaunchedEffect(refreshSignal) {
+        if (refreshSignal > 0) {
+            reloadComments()
+        }
+    }
 
     // Lifecycle-aware 15-second foreground poll for new comments (pauses automatically in background)
     net.igng.core.data.LaunchedForegroundPollingEffect(
@@ -147,11 +174,14 @@ fun PostCommentsSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            IgngSectionHeader(title = "讨论区（${comments.size}）", modifier = Modifier.weight(1f))
+            IgngSectionHeader(
+                title = if (isInitialLoading) "讨论区" else "讨论区（${comments.size}）",
+                modifier = Modifier.weight(1f),
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                IgngTagChip(text = "最早", selected = sortBy == "oldest", onClick = { sortBy = "oldest" })
-                IgngTagChip(text = "最新", selected = sortBy == "newest", onClick = { sortBy = "newest" })
-                IgngTagChip(text = "最热", selected = sortBy == "hot", onClick = { sortBy = "hot" })
+                IgngTagChip(text = "最早", selected = sortBy == "oldest", onClick = { sortBy = "oldest"; hasNewComments = false })
+                IgngTagChip(text = "最新", selected = sortBy == "newest", onClick = { sortBy = "newest"; hasNewComments = false })
+                IgngTagChip(text = "最热", selected = sortBy == "hot", onClick = { sortBy = "hot"; hasNewComments = false })
             }
         }
 
@@ -168,7 +198,7 @@ fun PostCommentsSection(
                 message = "点击刷新即可查看最新讨论，不会打断当前阅读位置。",
                 tone = IgngTone.ACCENT,
                 actionLabel = "立即刷新",
-                onAction = { scope.launch { loadComments() } },
+                onAction = { reloadComments() },
             )
         }
 
@@ -258,7 +288,7 @@ fun PostCommentsSection(
                                         selectedMentionIds = emptyList()
                                         showMentionPicker = false
                                         notice = if (res.data.reviewPending) "评论已提交，正在等待审核" else "评论发表成功"
-                                        loadComments()
+                                        reloadComments()
                                     }
                                     is ApiResult.Failure -> notice = res.error.message
                                 }
@@ -314,8 +344,10 @@ fun PostCommentsSection(
             }
         }
 
-        if (error != null) {
-            IgngErrorTile(message = error!!, onRetry = { scope.launch { loadComments() } })
+        if (isInitialLoading) {
+            IgngLoadingCenter(loading = true)
+        } else if (error != null) {
+            IgngErrorTile(message = error, onRetry = { commentsHandle.refresh() })
         } else if (comments.isEmpty()) {
             IgngEmptyTile(title = "还没有评论", subtitle = "欢迎发表第一条观点。")
         } else {
@@ -340,7 +372,7 @@ fun PostCommentsSection(
                         if (activeAccount == null) { onRequireLogin(); return@CommentItemCard }
                         scope.launch {
                             when (val r = container.postRepository.toggleCommentLike(target.id)) {
-                                is ApiResult.Success -> loadComments()
+                                is ApiResult.Success -> reloadComments()
                                 is ApiResult.Failure -> notice = r.error.message
                             }
                         }
@@ -348,7 +380,11 @@ fun PostCommentsSection(
                     onDelete = { target ->
                         scope.launch {
                             when (val r = container.postRepository.deleteComment(target.id)) {
-                                is ApiResult.Success -> { notice = "评论已删除"; loadComments() }
+                                is ApiResult.Success -> {
+                                    notice = "评论已删除"
+                                    container.postRepository.adjustCachedCommentCount(postId, -1)
+                                    reloadComments()
+                                }
                                 is ApiResult.Failure -> notice = r.error.message
                             }
                         }

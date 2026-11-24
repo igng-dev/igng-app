@@ -19,23 +19,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Create
 import androidx.compose.material.icons.rounded.Gavel
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,11 +44,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.launch
-import net.igng.bbs.core.data.BbsAppContainer
-import net.igng.bbs.core.data.UpsertBlockRuleRequest
 import net.igng.bbs.common.BbsContinueReadingCard
 import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.data.UpsertBlockRuleRequest
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.FavoriteItemDto
+import net.igng.bbs.core.model.FollowingItemDto
+import net.igng.bbs.core.model.PaginatedResponseDto
+import net.igng.bbs.core.model.UserProfileDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngBadge
 import net.igng.core.designsystem.IgngBadgeTone
@@ -70,10 +82,6 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.FavoriteItemDto
-import net.igng.bbs.core.model.FollowingItemDto
-import net.igng.bbs.core.model.UserProfileDto
 import net.igng.core.model.SessionAuthStatus
 import net.igng.core.network.ApiResult
 
@@ -102,6 +110,11 @@ fun ProfileCenterScreen(
     var refreshing by remember { mutableStateOf(false) }
     val sessionExpired = activeAccount != null && sessionAuthStatus.requiresReauth
 
+    LifecycleResumeEffect(activeAccount?.userId) {
+        scope.launch { container.refreshBootstrapIfStale() }
+        onPauseOrDispose { }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -122,7 +135,7 @@ fun ProfileCenterScreen(
                 scope.launch {
                     refreshing = true
                     container.refreshFamilyAccounts()
-                    container.refreshBootstrap()
+                    container.refreshBootstrap(force = true)
                     refreshing = false
                 }
             },
@@ -300,6 +313,10 @@ private fun ProfileRowItem(
     )
 }
 
+private class UserProfileUiHolder {
+    val tabState = mutableIntStateOf(0)
+}
+
 @Composable
 fun UserProfileScreen(
     container: BbsAppContainer,
@@ -311,144 +328,158 @@ fun UserProfileScreen(
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
-    var profile by remember { mutableStateOf<UserProfileDto?>(null) }
-    var tab by remember { mutableStateOf(0) } // 0=posts, 1=collab, 2=activities
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var notice by remember { mutableStateOf<String?>(null) }
+    val holder = rememberScreenHolder("bbs_user_profile_ui_$userIdOrUsername") { UserProfileUiHolder() }
+    var tab by holder.tabState // 0=posts, 1=collab, 2=activities
 
-    suspend fun load() {
-        loading = true
-        error = null
-        when (val r = container.profileRepository.getUserProfile(userIdOrUsername)) {
-            is ApiResult.Success -> profile = r.data
-            is ApiResult.Failure -> error = r.error.message
-        }
-        loading = false
+    val (profileState, profileHandle) = rememberSwrResource<UserProfileDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.userProfile(userIdOrUsername),
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Detail,
+        tags = setOf(BbsCacheTags.USER_PROFILES),
+        slotKey = "bbs_user_profile_$userIdOrUsername",
+    ) {
+        container.profileRepository.getUserProfile(userIdOrUsername).toKotlinResult()
     }
-    LaunchedEffect(userIdOrUsername, activeAccount?.userId) { load() }
+
+    val profile = profileState.data
+    var notice by remember { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(title = profile?.user?.displayName ?: "用户主页", onBack = onBack)
-        when {
-            loading && profile == null -> IgngLoadingCenter(loading = true)
-            error != null && profile == null -> Box(Modifier.padding(16.dp)) {
-                IgngErrorTile(message = error!!, onRetry = { scope.launch { load() } })
-            }
-            profile != null -> {
-                val p = profile!!
-                val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                    item {
-                        IgngTile {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                IgngAvatar(p.user.avatarUrl, p.user.displayName, size = 56.dp)
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(p.user.displayName, style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                                    Text("@${p.user.username} · Lv.${p.level}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                                }
-                            }
-                            p.user.bio?.takeIf { it.isNotBlank() }?.let { bio ->
-                                Spacer(Modifier.height(8.dp))
-                                Text(bio, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                Text("${p.stats.posts} 文章", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
-                                Text("${p.stats.followers} 粉丝", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
-                                Text("${p.stats.following} 关注", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
-                                Text("${BbsFormatters.compactCount(p.stats.totalLikes)} 获赞", style = MaterialTheme.typography.labelMedium, color = colors.textMuted)
-                            }
-                            if (!p.viewerState.isSelf) {
-                                Spacer(Modifier.height(12.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    IgngPrimaryButton(
-                                        text = if (p.viewerState.isFollowing) "已关注" else "关注",
-                                        onClick = {
-                                            if (activeAccount == null) { onRequireLogin(); return@IgngPrimaryButton }
-                                            scope.launch {
-                                                when (val r = container.profileRepository.toggleFollow(p.user.id)) {
-                                                    is ApiResult.Success -> load()
-                                                    is ApiResult.Failure -> notice = r.error.message
-                                                }
-                                            }
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    IgngSecondaryButton(
-                                        text = if (p.viewerState.blockFollow || p.viewerState.blockView) "取消屏蔽" else "屏蔽",
-                                        onClick = {
-                                            if (activeAccount == null) { onRequireLogin(); return@IgngSecondaryButton }
-                                            scope.launch {
-                                                val res = if (p.viewerState.blockFollow || p.viewerState.blockView) {
-                                                    container.profileRepository.deleteBlockRule(p.user.id)
-                                                } else {
-                                                    container.profileRepository.upsertBlockRule(UpsertBlockRuleRequest(p.user.id, blockFollow = true, blockView = true))
-                                                }
-                                                when (res) {
-                                                    is ApiResult.Success -> { notice = "屏蔽设置已更新"; load() }
-                                                    is ApiResult.Failure -> notice = res.error.message
-                                                }
-                                            }
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Pure BBS 3-tab strip (zero Ink)
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IgngTagChip("已发布（${p.posts.size}）", selected = tab == 0, onClick = { tab = 0 })
-                            IgngTagChip("参与协作（${p.collaboratedPosts.size}）", selected = tab == 1, onClick = { tab = 1 })
-                            IgngTagChip("近7天动态（${p.recentActivities.size}）", selected = tab == 2, onClick = { tab = 2 })
-                        }
-                    }
-
-                    when (tab) {
-                        0 -> if (p.posts.isEmpty()) {
-                            item { IgngEmptyTile("暂无公开文章", "这位作者还没有发布公开的 BBS 文章。") }
-                        } else {
-                            items(p.posts, key = { it.id }) { post ->
-                                BbsPostRowCard(post = post, onClick = { onOpenPost(post.id) })
-                            }
-                        }
-                        1 -> if (p.collaboratedPosts.isEmpty()) {
-                            item { IgngEmptyTile("暂无协作文章", "暂无公开的协作署名记录。") }
-                        } else {
-                            items(p.collaboratedPosts, key = { "${it.post.id}_${it.roleTitle}" }) { item ->
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    IgngTagChip("署名角色：${item.roleTitle}", tone = IgngTone.ACCENT)
-                                    BbsPostRowCard(post = item.post, onClick = { onOpenPost(item.post.id) })
-                                }
-                            }
-                        }
-                        else -> if (p.recentActivities.isEmpty()) {
-                            item { IgngEmptyTile("近 7 天暂无动态", "近期没有新的发布、评论或点赞互动。") }
-                        } else {
-                            items(p.recentActivities, key = { "${it.kind}_${it.targetId}_${it.createdAt}" }) { act ->
-                                IgngTile(padding = PaddingValues(14.dp), onClick = act.targetId?.let { pid -> { onOpenPost(pid) } }) {
-                                    Text(
-                                        text = when (act.kind) {
-                                            "post" -> "发布了文章《${act.title}》"
-                                            "comment" -> "评论了《${act.title}》"
-                                            else -> "赞了文章《${act.title}》"
-                                        },
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = colors.textPrimary,
-                                    )
-                                    act.excerpt?.takeIf { it.isNotBlank() }?.let {
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 2)
+        IgngPullToRefreshBox(
+            isRefreshing = profileState.isUserRefreshing,
+            onRefresh = { profileHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                profileState.isInitialLoading && profile == null -> IgngLoadingCenter(loading = true)
+                profileState.error != null && profile == null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = profileState.error!!, onRetry = { profileHandle.refresh() })
+                }
+                profile != null -> {
+                    val p = profile
+                    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                        item {
+                            IgngTile {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    IgngAvatar(p.user.avatarUrl, p.user.displayName, size = 56.dp)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(p.user.displayName, style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
+                                        Text("@${p.user.username} · Lv.${p.level}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
                                     }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(BbsFormatters.relativeTime(act.createdAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                }
+                                p.user.bio?.takeIf { it.isNotBlank() }?.let { bio ->
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(bio, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    Text("${p.stats.posts} 文章", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
+                                    Text("${p.stats.followers} 粉丝", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
+                                    Text("${p.stats.following} 关注", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
+                                    Text("${BbsFormatters.compactCount(p.stats.totalLikes)} 获赞", style = MaterialTheme.typography.labelMedium, color = colors.textMuted)
+                                }
+                                if (!p.viewerState.isSelf) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        IgngPrimaryButton(
+                                            text = if (p.viewerState.isFollowing) "已关注" else "关注",
+                                            onClick = {
+                                                if (activeAccount == null) { onRequireLogin(); return@IgngPrimaryButton }
+                                                scope.launch {
+                                                    when (val r = container.profileRepository.toggleFollow(p.user.id)) {
+                                                        is ApiResult.Success -> {
+                                                            profileHandle.mutateLocal { cur ->
+                                                                cur.copy(
+                                                                    viewerState = cur.viewerState.copy(isFollowing = r.data.following),
+                                                                    stats = cur.stats.copy(followers = r.data.followerCount),
+                                                                )
+                                                            }
+                                                            profileHandle.silentRefresh()
+                                                        }
+                                                        is ApiResult.Failure -> notice = r.error.message
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IgngSecondaryButton(
+                                            text = if (p.viewerState.blockFollow || p.viewerState.blockView) "取消屏蔽" else "屏蔽",
+                                            onClick = {
+                                                if (activeAccount == null) { onRequireLogin(); return@IgngSecondaryButton }
+                                                scope.launch {
+                                                    val res = if (p.viewerState.blockFollow || p.viewerState.blockView) {
+                                                        container.profileRepository.deleteBlockRule(p.user.id)
+                                                    } else {
+                                                        container.profileRepository.upsertBlockRule(UpsertBlockRuleRequest(p.user.id, blockFollow = true, blockView = true))
+                                                    }
+                                                    when (res) {
+                                                        is ApiResult.Success -> { notice = "屏蔽设置已更新"; profileHandle.silentRefresh() }
+                                                        is ApiResult.Failure -> notice = res.error.message
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Pure BBS 3-tab strip (zero Ink)
+                        item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                IgngTagChip("已发布（${p.posts.size}）", selected = tab == 0, onClick = { tab = 0 })
+                                IgngTagChip("参与协作（${p.collaboratedPosts.size}）", selected = tab == 1, onClick = { tab = 1 })
+                                IgngTagChip("近7天动态（${p.recentActivities.size}）", selected = tab == 2, onClick = { tab = 2 })
+                            }
+                        }
+
+                        when (tab) {
+                            0 -> if (p.posts.isEmpty()) {
+                                item { IgngEmptyTile("暂无公开文章", "这位作者还没有发布公开的 BBS 文章。") }
+                            } else {
+                                items(p.posts, key = { it.id }) { post ->
+                                    BbsPostRowCard(post = post, onClick = { onOpenPost(post.id) })
+                                }
+                            }
+                            1 -> if (p.collaboratedPosts.isEmpty()) {
+                                item { IgngEmptyTile("暂无协作文章", "暂无公开的协作署名记录。") }
+                            } else {
+                                items(p.collaboratedPosts, key = { "${it.post.id}_${it.roleTitle}" }) { item ->
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        IgngTagChip("署名角色：${item.roleTitle}", tone = IgngTone.ACCENT)
+                                        BbsPostRowCard(post = item.post, onClick = { onOpenPost(item.post.id) })
+                                    }
+                                }
+                            }
+                            else -> if (p.recentActivities.isEmpty()) {
+                                item { IgngEmptyTile("近 7 天暂无动态", "近期没有新的发布、评论或点赞互动。") }
+                            } else {
+                                items(p.recentActivities, key = { "${it.kind}_${it.targetId}_${it.createdAt}" }) { act ->
+                                    IgngTile(padding = PaddingValues(14.dp), onClick = act.targetId?.let { pid -> { onOpenPost(pid) } }) {
+                                        Text(
+                                            text = when (act.kind) {
+                                                "post" -> "发布了文章《${act.title}》"
+                                                "comment" -> "评论了《${act.title}》"
+                                                else -> "赞了文章《${act.title}》"
+                                            },
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = colors.textPrimary,
+                                        )
+                                        act.excerpt?.takeIf { it.isNotBlank() }?.let {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 2)
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(BbsFormatters.relativeTime(act.createdAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                    }
                                 }
                             }
                         }
@@ -466,40 +497,53 @@ fun FavoritesScreen(
     onOpenPost: (String) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    var items by remember { mutableStateOf<List<FavoriteItemDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
 
-    suspend fun load() {
-        loading = true; error = null
-        when (val r = container.profileRepository.listFavorites(pageSize = 40)) {
-            is ApiResult.Success -> items = r.data.data
-            is ApiResult.Failure -> error = r.error.message
-        }
-        loading = false
+    val (favState, favHandle) = rememberSwrResource<PaginatedResponseDto<FavoriteItemDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.FAVORITES,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.FAVORITES),
+        slotKey = "bbs_favorites_slot",
+    ) {
+        container.profileRepository.listFavorites(pageSize = 40).toKotlinResult()
     }
-    LaunchedEffect(Unit) { load() }
+
+    val items = favState.data?.data.orEmpty()
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(title = "我的收藏", onBack = onBack)
-        when {
-            loading -> IgngLoadingCenter(loading = true)
-            error != null -> Box(Modifier.padding(16.dp)) { IgngErrorTile(error!!, onRetry = { scope.launch { load() } }) }
-            items.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngEmptyTile("收藏夹还是空的", "在阅读文章时点击底部书签图标即可收藏。") }
-            else -> {
-                val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(items, key = { it.post.id }) { fav ->
-                        BbsPostRowCard(post = fav.post, onClick = { onOpenPost(fav.post.id) })
+        IgngPullToRefreshBox(
+            isRefreshing = favState.isUserRefreshing,
+            onRefresh = { favHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                favState.isInitialLoading && items.isEmpty() -> IgngLoadingCenter(loading = true)
+                favState.error != null && items.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(favState.error!!, onRetry = { favHandle.refresh() })
+                }
+                items.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngEmptyTile("收藏夹还是空的", "在阅读文章时点击底部书签图标即可收藏。")
+                }
+                else -> {
+                    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(items, key = { it.post.id }) { fav ->
+                            BbsPostRowCard(post = fav.post, onClick = { onOpenPost(fav.post.id) })
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private class FollowingUiHolder {
+    val tabState = mutableStateOf("following")
 }
 
 @Composable
@@ -510,19 +554,21 @@ fun FollowingScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf("following") }
-    var list by remember { mutableStateOf<List<FollowingItemDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    val holder = rememberScreenHolder("bbs_following_ui") { FollowingUiHolder() }
+    var tab by holder.tabState
 
-    suspend fun load() {
-        loading = true
-        when (val r = container.profileRepository.listFollowing(tab = tab, pageSize = 50)) {
-            is ApiResult.Success -> list = r.data.data
-            is ApiResult.Failure -> Unit
-        }
-        loading = false
+    val (followingState, followingHandle) = rememberSwrResource<PaginatedResponseDto<FollowingItemDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.following(tab),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.FOLLOWING),
+        slotKey = "bbs_following_slot",
+    ) {
+        container.profileRepository.listFollowing(tab = tab, pageSize = 50).toKotlinResult()
     }
-    LaunchedEffect(tab) { load() }
+
+    val list = followingState.data?.data.orEmpty()
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
@@ -534,35 +580,46 @@ fun FollowingScreen(
                 IgngTagChip("关注我的", selected = tab == "followers", onClick = { tab = "followers" })
             },
         )
-        if (loading) {
-            IgngLoadingCenter(loading = true)
-        } else if (list.isEmpty()) {
-            Box(Modifier.padding(16.dp)) { IgngEmptyTile("列表为空", "暂时还没有相关用户记录。") }
-        } else {
-            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(list, key = { it.user.id }) { row ->
-                    IgngTile(padding = PaddingValues(14.dp), onClick = { onOpenUser(row.user.id) }) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            IgngAvatar(row.user.avatarUrl, row.user.displayName, size = 40.dp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(row.user.displayName, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                Text("@${row.user.username}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                            }
-                            IgngTagChip(
-                                text = if (row.isFollowing) "已关注" else "+ 回关",
-                                selected = row.isFollowing,
-                                tone = IgngTone.ACCENT,
-                                onClick = {
-                                    scope.launch {
-                                        container.profileRepository.toggleFollow(row.user.id)
-                                        load()
+        IgngPullToRefreshBox(
+            isRefreshing = followingState.isUserRefreshing,
+            onRefresh = { followingHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                followingState.isInitialLoading && list.isEmpty() -> IgngLoadingCenter(loading = true)
+                followingState.error != null && list.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(followingState.error!!, onRetry = { followingHandle.refresh() })
+                }
+                list.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngEmptyTile("列表为空", "暂时还没有相关用户记录。")
+                }
+                else -> {
+                    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(list, key = { it.user.id }) { row ->
+                            IgngTile(padding = PaddingValues(14.dp), onClick = { onOpenUser(row.user.id) }) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    IgngAvatar(row.user.avatarUrl, row.user.displayName, size = 40.dp)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(row.user.displayName, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
+                                        Text("@${row.user.username}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
                                     }
-                                },
-                            )
+                                    IgngTagChip(
+                                        text = if (row.isFollowing) "已关注" else "+ 回关",
+                                        selected = row.isFollowing,
+                                        tone = IgngTone.ACCENT,
+                                        onClick = {
+                                            scope.launch {
+                                                container.profileRepository.toggleFollow(row.user.id)
+                                                followingHandle.silentRefresh()
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }

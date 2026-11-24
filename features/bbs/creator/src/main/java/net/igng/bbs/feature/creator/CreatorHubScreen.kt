@@ -28,22 +28,24 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.common.BbsPostRowCard
 import net.igng.bbs.common.BbsRiskMeterCard
+import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.CreatorOverviewDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.ChartPoint
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
@@ -59,9 +61,6 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.CreatorOverviewDto
-import net.igng.core.network.ApiResult
 
 @Composable
 fun CreatorHubScreen(
@@ -78,30 +77,21 @@ fun CreatorHubScreen(
     bottomInsetPadding: PaddingValues = PaddingValues(bottom = 96.dp),
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
 
-    var overview by remember { mutableStateOf<CreatorOverviewDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    suspend fun load(isRefresh: Boolean) {
-        if (activeAccount == null) {
-            loading = false
-            return
-        }
-        if (isRefresh) refreshing = true else if (overview == null) loading = true
-        error = null
-        when (val res = container.creatorRepository.getOverview()) {
-            is ApiResult.Success -> overview = res.data
-            is ApiResult.Failure -> if (overview == null) error = res.error.message
-        }
-        loading = false
-        refreshing = false
+    val (overviewState, overviewHandle) = rememberSwrResource<CreatorOverviewDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_OVERVIEW,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR),
+        enabled = activeAccount != null,
+        slotKey = "bbs_creator_overview",
+    ) {
+        container.creatorRepository.getOverview().toKotlinResult()
     }
 
-    LaunchedEffect(activeAccount?.userId) { load(false) }
+    val overview = overviewState.data
 
     Column(
         modifier = Modifier
@@ -135,17 +125,17 @@ fun CreatorHubScreen(
         }
 
         IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { scope.launch { load(true) } },
+            isRefreshing = overviewState.isUserRefreshing,
+            onRefresh = { overviewHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
             when {
-                loading && overview == null -> IgngLoadingCenter(loading = true)
-                error != null && overview == null -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { load(false) } })
+                overviewState.isInitialLoading && overview == null -> IgngLoadingCenter(loading = true)
+                overviewState.error != null && overview == null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = overviewState.error!!, onRetry = { overviewHandle.refresh() })
                 }
                 overview != null -> {
-                    val data = overview!!
+                    val data = overview
                     LazyColumn(
                         contentPadding = PaddingValues(
                             start = 16.dp,

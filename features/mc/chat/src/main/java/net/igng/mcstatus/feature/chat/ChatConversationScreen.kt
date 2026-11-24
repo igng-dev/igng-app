@@ -70,11 +70,17 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
 import net.igng.mcstatus.core.data.ChatForwardResponse
+import net.igng.mcstatus.core.data.ChatLogsResponse
 import net.igng.mcstatus.core.data.ChatMessageDto
 import net.igng.mcstatus.core.data.ChatPersonaDto
 import net.igng.mcstatus.core.data.ChatRepository
 import net.igng.mcstatus.core.data.ChatSenderProfileDto
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
@@ -100,6 +106,35 @@ private data class VideoPayload(
     val path: String,
     val title: String,
 )
+
+private class ChatConversationUiHolder(
+    initialFilter: ChatFilterState,
+    cachedLatest: ChatLogsResponse?,
+    initialPersona: ChatPersonaDto?,
+) {
+    val filterState = mutableStateOf(initialFilter)
+    val searchHighlightState = mutableStateOf("")
+    val messagesState = mutableStateOf(
+        if (!initialFilter.isActive && cachedLatest != null) {
+            mergeChatMessages(emptyList(), cachedLatest.messages, pruneWindow = false)
+        } else {
+            emptyList()
+        },
+    )
+    val profilesState = mutableStateOf(
+        if (!initialFilter.isActive && cachedLatest != null) cachedLatest.senderProfiles else emptyMap(),
+    )
+    val personaState = mutableStateOf(cachedLatest?.persona ?: initialPersona)
+    val hasMoreState = mutableStateOf(if (!initialFilter.isActive && cachedLatest != null) cachedLatest.hasMore else false)
+    val loadingState = mutableStateOf(messagesState.value.isEmpty())
+    val loadingOlderState = mutableStateOf(false)
+    val errorState = mutableStateOf<String?>(null)
+    val newBelowCountState = mutableIntStateOf(0)
+    var loadedFilter by mutableStateOf<ChatFilterState?>(
+        if (!initialFilter.isActive && cachedLatest != null) initialFilter else null,
+    )
+    var initialScrollDone by mutableStateOf(false)
+}
 
 /**
  * Full-screen immersive conversation view (hides bottom nav bar) with WeChat/QQ-style mobile bubbles,
@@ -133,6 +168,7 @@ fun ChatConversationScreen(
     val haptic = rememberIgngHaptics()
     val listState = rememberLazyListState()
     val boundMcSet = remember(boundMcUsernames) { boundMcUsernames.toSet() }
+    val latestCacheKey = remember(source, targetId) { McCacheKeys.chatLatest(source, targetId) }
 
     val sessionKind = remember(source, platform, isPrivate) {
         when {
@@ -144,24 +180,29 @@ fun ChatConversationScreen(
         }
     }
 
-    var filter by remember {
-        mutableStateOf(ChatFilterState(focusedId = initialFocusMessageId.orEmpty()))
+    val holder = rememberScreenHolder("chat_conv_${source}_$targetId") {
+        val initFilter = ChatFilterState(focusedId = initialFocusMessageId.orEmpty())
+        val cached = if (!initFilter.isActive) {
+            chatRepository.swrCache.peek<ChatLogsResponse>(latestCacheKey, IgngCacheScope.SESSION_AWARE)?.data
+        } else {
+            null
+        }
+        val initPersona = initialPersonaLabel?.takeIf { it.isNotBlank() }?.let {
+            ChatPersonaDto(label = it, description = initialPersonaDescription.orEmpty())
+        }
+        ChatConversationUiHolder(initFilter, cached, initPersona)
     }
-    var searchHighlight by remember { mutableStateOf("") }
-    var messages by remember { mutableStateOf<List<ChatMessageDto>>(emptyList()) }
-    var profiles by remember { mutableStateOf<Map<String, ChatSenderProfileDto>>(emptyMap()) }
-    var persona by remember {
-        mutableStateOf(
-            initialPersonaLabel?.takeIf { it.isNotBlank() }?.let {
-                ChatPersonaDto(label = it, description = initialPersonaDescription.orEmpty())
-            },
-        )
-    }
-    var hasMore by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(true) }
-    var loadingOlder by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var newBelowCount by remember { mutableIntStateOf(0) }
+
+    var filter by holder.filterState
+    var searchHighlight by holder.searchHighlightState
+    var messages by holder.messagesState
+    var profiles by holder.profilesState
+    var persona by holder.personaState
+    var hasMore by holder.hasMoreState
+    var loading by holder.loadingState
+    var loadingOlder by holder.loadingOlderState
+    var error by holder.errorState
+    var newBelowCount by holder.newBelowCountState
 
     // Interactive overlays
     var showSearchSheet by remember { mutableStateOf(false) }
@@ -291,6 +332,14 @@ fun ChatConversationScreen(
                         (merged.size - prevCount).coerceAtLeast(0)
                     }
                     messages = merged
+                    if (!activeFilter.isActive) {
+                        chatRepository.swrCache.put(
+                            key = latestCacheKey,
+                            data = resp.copy(messages = merged, senderProfiles = profiles, hasMore = hasMore),
+                            scope = IgngCacheScope.SESSION_AWARE,
+                            tags = setOf(McCacheTags.CHAT_MESSAGES),
+                        )
+                    }
                     if (addedTail > 0) {
                         if (wasAtBottom) {
                             delay(24)
@@ -304,21 +353,52 @@ fun ChatConversationScreen(
                     messages = mergeChatMessages(emptyList(), resp.messages, pruneWindow = false)
                     hasMore = resp.hasMore
                     newBelowCount = 0
+                    holder.loadedFilter = activeFilter
+                    holder.initialScrollDone = true
+                    if (!activeFilter.isActive) {
+                        chatRepository.swrCache.put(
+                            key = latestCacheKey,
+                            data = resp.copy(messages = messages, senderProfiles = profiles),
+                            scope = IgngCacheScope.SESSION_AWARE,
+                            tags = setOf(McCacheTags.CHAT_MESSAGES),
+                        )
+                    }
                     delay(32)
                     scrollToMessageOrBottom(activeFilter.focusedId.takeIf { it.isNotBlank() }, smooth = false)
                 }
             }
         }.onFailure { err ->
-            if (!silent) error = err.message ?: "消息读取失败"
+            if (!silent && messages.isEmpty()) error = err.message ?: "消息读取失败"
         }
 
         loading = false
         loadingOlder = false
     }
 
-    // Load whenever filter changes
+    // Scroll to bottom once if opened from cached snapshot
+    LaunchedEffect(Unit) {
+        if (!holder.initialScrollDone && messages.isNotEmpty()) {
+            holder.initialScrollDone = true
+            delay(16)
+            scrollToMessageOrBottom(filter.focusedId.takeIf { it.isNotBlank() }, smooth = false)
+        }
+    }
+
+    // Load only on cold start or filter change; never re-blank on predictive back!
     LaunchedEffect(source, targetId, filter) {
-        loadMessages(older = false, silent = false, activeFilter = filter)
+        if (holder.loadedFilter != filter || messages.isEmpty()) {
+            loadMessages(older = false, silent = false, activeFilter = filter)
+        }
+    }
+
+    // Silently catch up when returning to conversation (ON_RESUME only, never mid-predictive-back drag)
+    LifecycleResumeEffect(source, targetId, filter) {
+        if (messages.isNotEmpty() && !filter.isActive && !loading && !loadingOlder) {
+            scope.launch {
+                loadMessages(older = false, silent = true, activeFilter = filter)
+            }
+        }
+        onPauseOrDispose { }
     }
 
     // Lifecycle-aware silent foreground polling every 6s when viewing live latest stream

@@ -44,10 +44,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.mcstatus.core.data.BoundMcAccountDto
 import net.igng.mcstatus.core.data.CustomMedalSlotDto
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.data.McCharacterDetailsResponse
 import net.igng.mcstatus.core.data.McLoginRecordsResponse
 import net.igng.mcstatus.core.data.MedalProfileDto
@@ -108,9 +117,19 @@ fun CharactersScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var accounts by remember { mutableStateOf<List<BoundMcAccountDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val (accountsState, accountsHandle) = rememberSwrResource<List<BoundMcAccountDto>>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_ACCOUNTS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.PLAYER_ACCOUNTS),
+        slotKey = "mc_characters",
+    ) {
+        runSuspendCatching { playerRepository.fetchBoundAccounts() }
+    }
+    val accounts = accountsState.data.orEmpty()
+    val loading = accountsState.isInitialLoading
+    val error = accountsState.error
     var feedback by remember { mutableStateOf<String?>(null) }
 
     var detailTarget by remember { mutableStateOf<BoundMcAccountDto?>(null) }
@@ -126,16 +145,9 @@ fun CharactersScreen(
 
     var unbindTarget by remember { mutableStateOf<BoundMcAccountDto?>(null) }
 
-    suspend fun reload() {
-        loading = true
-        error = null
-        runCatching { playerRepository.fetchBoundAccounts() }
-            .onSuccess { accounts = it }
-            .onFailure { error = it.message ?: "角色列表没有读到" }
-        loading = false
+    fun reload() {
+        accountsHandle.silentRefresh()
     }
-
-    LaunchedEffect(Unit) { reload() }
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -158,11 +170,16 @@ fun CharactersScreen(
                     IgngBadge(msg, tone = IgngBadgeTone.Success)
                 }
             }
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { reload() } })
-                }
+            IgngPullToRefreshBox(
+                isRefreshing = accountsState.isUserRefreshing,
+                onRefresh = { accountsHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { accountsHandle.refresh() })
+                    }
                 accounts.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngStateBlock(
                         title = "还没有绑定 Minecraft 角色",
@@ -244,6 +261,7 @@ fun CharactersScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -479,6 +497,13 @@ fun CharactersScreen(
 
 private enum class VaultTab(val label: String) { ITEMS("物品检索"), HISTORY("存取流水") }
 
+private class VaultUiHolder {
+    var tab by mutableStateOf(VaultTab.ITEMS)
+    var selectedVaultId by mutableStateOf("")
+    var query by mutableStateOf("")
+    var submittedQuery by mutableStateOf("")
+}
+
 @Composable
 fun VaultScreen(
     playerRepository: PlayerRepository,
@@ -486,138 +511,166 @@ fun VaultScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf(VaultTab.ITEMS) }
-    var overview by remember { mutableStateOf<VaultOverviewResponse?>(null) }
-    var selectedVaultId by remember { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
-    var itemsData by remember { mutableStateOf<VaultItemsResponse?>(null) }
-    var historyData by remember { mutableStateOf<VaultHistoryResponse?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val uiHolder = rememberScreenHolder("mc_vault_ui") { VaultUiHolder() }
     var selectedItem by remember { mutableStateOf<VaultItemGroupDto?>(null) }
     var traceData by remember { mutableStateOf<VaultTraceResponse?>(null) }
     var traceLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        loading = true
-        runCatching { playerRepository.fetchVaultOverview() }
-            .onSuccess {
-                overview = it
-                selectedVaultId = it.vaults.firstOrNull()?.vault_id.orEmpty()
-            }
-            .onFailure { error = it.message ?: "跨服仓库没有读到" }
-        loading = false
+    val (overviewState, overviewHandle) = rememberSwrResource<VaultOverviewResponse>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_VAULT_OVERVIEW,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        slotKey = "mc_vault_overview",
+    ) {
+        runSuspendCatching { playerRepository.fetchVaultOverview() }
+    }
+    val overview = overviewState.data
+    val activeVaultId = uiHolder.selectedVaultId.ifBlank {
+        overview?.vaults?.firstOrNull()?.vault_id.orEmpty()
     }
 
-    LaunchedEffect(tab, selectedVaultId) {
-        if (overview?.available != true) return@LaunchedEffect
-        if (tab == VaultTab.ITEMS && selectedVaultId.isNotBlank()) {
-            runCatching { playerRepository.fetchVaultItems(selectedVaultId, query) }
-                .onSuccess { itemsData = it }
-        } else if (tab == VaultTab.HISTORY && selectedVaultId.isNotBlank()) {
-            runCatching { playerRepository.fetchVaultHistory(selectedVaultId) }
-                .onSuccess { historyData = it }
-        }
+    val (itemsState, itemsHandle) = rememberSwrResource<VaultItemsResponse>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.playerVaultItems(activeVaultId, uiHolder.submittedQuery),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        enabled = overview?.available == true && uiHolder.tab == VaultTab.ITEMS && activeVaultId.isNotBlank(),
+        slotKey = "mc_vault_items",
+    ) {
+        runSuspendCatching { playerRepository.fetchVaultItems(activeVaultId, uiHolder.submittedQuery) }
     }
+
+    val (historyState, historyHandle) = rememberSwrResource<VaultHistoryResponse>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.playerVaultHistory(activeVaultId),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        enabled = overview?.available == true && uiHolder.tab == VaultTab.HISTORY && activeVaultId.isNotBlank(),
+        slotKey = "mc_vault_history",
+    ) {
+        runSuspendCatching { playerRepository.fetchVaultHistory(activeVaultId) }
+    }
+
+    val loading = overviewState.isInitialLoading
+    val error = overviewState.error
+    val itemsData = itemsState.data
+    val historyData = historyState.data
+    val refreshing = overviewState.isUserRefreshing || itemsState.isUserRefreshing || historyState.isUserRefreshing
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "跨服物资仓库", subtitle = "OneWayVault 物品检索、附魔与流转追踪", onBack = onBack)
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                overview?.available != true -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "尚未开通跨服仓库", description = "当前绑定的角色还没有跨服仓库数据。") }
-                else -> {
-                    val ov = overview!!
-                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MiniKpi("仓库数", IgngFormatters.formatNumber(ov.totals.vault_count), Modifier.weight(1f))
-                            MiniKpi("总物品", IgngFormatters.formatNumber(ov.totals.item_amount), Modifier.weight(1f))
-                            MiniKpi("种类", IgngFormatters.formatNumber(ov.totals.material_count), Modifier.weight(1f))
-                        }
-                        if (ov.vaults.size > 1) {
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                ov.vaults.forEach { bucket ->
-                                    val picked = bucket.vault_id == selectedVaultId
-                                    IgngBadge(
-                                        text = "${bucket.vault_id} (${bucket.item_amount})",
-                                        tone = if (picked) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
-                                        modifier = Modifier.clickable { selectedVaultId = bucket.vault_id },
-                                    )
-                                }
-                            }
-                        }
-                        IgngSegmentedTabs(VaultTab.entries, tab, { it.label }, { tab = it })
-                        if (tab == VaultTab.ITEMS) {
-                            IgngSearchField(
-                                value = query,
-                                onValueChange = { query = it },
-                                placeholder = "按中文名、材质 ID 或自定义名搜索…",
-                                onSubmit = {
-                                    scope.launch {
-                                        if (selectedVaultId.isNotBlank()) {
-                                            runCatching { playerRepository.fetchVaultItems(selectedVaultId, query) }
-                                                .onSuccess { itemsData = it }
-                                        }
-                                    }
-                                },
-                            )
-                        }
+            IgngPullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = {
+                    overviewHandle.refresh()
+                    if (uiHolder.tab == VaultTab.ITEMS && activeVaultId.isNotBlank()) itemsHandle.refresh()
+                    if (uiHolder.tab == VaultTab.HISTORY && activeVaultId.isNotBlank()) historyHandle.refresh()
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { overviewHandle.refresh() })
                     }
-                    Spacer(Modifier.height(10.dp))
-                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (tab == VaultTab.ITEMS) {
-                            val groups = itemsData?.groups.orEmpty()
-                            if (groups.isEmpty()) {
-                                item { IgngStateBlock(title = "仓库里还没有匹配的物品") }
-                            } else {
-                                itemsIndexed(groups, key = { i, g -> "${g.groupKey ?: g.material}:${g.displayName}:$i" }) { idx, item ->
-                                    IgngInteractiveTile(
-                                        onClick = { selectedItem = item },
-                                        modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
-                                    ) {
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                            Column(Modifier.weight(1f)) {
-                                                IgngMcFormattedText(item.title, style = IgngTheme.type.cardTitle)
-                                                Text(item.material, style = IgngTheme.type.mono, color = colors.textMuted)
-                                            }
-                                            IgngBadge("×${IgngFormatters.formatNumber(item.total_amount)}", tone = IgngBadgeTone.Accent)
-                                        }
-                                        if (item.enchantmentLabels.isNotEmpty()) {
-                                            Spacer(Modifier.height(6.dp))
-                                            Text(
-                                                item.enchantmentLabels.joinToString(" · "),
-                                                style = IgngTheme.type.badge,
-                                                color = colors.accent,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
+                    overview?.available != true -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "尚未开通跨服仓库", description = "当前绑定的角色还没有跨服仓库数据。") }
+                    else -> Column(Modifier.fillMaxSize()) {
+                        val ov = overview
+                        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                MiniKpi("仓库数", IgngFormatters.formatNumber(ov.totals.vault_count), Modifier.weight(1f))
+                                MiniKpi("总物品", IgngFormatters.formatNumber(ov.totals.item_amount), Modifier.weight(1f))
+                                MiniKpi("种类", IgngFormatters.formatNumber(ov.totals.material_count), Modifier.weight(1f))
+                            }
+                            if (ov.vaults.size > 1) {
+                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ov.vaults.forEach { bucket ->
+                                        val picked = bucket.vault_id == activeVaultId
+                                        IgngBadge(
+                                            text = "${bucket.vault_id} (${bucket.item_amount})",
+                                            tone = if (picked) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                                            modifier = Modifier.clickable { uiHolder.selectedVaultId = bucket.vault_id },
+                                        )
                                     }
                                 }
                             }
-                        } else {
-                            val ops = historyData?.records.orEmpty()
-                            if (ops.isEmpty()) {
-                                item { IgngStateBlock(title = "还没有存取流水记录") }
-                            } else {
-                                itemsIndexed(ops, key = { i, o -> "${o.operation_id}:$i" }) { idx, op ->
-                                    IgngInteractiveTile(
-                                        onClick = {
-                                            scope.launch {
-                                                traceLoading = true
-                                                traceData = runCatching { playerRepository.fetchVaultTrace(op.operation_id) }.getOrNull()
-                                                traceLoading = false
+                            IgngSegmentedTabs(VaultTab.entries, uiHolder.tab, { it.label }, { uiHolder.tab = it })
+                            if (uiHolder.tab == VaultTab.ITEMS) {
+                                IgngSearchField(
+                                    value = uiHolder.query,
+                                    onValueChange = {
+                                        uiHolder.query = it
+                                        if (it.isBlank()) uiHolder.submittedQuery = ""
+                                    },
+                                    placeholder = "按中文名、材质 ID 或自定义名搜索…",
+                                    onSubmit = {
+                                        val next = uiHolder.query.trim()
+                                        if (next == uiHolder.submittedQuery) itemsHandle.refresh() else uiHolder.submittedQuery = next
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (uiHolder.tab == VaultTab.ITEMS) {
+                                val groups = itemsData?.groups.orEmpty()
+                                if (itemsState.isInitialLoading && groups.isEmpty()) {
+                                    item { IgngSkeletonRows(3) }
+                                } else if (groups.isEmpty()) {
+                                    item { IgngStateBlock(title = "仓库里还没有匹配的物品") }
+                                } else {
+                                    itemsIndexed(groups, key = { i, g -> "${g.groupKey ?: g.material}:${g.displayName}:$i" }) { idx, item ->
+                                        IgngInteractiveTile(
+                                            onClick = { selectedItem = item },
+                                            modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                        ) {
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                Column(Modifier.weight(1f)) {
+                                                    IgngMcFormattedText(item.title, style = IgngTheme.type.cardTitle)
+                                                    Text(item.material, style = IgngTheme.type.mono, color = colors.textMuted)
+                                                }
+                                                IgngBadge("×${IgngFormatters.formatNumber(item.total_amount)}", tone = IgngBadgeTone.Accent)
                                             }
-                                        },
-                                        modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
-                                    ) {
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                            Text(op.material ?: op.kind, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                            IgngBadge(op.state, tone = if (op.state.equals("COMMITTED", true) || op.state.equals("COMPLETED", true)) IgngBadgeTone.Success else IgngBadgeTone.Neutral)
+                                            if (item.enchantmentLabels.isNotEmpty()) {
+                                                Spacer(Modifier.height(6.dp))
+                                                Text(
+                                                    item.enchantmentLabels.joinToString(" · "),
+                                                    style = IgngTheme.type.badge,
+                                                    color = colors.accent,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
                                         }
-                                        Spacer(Modifier.height(4.dp))
-                                        Text("${op.kind} · ${op.source_server ?: "跨服"} · ${IgngFormatters.formatIsoDateTime(op.created_at, short = true)}", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                    }
+                                }
+                            } else {
+                                val ops = historyData?.records.orEmpty()
+                                if (historyState.isInitialLoading && ops.isEmpty()) {
+                                    item { IgngSkeletonRows(3) }
+                                } else if (ops.isEmpty()) {
+                                    item { IgngStateBlock(title = "还没有存取流水记录") }
+                                } else {
+                                    itemsIndexed(ops, key = { i, o -> "${o.operation_id}:$i" }) { idx, op ->
+                                        IgngInteractiveTile(
+                                            onClick = {
+                                                scope.launch {
+                                                    traceLoading = true
+                                                    traceData = runCatching { playerRepository.fetchVaultTrace(op.operation_id) }.getOrNull()
+                                                    traceLoading = false
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                        ) {
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(op.material ?: op.kind, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                                IgngBadge(op.state, tone = if (op.state.equals("COMMITTED", true) || op.state.equals("COMPLETED", true)) IgngBadgeTone.Success else IgngBadgeTone.Neutral)
+                                            }
+                                            Spacer(Modifier.height(4.dp))
+                                            Text("${op.kind} · ${op.source_server ?: "跨服"} · ${IgngFormatters.formatIsoDateTime(op.created_at, short = true)}", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                        }
                                     }
                                 }
                             }
@@ -679,60 +732,82 @@ fun VaultScreen(
 
 // ==================== 3. My Lands / Teleports / Fake Players / Logins ====================
 
+private class MyLandsUiHolder {
+    var query by mutableStateOf("")
+    var submittedQuery by mutableStateOf("")
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
-    var lands by remember { mutableStateOf<List<PlayerLandDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val uiHolder = rememberScreenHolder("mc_lands_ui") { MyLandsUiHolder() }
     var editingLand by remember { mutableStateOf<PlayerLandDto?>(null) }
     var descDraft by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
 
-    suspend fun reload() {
-        loading = true
-        error = null
-        runCatching { playerRepository.fetchLands(keyword = query) }
-            .onSuccess { lands = it.records }
-            .onFailure { error = it.message ?: "领地列表没有读到" }
-        loading = false
+    val (landsState, landsHandle) = rememberSwrResource<List<PlayerLandDto>>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.playerLands(uiHolder.submittedQuery),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.LANDS),
+        slotKey = "mc_my_lands",
+    ) {
+        runSuspendCatching { playerRepository.fetchLands(keyword = uiHolder.submittedQuery).records }
     }
 
-    LaunchedEffect(Unit) { reload() }
+    val lands = landsState.data.orEmpty()
+    val loading = landsState.isInitialLoading
+    val error = landsState.error
+
+    fun reload() {
+        landsHandle.silentRefresh()
+    }
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "我的领地", subtitle = "查看权限旗标、公开展示与描述编辑", onBack = onBack)
             IgngSearchField(
-                value = query,
-                onValueChange = { query = it },
+                value = uiHolder.query,
+                onValueChange = {
+                    uiHolder.query = it
+                    if (it.isBlank()) uiHolder.submittedQuery = ""
+                },
                 placeholder = "搜索领地名称或描述，回车查询",
-                onSubmit = { scope.launch { reload() } },
+                onSubmit = {
+                    val next = uiHolder.query.trim()
+                    if (next == uiHolder.submittedQuery) landsHandle.refresh() else uiHolder.submittedQuery = next
+                },
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             Spacer(Modifier.height(10.dp))
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { reload() } }) }
-                lands.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有领地记录") }
-                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    itemsIndexed(lands, key = { _, l -> l.id }) { idx, land ->
-                        IgngInteractiveTile(
-                            onClick = { editingLand = land; descDraft = land.description },
-                            modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
-                        ) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text(land.land_name ?: "未命名领地", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                IgngBadge(if (land.is_public) "大厅公开" else "仅自己可见", tone = if (land.is_public) IgngBadgeTone.Success else IgngBadgeTone.Neutral)
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text("${land.server_name ?: "服务器 ${land.server_id}"} · ${IgngFormatters.worldLabel(land.world)} (${IgngFormatters.formatCoordinate(land.x, land.y, land.z)})", style = IgngTheme.type.caption, color = colors.textSecondary)
-                            if (land.description.isNotBlank()) {
+            IgngPullToRefreshBox(
+                isRefreshing = landsState.isUserRefreshing,
+                onRefresh = { landsHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { landsHandle.refresh() }) }
+                    lands.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有领地记录") }
+                    else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(lands, key = { _, l -> l.id }) { idx, land ->
+                            IgngInteractiveTile(
+                                onClick = { editingLand = land; descDraft = land.description },
+                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                            ) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(land.land_name ?: "未命名领地", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                    IgngBadge(if (land.is_public) "大厅公开" else "仅自己可见", tone = if (land.is_public) IgngBadgeTone.Success else IgngBadgeTone.Neutral)
+                                }
                                 Spacer(Modifier.height(4.dp))
-                                Text(land.description, style = IgngTheme.type.body, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${land.server_name ?: "服务器 ${land.server_id}"} · ${IgngFormatters.worldLabel(land.world)} (${IgngFormatters.formatCoordinate(land.x, land.y, land.z)})", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                if (land.description.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(land.description, style = IgngTheme.type.body, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
@@ -802,37 +877,46 @@ fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
 @Composable
 fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
-    var list by remember { mutableStateOf<List<PlayerTeleportDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        loading = true
-        runCatching { playerRepository.fetchTeleports() }
-            .onSuccess { list = it }
-            .onFailure { error = it.message ?: "传送点列表没有读到" }
-        loading = false
+    val (listState, listHandle) = rememberSwrResource<List<PlayerTeleportDto>>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_TELEPORTS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Detail,
+        slotKey = "mc_teleports",
+    ) {
+        runSuspendCatching { playerRepository.fetchTeleports() }
     }
+    val list = listState.data.orEmpty()
+    val loading = listState.isInitialLoading
+    val error = listState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "我的传送点", subtitle = "点击坐标即可复制", onBack = onBack)
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有传送点") }
-                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    itemsIndexed(list, key = { _, tp -> tp.id }) { idx, tp ->
-                        IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text(tp.point_name ?: "未命名传送点", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                IgngBadge(tp.server_name ?: "服务器 ${tp.server_id}")
+            IgngPullToRefreshBox(
+                isRefreshing = listState.isUserRefreshing,
+                onRefresh = { listHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { listHandle.refresh() })
+                    }
+                    list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有传送点") }
+                    else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(list, key = { _, tp -> tp.id }) { idx, tp ->
+                            IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(tp.point_name ?: "未命名传送点", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                    IgngBadge(tp.server_name ?: "服务器 ${tp.server_id}")
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text("${tp.owner_name ?: "—"} · ${IgngFormatters.worldLabel(tp.world)}", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                Spacer(Modifier.height(8.dp))
+                                val coord = IgngFormatters.formatCoordinate(tp.x, tp.y, tp.z)
+                                IgngCopyPill(value = coord, label = "坐标：$coord", modifier = Modifier.fillMaxWidth())
                             }
-                            Spacer(Modifier.height(6.dp))
-                            Text("${tp.owner_name ?: "—"} · ${IgngFormatters.worldLabel(tp.world)}", style = IgngTheme.type.caption, color = colors.textSecondary)
-                            Spacer(Modifier.height(8.dp))
-                            val coord = IgngFormatters.formatCoordinate(tp.x, tp.y, tp.z)
-                            IgngCopyPill(value = coord, label = "坐标：$coord", modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
@@ -844,44 +928,59 @@ fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
 @Composable
 fun MyFakePlayersScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
-    var list by remember { mutableStateOf<List<PlayerFakePlayerDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        loading = true
-        runCatching { playerRepository.fetchFakePlayers() }
-            .onSuccess { list = it }
-            .onFailure { error = it.message ?: "假人列表没有读到" }
-        loading = false
+    val (listState, listHandle) = rememberSwrResource<List<PlayerFakePlayerDto>>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_FAKE_PLAYERS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Realtime,
+        pollIntervalMs = 30_000L,
+        slotKey = "mc_fake_players",
+    ) {
+        runSuspendCatching { playerRepository.fetchFakePlayers() }
     }
+    val list = listState.data.orEmpty()
+    val loading = listState.isInitialLoading
+    val error = listState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "我的假人", subtitle = "查看在线假人状态与位置", onBack = onBack)
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "当前没有在线假人") }
-                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    itemsIndexed(list, key = { _, fp -> fp.id }) { idx, fp ->
-                        IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(fp.fake_name ?: "假人", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                IgngBadge(fp.server_name ?: "服务器 ${fp.server_id}", tone = IgngBadgeTone.Success, leadingDot = true, pulse = true)
+            IgngPullToRefreshBox(
+                isRefreshing = listState.isUserRefreshing,
+                onRefresh = { listHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { listHandle.refresh() })
+                    }
+                    list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "当前没有在线假人") }
+                    else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(list, key = { _, fp -> fp.id }) { idx, fp ->
+                            IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(fp.fake_name ?: "假人", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                    IgngBadge(fp.server_name ?: "服务器 ${fp.server_id}", tone = IgngBadgeTone.Success, leadingDot = true, pulse = true)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "血量 ${IgngFormatters.formatDecimal(fp.health, 1)} · 饥饿 ${IgngFormatters.formatDecimal(fp.hunger, 1)} · ${IgngFormatters.worldLabel(fp.world)} (${IgngFormatters.formatCoordinate(fp.x, fp.y, fp.z)})",
+                                    style = IgngTheme.type.caption,
+                                    color = colors.textSecondary,
+                                )
                             }
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                "血量 ${IgngFormatters.formatDecimal(fp.health, 1)} · 饥饿 ${IgngFormatters.formatDecimal(fp.hunger, 1)} · ${IgngFormatters.worldLabel(fp.world)} (${IgngFormatters.formatCoordinate(fp.x, fp.y, fp.z)})",
-                                style = IgngTheme.type.caption,
-                                color = colors.textSecondary,
-                            )
                         }
                     }
                 }
             }
         }
     }
+}
+
+private class LoginActivityUiHolder {
+    var selectedUsername by mutableStateOf<String?>(null)
+    var page by mutableStateOf(1)
 }
 
 @Composable
@@ -893,34 +992,27 @@ fun LoginActivityScreen(
 ) {
     val colors = IgngTheme.colors
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val uiHolder = rememberScreenHolder("mc_login_activity_ui") { LoginActivityUiHolder() }
     val feature = bootstrap?.features?.loginHistory
     val verifiedAccounts = remember(bootstrap) {
         bootstrap?.viewer?.boundMcAccounts?.filter { it.verified }.orEmpty()
     }
-    var selectedUsername by remember { mutableStateOf<String?>(null) }
-    var page by remember { mutableStateOf(1) }
-    var loading by remember { mutableStateOf(feature?.available == true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var data by remember { mutableStateOf<McLoginRecordsResponse?>(null) }
 
-    suspend fun loadRecords(targetUser: String?, targetPage: Int) {
-        if (feature?.available != true) return
-        loading = true
-        error = null
-        runCatching {
-            playerRepository.fetchLoginRecords(username = targetUser, page = targetPage, pageSize = 20)
-        }
-            .onSuccess { data = it }
-            .onFailure { error = it.message ?: "登录历史读取失败" }
-        loading = false
-    }
-
-    LaunchedEffect(feature?.available, selectedUsername, page) {
-        if (feature?.available == true) {
-            loadRecords(selectedUsername, page)
+    val (recordsState, recordsHandle) = rememberSwrResource<McLoginRecordsResponse>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.playerLoginRecords(uiHolder.selectedUsername, uiHolder.page),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        enabled = feature?.available == true,
+        slotKey = "mc_login_records",
+    ) {
+        runSuspendCatching {
+            playerRepository.fetchLoginRecords(username = uiHolder.selectedUsername, page = uiHolder.page, pageSize = 20)
         }
     }
+    val data = recordsState.data
+    val loading = recordsState.isInitialLoading
+    val error = recordsState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -938,162 +1030,168 @@ fun LoginActivityScreen(
                     )
                 },
             )
-            when {
-                feature?.available != true -> {
-                    val isNeedVerify = feature?.reason == "verification_required"
-                    val isUnauth = feature?.reason == "unauthenticated"
-                    Box(Modifier.padding(16.dp)) {
+            IgngPullToRefreshBox(
+                isRefreshing = recordsState.isUserRefreshing,
+                onRefresh = { if (feature?.available == true) recordsHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    feature?.available != true -> {
+                        val isNeedVerify = feature?.reason == "verification_required"
+                        val isUnauth = feature?.reason == "unauthenticated"
+                        Box(Modifier.padding(16.dp)) {
+                            IgngStateBlock(
+                                title = when {
+                                    isNeedVerify -> "需要完成游戏内身份核验"
+                                    isUnauth -> "请先登录 IGNG 账号"
+                                    else -> "游戏登录历史暂未开放"
+                                },
+                                description = when {
+                                    isNeedVerify -> "请先在网页端角色页为已绑定角色生成一次性验证码，并在游戏内执行 /igng verify（或 /igng bind）完成核验后即可查看登录历史。"
+                                    isUnauth -> "登录后即可查看已完成身份核验的 Minecraft 角色登录流水。"
+                                    else -> "服务端当前已暂停游戏内登录流水归因查询，待恢复后将在 /api/v1/mc/bootstrap 自动启用。"
+                                },
+                                actionLabel = if (isNeedVerify) "前往网页端核验" else null,
+                                onAction = if (isNeedVerify) {
+                                    { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                    }
+                    loading && data == null -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null && data == null -> Box(Modifier.padding(16.dp)) {
                         IgngStateBlock(
-                            title = when {
-                                isNeedVerify -> "需要完成游戏内身份核验"
-                                isUnauth -> "请先登录 IGNG 账号"
-                                else -> "游戏登录历史暂未开放"
-                            },
-                            description = when {
-                                isNeedVerify -> "请先在网页端角色页为已绑定角色生成一次性验证码，并在游戏内执行 /igng verify（或 /igng bind）完成核验后即可查看登录历史。"
-                                isUnauth -> "登录后即可查看已完成身份核验的 Minecraft 角色登录流水。"
-                                else -> "服务端当前已暂停游戏内登录流水归因查询，待恢复后将在 /api/v1/mc/bootstrap 自动启用。"
-                            },
-                            actionLabel = if (isNeedVerify) "前往网页端核验" else null,
-                            onAction = if (isNeedVerify) {
-                                { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) }
-                            } else {
-                                null
-                            },
+                            title = "读取失败",
+                            description = error,
+                            isError = true,
+                            actionLabel = "重试",
+                            onAction = { recordsHandle.refresh() },
                         )
                     }
-                }
-                loading && data == null -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null && data == null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(
-                        title = "读取失败",
-                        description = error,
-                        isError = true,
-                        actionLabel = "重试",
-                        onAction = { scope.launch { loadRecords(selectedUsername, page) } },
-                    )
-                }
-                else -> {
-                    val res = data
-                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (verifiedAccounts.size > 1) {
-                            item {
-                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    IgngBadge(
-                                        text = "全部已核验角色",
-                                        tone = if (selectedUsername == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
-                                        modifier = Modifier.clickable {
-                                            selectedUsername = null
-                                            page = 1
-                                        },
-                                    )
-                                    verifiedAccounts.forEach { acc ->
+                    else -> {
+                        val res = data
+                        LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (verifiedAccounts.size > 1) {
+                                item {
+                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         IgngBadge(
-                                            text = acc.username,
-                                            tone = if (selectedUsername == acc.username) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                                            text = "全部已核验角色",
+                                            tone = if (uiHolder.selectedUsername == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
                                             modifier = Modifier.clickable {
-                                                selectedUsername = acc.username
-                                                page = 1
+                                                uiHolder.selectedUsername = null
+                                                uiHolder.page = 1
                                             },
                                         )
+                                        verifiedAccounts.forEach { acc ->
+                                            IgngBadge(
+                                                text = acc.username,
+                                                tone = if (uiHolder.selectedUsername == acc.username) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                                                modifier = Modifier.clickable {
+                                                    uiHolder.selectedUsername = acc.username
+                                                    uiHolder.page = 1
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        if (!res?.historySince.isNullOrBlank() || !res?.unverifiedAccounts.isNullOrEmpty()) {
-                            item {
-                                IgngTile(soft = true, modifier = Modifier.fillMaxWidth()) {
-                                    res?.historySince?.let { since ->
-                                        Text(
-                                            "仅展示已完成身份核验起算点（${IgngFormatters.formatIsoDateTime(since)}）之后的归属登录记录。",
-                                            style = IgngTheme.type.caption,
-                                            color = colors.textSecondary,
-                                        )
-                                    }
-                                    val unverified = res?.unverifiedAccounts.orEmpty()
-                                    if (unverified.isNotEmpty()) {
-                                        Spacer(Modifier.height(6.dp))
-                                        Text(
-                                            "待核验角色（暂不展示登录流水）：${unverified.joinToString("、")}",
-                                            style = IgngTheme.type.caption,
-                                            color = colors.textPrimary,
-                                        )
-                                        Spacer(Modifier.height(6.dp))
-                                        IgngButton(
-                                            text = "前往网页端完成核验",
-                                            onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
-                                            style = IgngButtonStyle.Secondary,
-                                            icon = Icons.Rounded.OpenInBrowser,
-                                            compact = true,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        val records = res?.data.orEmpty()
-                        if (records.isEmpty()) {
-                            item {
-                                IgngStateBlock(
-                                    title = "还没有登录记录",
-                                    description = "当前筛选条件在身份核验起算点之后暂无进服登录记录。",
-                                )
-                            }
-                        } else {
-                            itemsIndexed(records, key = { i, r -> "${r.recordId}:$i" }) { idx, rec ->
-                                IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text(rec.username, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                            if (!res?.historySince.isNullOrBlank() || !res?.unverifiedAccounts.isNullOrEmpty()) {
+                                item {
+                                    IgngTile(soft = true, modifier = Modifier.fillMaxWidth()) {
+                                        res?.historySince?.let { since ->
                                             Text(
-                                                "${rec.serverName ?: "服务器 ${rec.serverId}"} · ${IgngFormatters.formatIsoDateTime(rec.recordedAt)}",
+                                                "仅展示已完成身份核验起算点（${IgngFormatters.formatIsoDateTime(since)}）之后的归属登录记录。",
                                                 style = IgngTheme.type.caption,
                                                 color = colors.textSecondary,
                                             )
                                         }
-                                        IgngBadge(
-                                            text = if (rec.isSuccess) "登录成功" else "登录失败",
-                                            tone = if (rec.isSuccess) IgngBadgeTone.Success else IgngBadgeTone.Danger,
-                                        )
+                                        val unverified = res?.unverifiedAccounts.orEmpty()
+                                        if (unverified.isNotEmpty()) {
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                "待核验角色（暂不展示登录流水）：${unverified.joinToString("、")}",
+                                                style = IgngTheme.type.caption,
+                                                color = colors.textPrimary,
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            IgngButton(
+                                                text = "前往网页端完成核验",
+                                                onClick = { IgngBrowserLauncher.openExternalUrl(context, "${endpoints.dash}/mc/characters", colors.isDark) },
+                                                style = IgngButtonStyle.Secondary,
+                                                icon = Icons.Rounded.OpenInBrowser,
+                                                compact = true,
+                                            )
+                                        }
                                     }
-                                    Spacer(Modifier.height(6.dp))
-                                    val location = if (!rec.world.isNullOrBlank()) {
-                                        "${IgngFormatters.worldLabel(rec.world)} (${IgngFormatters.formatCoordinate(rec.x, rec.y, rec.z)})"
-                                    } else {
-                                        "未上报坐标"
-                                    }
-                                    Text(
-                                        "IP：${rec.ipAddress ?: "未知"} · $location",
-                                        style = IgngTheme.type.mono,
-                                        color = colors.textMuted,
-                                    )
                                 }
                             }
 
-                            val pag = res?.pagination
-                            if (pag != null && pag.totalPages > 1) {
+                            val records = res?.data.orEmpty()
+                            if (records.isEmpty()) {
                                 item {
-                                    Row(
-                                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        IgngButton(
-                                            text = "上一页",
-                                            enabled = page > 1 && !loading,
-                                            onClick = { page = (page - 1).coerceAtLeast(1) },
-                                            style = IgngButtonStyle.Secondary,
-                                            compact = true,
+                                    IgngStateBlock(
+                                        title = "还没有登录记录",
+                                        description = "当前筛选条件在身份核验起算点之后暂无进服登录记录。",
+                                    )
+                                }
+                            } else {
+                                itemsIndexed(records, key = { i, r -> "${r.recordId}:$i" }) { idx, rec ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(rec.username, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                                Text(
+                                                    "${rec.serverName ?: "服务器 ${rec.serverId}"} · ${IgngFormatters.formatIsoDateTime(rec.recordedAt)}",
+                                                    style = IgngTheme.type.caption,
+                                                    color = colors.textSecondary,
+                                                )
+                                            }
+                                            IgngBadge(
+                                                text = if (rec.isSuccess) "登录成功" else "登录失败",
+                                                tone = if (rec.isSuccess) IgngBadgeTone.Success else IgngBadgeTone.Danger,
+                                            )
+                                        }
+                                        Spacer(Modifier.height(6.dp))
+                                        val location = if (!rec.world.isNullOrBlank()) {
+                                            "${IgngFormatters.worldLabel(rec.world)} (${IgngFormatters.formatCoordinate(rec.x, rec.y, rec.z)})"
+                                        } else {
+                                            "未上报坐标"
+                                        }
+                                        Text(
+                                            "IP：${rec.ipAddress ?: "未知"} · $location",
+                                            style = IgngTheme.type.mono,
+                                            color = colors.textMuted,
                                         )
-                                        Text("第 ${pag.page} / ${pag.totalPages} 页 · 共 ${pag.total} 条", style = IgngTheme.type.caption, color = colors.textSecondary)
-                                        IgngButton(
-                                            text = "下一页",
-                                            enabled = page < pag.totalPages && !loading,
-                                            onClick = { page = (page + 1).coerceAtMost(pag.totalPages) },
-                                            style = IgngButtonStyle.Secondary,
-                                            compact = true,
-                                        )
+                                    }
+                                }
+
+                                val pag = res?.pagination
+                                if (pag != null && pag.totalPages > 1) {
+                                    item {
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            IgngButton(
+                                                text = "上一页",
+                                                enabled = uiHolder.page > 1 && !loading,
+                                                onClick = { uiHolder.page = (uiHolder.page - 1).coerceAtLeast(1) },
+                                                style = IgngButtonStyle.Secondary,
+                                                compact = true,
+                                            )
+                                            Text("第 ${pag.page} / ${pag.totalPages} 页 · 共 ${pag.total} 条", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                            IgngButton(
+                                                text = "下一页",
+                                                enabled = uiHolder.page < pag.totalPages && !loading,
+                                                onClick = { uiHolder.page = (uiHolder.page + 1).coerceAtMost(pag.totalPages) },
+                                                style = IgngButtonStyle.Secondary,
+                                                compact = true,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1107,93 +1205,106 @@ fun LoginActivityScreen(
 
 // ==================== 4. Vanilla Stats / Medals / Perfect / Permissions ====================
 
+private class VanillaStatsUiHolder {
+    var selectedServerId by mutableStateOf<Int?>(null)
+}
+
 @Composable
 fun VanillaStatsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
-    var stats by remember { mutableStateOf<VanillaStatsResponse?>(null) }
-    var selectedServerId by remember { mutableStateOf<Int?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val uiHolder = rememberScreenHolder("mc_vanilla_stats_ui") { VanillaStatsUiHolder() }
 
-    LaunchedEffect(selectedServerId) {
-        loading = true
-        error = null
-        runCatching { playerRepository.fetchVanillaStats(serverId = selectedServerId) }
-            .onSuccess { stats = it }
-            .onFailure { error = it.message ?: "统计数据没有读到" }
-        loading = false
+    val (statsState, statsHandle) = rememberSwrResource<VanillaStatsResponse>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.playerStats(uiHolder.selectedServerId),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Detail,
+        slotKey = "mc_vanilla_stats",
+    ) {
+        runSuspendCatching { playerRepository.fetchVanillaStats(serverId = uiHolder.selectedServerId) }
     }
+    val stats = statsState.data
+    val loading = statsState.isInitialLoading
+    val error = statsState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "游戏统计", subtitle = "Minecraft 原版统计快照与图表", onBack = onBack)
-            when {
-                loading && stats == null -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null && stats == null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                stats != null -> {
-                    val data = stats!!
-                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        if (data.servers.isNotEmpty()) {
-                            item {
-                                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    IgngBadge(
-                                        text = "全部服务器",
-                                        tone = if (selectedServerId == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
-                                        modifier = Modifier.clickable { selectedServerId = null },
-                                    )
-                                    data.servers.forEach { srv ->
+            IgngPullToRefreshBox(
+                isRefreshing = statsState.isUserRefreshing,
+                onRefresh = { statsHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading && stats == null -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null && stats == null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { statsHandle.refresh() })
+                    }
+                    stats != null -> {
+                        val data = stats
+                        LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            if (data.servers.isNotEmpty()) {
+                                item {
+                                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         IgngBadge(
-                                            text = srv.serverName,
-                                            tone = if (selectedServerId == srv.serverId) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
-                                            modifier = Modifier.clickable { selectedServerId = srv.serverId },
+                                            text = "全部服务器",
+                                            tone = if (uiHolder.selectedServerId == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                                            modifier = Modifier.clickable { uiHolder.selectedServerId = null },
+                                        )
+                                        data.servers.forEach { srv ->
+                                            IgngBadge(
+                                                text = srv.serverName,
+                                                tone = if (uiHolder.selectedServerId == srv.serverId) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                                                modifier = Modifier.clickable { uiHolder.selectedServerId = srv.serverId },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                val s = data.summary
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MiniKpi("总游玩时长", IgngFormatters.formatPlaytimeSeconds(s.playTimeSeconds), Modifier.weight(1f))
+                                        MiniKpi("总移动里程", IgngFormatters.formatDistanceCm(s.distanceCm), Modifier.weight(1f))
+                                    }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MiniKpi("挖掘方块", IgngFormatters.formatNumber(s.blocksMined), Modifier.weight(1f))
+                                        MiniKpi("合成物品", IgngFormatters.formatNumber(s.itemsCrafted), Modifier.weight(1f))
+                                    }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MiniKpi("击败生物", IgngFormatters.formatNumber(s.mobKills), Modifier.weight(1f))
+                                        MiniKpi("阵亡次数", IgngFormatters.formatNumber(s.deaths), Modifier.weight(1f))
+                                    }
+                                }
+                            }
+
+                            fun renderRanking(title: String, entries: List<net.igng.mcstatus.core.data.VanillaStatEntryDto>) {
+                                if (entries.isEmpty()) return
+                                item {
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                        IgngSectionHeader(title = title)
+                                        Spacer(Modifier.height(10.dp))
+                                        val max = entries.maxOf { it.value }.coerceAtLeast(1L).toFloat()
+                                        IgngHorizontalBarList(
+                                            items = entries.take(8).map {
+                                                IgngBarMetric(
+                                                    label = it.label.ifBlank { it.key },
+                                                    formattedValue = it.formatted ?: IgngFormatters.formatNumber(it.value),
+                                                    ratio = it.value / max,
+                                                )
+                                            },
                                         )
                                     }
                                 }
                             }
-                        }
 
-                        item {
-                            val s = data.summary
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    MiniKpi("总游玩时长", IgngFormatters.formatPlaytimeSeconds(s.playTimeSeconds), Modifier.weight(1f))
-                                    MiniKpi("总移动里程", IgngFormatters.formatDistanceCm(s.distanceCm), Modifier.weight(1f))
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    MiniKpi("挖掘方块", IgngFormatters.formatNumber(s.blocksMined), Modifier.weight(1f))
-                                    MiniKpi("合成物品", IgngFormatters.formatNumber(s.itemsCrafted), Modifier.weight(1f))
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    MiniKpi("击败生物", IgngFormatters.formatNumber(s.mobKills), Modifier.weight(1f))
-                                    MiniKpi("阵亡次数", IgngFormatters.formatNumber(s.deaths), Modifier.weight(1f))
-                                }
-                            }
+                            renderRanking("移动方式分布", data.movement)
+                            renderRanking("挖掘最多方块", data.topMined)
+                            renderRanking("合成最多物品", data.topCrafted)
+                            renderRanking("击败最多生物", data.topKilled)
                         }
-
-                        fun renderRanking(title: String, entries: List<net.igng.mcstatus.core.data.VanillaStatEntryDto>) {
-                            if (entries.isEmpty()) return
-                            item {
-                                IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                    IgngSectionHeader(title = title)
-                                    Spacer(Modifier.height(10.dp))
-                                    val max = entries.maxOf { it.value }.coerceAtLeast(1L).toFloat()
-                                    IgngHorizontalBarList(
-                                        items = entries.take(8).map {
-                                            IgngBarMetric(
-                                                label = it.label.ifBlank { it.key },
-                                                formattedValue = it.formatted ?: IgngFormatters.formatNumber(it.value),
-                                                ratio = it.value / max,
-                                            )
-                                        },
-                                    )
-                                }
-                            }
-                        }
-
-                        renderRanking("移动方式分布", data.movement)
-                        renderRanking("挖掘最多方块", data.topMined)
-                        renderRanking("合成最多物品", data.topCrafted)
-                        renderRanking("击败最多生物", data.topKilled)
                     }
                 }
             }
@@ -1205,78 +1316,90 @@ fun VanillaStatsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
 fun MyMedalsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var profile by remember { mutableStateOf<MedalProfileDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
     var editingSlot by remember { mutableStateOf<CustomMedalSlotDto?>(null) }
     var customInput by remember { mutableStateOf("") }
     var validationError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
 
-    suspend fun reload() {
-        loading = true
-        error = null
-        runCatching { playerRepository.fetchMedals() }
-            .onSuccess { profile = it }
-            .onFailure { error = it.message ?: "勋章数据没有读到" }
-        loading = false
+    val (profileState, profileHandle) = rememberSwrResource<MedalProfileDto>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_MEDALS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Detail,
+        tags = setOf(McCacheTags.MEDALS),
+        slotKey = "mc_medals",
+    ) {
+        runSuspendCatching { playerRepository.fetchMedals() }
     }
+    val profile = profileState.data
+    val loading = profileState.isInitialLoading
+    val error = profileState.error
 
-    LaunchedEffect(Unit) { reload() }
+    fun reload() {
+        profileHandle.silentRefresh()
+    }
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "我的勋章", subtitle = "荣誉陈列与自定义称号名称", onBack = onBack)
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { reload() } }) }
-                profile != null -> {
-                    val data = profile!!
-                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (data.customMedals.isNotEmpty()) {
-                            item { IgngSectionHeader(title = "自定义勋章称号", subtitle = "修改后将与游戏内同步") }
-                            items(data.customMedals, key = { it.ownerName }) { slot ->
-                                IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text(slot.customName?.ifBlank { "未设置自定义称号" } ?: "未设置自定义称号", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                            Text("角色：${slot.ownerName}", style = IgngTheme.type.caption, color = colors.textSecondary)
-                                        }
-                                        if (slot.canEdit) {
-                                            IgngButton(
-                                                text = "修改名称",
-                                                onClick = {
-                                                    editingSlot = slot
-                                                    customInput = slot.customName.orEmpty()
-                                                    validationError = null
-                                                },
-                                                style = IgngButtonStyle.Secondary,
-                                                icon = Icons.Rounded.Edit,
-                                                compact = true,
-                                            )
+            IgngPullToRefreshBox(
+                isRefreshing = profileState.isUserRefreshing,
+                onRefresh = { profileHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { profileHandle.refresh() })
+                    }
+                    profile != null -> {
+                        val data = profile
+                        LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (data.customMedals.isNotEmpty()) {
+                                item { IgngSectionHeader(title = "自定义勋章称号", subtitle = "修改后将与游戏内同步") }
+                                items(data.customMedals, key = { it.ownerName }) { slot ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(slot.customName?.ifBlank { "未设置自定义称号" } ?: "未设置自定义称号", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                                Text("角色：${slot.ownerName}", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                            }
+                                            if (slot.canEdit) {
+                                                IgngButton(
+                                                    text = "修改名称",
+                                                    onClick = {
+                                                        editingSlot = slot
+                                                        customInput = slot.customName.orEmpty()
+                                                        validationError = null
+                                                    },
+                                                    style = IgngButtonStyle.Secondary,
+                                                    icon = Icons.Rounded.Edit,
+                                                    compact = true,
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        item { IgngSectionHeader(title = "已获得勋章", subtitle = "共 ${data.allActiveMedals.size} 枚") }
-                        if (data.allActiveMedals.isEmpty()) {
-                            item { IgngStateBlock(title = "还没有获得勋章", description = "参与服务器活动与周目建设可解锁专属勋章。") }
-                        } else {
-                            itemsIndexed(data.allActiveMedals, key = { i, m -> "${m.id}:${m.medalId}:$i" }) { idx, medal ->
-                                IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(medal.displayName ?: medal.name, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                        medal.account?.let { IgngBadge(it, tone = IgngBadgeTone.Accent) }
-                                    }
-                                    medal.description?.takeIf { it.isNotBlank() }?.let {
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(it, style = IgngTheme.type.body, color = colors.textSecondary)
-                                    }
-                                    medal.publicReason?.takeIf { it.isNotBlank() }?.let {
-                                        Spacer(Modifier.height(4.dp))
-                                        Text("颁发原因：$it", style = IgngTheme.type.caption, color = colors.textMuted)
+                            item { IgngSectionHeader(title = "已获得勋章", subtitle = "共 ${data.allActiveMedals.size} 枚") }
+                            if (data.allActiveMedals.isEmpty()) {
+                                item { IgngStateBlock(title = "还没有获得勋章", description = "参与服务器活动与周目建设可解锁专属勋章。") }
+                            } else {
+                                itemsIndexed(data.allActiveMedals, key = { i, m -> "${m.id}:${m.medalId}:$i" }) { idx, medal ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text(medal.displayName ?: medal.name, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                            medal.account?.let { IgngBadge(it, tone = IgngBadgeTone.Accent) }
+                                        }
+                                        medal.description?.takeIf { it.isNotBlank() }?.let {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(it, style = IgngTheme.type.body, color = colors.textSecondary)
+                                        }
+                                        medal.publicReason?.takeIf { it.isNotBlank() }?.let {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text("颁发原因：$it", style = IgngTheme.type.caption, color = colors.textMuted)
+                                        }
                                     }
                                 }
                             }
@@ -1330,138 +1453,147 @@ fun MyMedalsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
 @Composable
 fun PersonalPerfectScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
-    var data by remember { mutableStateOf<PersonalPerfectResponse?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        loading = true
-        runCatching { playerRepository.fetchPersonalPerfect() }
-            .onSuccess { data = it }
-            .onFailure { error = it.message ?: "完美之人信息暂时不可用" }
-        loading = false
+    val (dataState, dataHandle) = rememberSwrResource<PersonalPerfectResponse>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_PERFECT,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Detail,
+        slotKey = "mc_personal_perfect",
+    ) {
+        runSuspendCatching { playerRepository.fetchPersonalPerfect() }
     }
+    val data = dataState.data
+    val loading = dataState.isInitialLoading
+    val error = dataState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "完美之人", subtitle = "个人资格状态与权益额度", onBack = onBack)
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                data != null -> {
-                    val info = data!!
-                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        item {
-                            IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text("认证状态", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
-                                    IgngBadge(
-                                        text = if (info.hasPerfect) "完美之人" else "未认证",
-                                        tone = if (info.hasPerfect) IgngBadgeTone.Warning else IgngBadgeTone.Neutral,
-                                    )
-                                }
-                                if (info.holders.isNotEmpty()) {
-                                    Spacer(Modifier.height(8.dp))
-                                    info.holders.forEach { h ->
-                                        Row(
-                                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
+            IgngPullToRefreshBox(
+                isRefreshing = dataState.isUserRefreshing,
+                onRefresh = { dataHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(3) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { dataHandle.refresh() })
+                    }
+                    data != null -> {
+                        val info = data
+                        LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            item {
+                                IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("认证状态", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
+                                        IgngBadge(
+                                            text = if (info.hasPerfect) "完美之人" else "未认证",
+                                            tone = if (info.hasPerfect) IgngBadgeTone.Warning else IgngBadgeTone.Neutral,
+                                        )
+                                    }
+                                    if (info.holders.isNotEmpty()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        info.holders.forEach { h ->
                                             Row(
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
-                                                h.memberNoLabel?.takeIf { it.isNotBlank() }?.let {
-                                                    IgngBadge(it, tone = IgngBadgeTone.Warning)
-                                                }
-                                                Column {
-                                                    Text(h.username, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
-                                                    h.qualificationLabel?.takeIf { it.isNotBlank() }?.let {
-                                                        Text(it, style = IgngTheme.type.badge, color = colors.textSecondary)
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    h.memberNoLabel?.takeIf { it.isNotBlank() }?.let {
+                                                        IgngBadge(it, tone = IgngBadgeTone.Warning)
+                                                    }
+                                                    Column {
+                                                        Text(h.username, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                                        h.qualificationLabel?.takeIf { it.isNotBlank() }?.let {
+                                                            Text(it, style = IgngTheme.type.badge, color = colors.textSecondary)
+                                                        }
                                                     }
                                                 }
+                                                IgngBadge(
+                                                    text = if (h.isHolder) "已生效" else "未生效",
+                                                    tone = if (h.isHolder) IgngBadgeTone.Success else IgngBadgeTone.Neutral,
+                                                )
                                             }
-                                            IgngBadge(
-                                                text = if (h.isHolder) "已生效" else "未生效",
-                                                tone = if (h.isHolder) IgngBadgeTone.Success else IgngBadgeTone.Neutral,
-                                            )
                                         }
                                     }
                                 }
                             }
-                        }
-                        if (info.benefits.isNotEmpty()) {
-                            item { IgngSectionHeader(title = "权益与额度") }
-                            itemsIndexed(info.benefits, key = { i, b -> "${b.key}:$i" }) { idx, b ->
-                                IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
-                                    Text(b.title, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                    val benefitDesc = b.summary.ifBlank { b.description }
-                                    if (benefitDesc.isNotBlank()) {
-                                        Spacer(Modifier.height(3.dp))
-                                        Text(benefitDesc, style = IgngTheme.type.caption, color = colors.textSecondary)
-                                    }
-                                    if (b.limits.isNotEmpty()) {
-                                        Spacer(Modifier.height(6.dp))
-                                        b.limits.forEach { lim ->
-                                            Text("· $lim", style = IgngTheme.type.badge, color = colors.textMuted)
+                            if (info.benefits.isNotEmpty()) {
+                                item { IgngSectionHeader(title = "权益与额度") }
+                                itemsIndexed(info.benefits, key = { i, b -> "${b.key}:$i" }) { idx, b ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                        Text(b.title, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                        val benefitDesc = b.summary.ifBlank { b.description }
+                                        if (benefitDesc.isNotBlank()) {
+                                            Spacer(Modifier.height(3.dp))
+                                            Text(benefitDesc, style = IgngTheme.type.caption, color = colors.textSecondary)
+                                        }
+                                        if (b.limits.isNotEmpty()) {
+                                            Spacer(Modifier.height(6.dp))
+                                            b.limits.forEach { lim ->
+                                                Text("· $lim", style = IgngTheme.type.badge, color = colors.textMuted)
+                                            }
+                                        }
+                                        val limit = b.limit ?: 0
+                                        val used = b.used ?: 0
+                                        if (limit > 0) {
+                                            Spacer(Modifier.height(8.dp))
+                                            val ratio = (used.toFloat() / limit).coerceIn(0f, 1f)
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text("当前用量", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                                Text("$used / $limit", style = IgngTheme.type.mono, color = colors.textPrimary)
+                                            }
+                                            Spacer(Modifier.height(4.dp))
+                                            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)).background(colors.tileSoft)) {
+                                                Box(Modifier.fillMaxWidth(ratio).height(6.dp).clip(RoundedCornerShape(999.dp)).background(colors.accent))
+                                            }
                                         }
                                     }
-                                    val limit = b.limit ?: 0
-                                    val used = b.used ?: 0
-                                    if (limit > 0) {
+                                }
+                            }
+                            if (info.criteria.isNotEmpty()) {
+                                item {
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                        IgngSectionHeader(title = "认证标准")
                                         Spacer(Modifier.height(8.dp))
-                                        val ratio = (used.toFloat() / limit).coerceIn(0f, 1f)
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                            Text("当前用量", style = IgngTheme.type.caption, color = colors.textSecondary)
-                                            Text("$used / $limit", style = IgngTheme.type.mono, color = colors.textPrimary)
-                                        }
-                                        Spacer(Modifier.height(4.dp))
-                                        Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)).background(colors.tileSoft)) {
-                                            Box(Modifier.fillMaxWidth(ratio).height(6.dp).clip(RoundedCornerShape(999.dp)).background(colors.accent))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if (info.criteria.isNotEmpty()) {
-                            item {
-                                IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                    IgngSectionHeader(title = "认证标准")
-                                    Spacer(Modifier.height(8.dp))
-                                    info.criteria.forEach { c ->
-                                        Column(Modifier.padding(vertical = 4.dp)) {
-                                            if (c.title.isNotBlank()) {
-                                                Text(c.title, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
-                                            }
-                                            if (c.text.isNotBlank()) {
-                                                Text(c.text, style = IgngTheme.type.caption, color = colors.textSecondary)
+                                        info.criteria.forEach { c ->
+                                            Column(Modifier.padding(vertical = 4.dp)) {
+                                                if (c.title.isNotBlank()) {
+                                                    Text(c.title, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                                }
+                                                if (c.text.isNotBlank()) {
+                                                    Text(c.text, style = IgngTheme.type.caption, color = colors.textSecondary)
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        }
-                        if (info.rules.isNotEmpty()) {
-                            item {
-                                IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                    IgngSectionHeader(title = "权益细则")
-                                    Spacer(Modifier.height(8.dp))
-                                    info.rules.forEach { r ->
-                                        if (r.text.isNotBlank()) {
-                                            Text("· ${r.text}", style = IgngTheme.type.caption, color = colors.textSecondary, modifier = Modifier.padding(vertical = 2.dp))
+                            if (info.rules.isNotEmpty()) {
+                                item {
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                        IgngSectionHeader(title = "权益细则")
+                                        Spacer(Modifier.height(8.dp))
+                                        info.rules.forEach { r ->
+                                            if (r.text.isNotBlank()) {
+                                                Text("· ${r.text}", style = IgngTheme.type.caption, color = colors.textSecondary, modifier = Modifier.padding(vertical = 2.dp))
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        if (info.applySteps.isNotEmpty()) {
-                            item {
-                                IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                    IgngSectionHeader(title = "申请流程")
-                                    Spacer(Modifier.height(8.dp))
-                                    info.applySteps.forEachIndexed { i, step ->
-                                        Text("${i + 1}. $step", style = IgngTheme.type.caption, color = colors.textSecondary, modifier = Modifier.padding(vertical = 2.dp))
+                            if (info.applySteps.isNotEmpty()) {
+                                item {
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                        IgngSectionHeader(title = "申请流程")
+                                        Spacer(Modifier.height(8.dp))
+                                        info.applySteps.forEachIndexed { i, step ->
+                                            Text("${i + 1}. $step", style = IgngTheme.type.caption, color = colors.textSecondary, modifier = Modifier.padding(vertical = 2.dp))
+                                        }
                                     }
                                 }
                             }
@@ -1475,36 +1607,57 @@ fun PersonalPerfectScreen(playerRepository: PlayerRepository, onBack: () -> Unit
 
 private enum class PermTab(val label: String) { GROUPS("权限组与节点"), INSIGHTS("动态与到期") }
 
+private data class PermissionsBundle(
+    val perms: PlayerPermissionsResponse,
+    val insights: PermissionInsightsResponse?,
+)
+
+private class PermissionsUiHolder {
+    var tab by mutableStateOf(PermTab.GROUPS)
+}
+
 @Composable
 fun PermissionsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf(PermTab.GROUPS) }
-    var perms by remember { mutableStateOf<PlayerPermissionsResponse?>(null) }
-    var insights by remember { mutableStateOf<PermissionInsightsResponse?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        loading = true
-        val pDef = scope.async { runCatching { playerRepository.fetchPermissions() } }
-        val iDef = scope.async { runCatching { playerRepository.fetchPermissionInsights() } }
-        pDef.await().onSuccess { perms = it }.onFailure { error = it.message ?: "游戏权限没有读到" }
-        iDef.await().onSuccess { insights = it }
-        loading = false
+    val uiHolder = rememberScreenHolder("mc_perms_ui") { PermissionsUiHolder() }
+    val (bundleState, bundleHandle) = rememberSwrResource<PermissionsBundle>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_PERMISSIONS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Detail,
+        slotKey = "mc_permissions",
+    ) {
+        runSuspendCatching {
+            coroutineScope {
+                val pDef = async { playerRepository.fetchPermissions() }
+                val iDef = async { runSuspendCatching { playerRepository.fetchPermissionInsights() }.getOrNull() }
+                PermissionsBundle(perms = pDef.await(), insights = iDef.await())
+            }
+        }
     }
+    val perms = bundleState.data?.perms
+    val insights = bundleState.data?.insights
+    val loading = bundleState.isInitialLoading
+    val error = bundleState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "游戏权限", subtitle = "LuckPerms 跨服权限组与独立节点", onBack = onBack)
             Box(Modifier.padding(horizontal = 16.dp)) {
-                IgngSegmentedTabs(PermTab.entries, tab, { it.label }, { tab = it })
+                IgngSegmentedTabs(PermTab.entries, uiHolder.tab, { it.label }, { uiHolder.tab = it })
             }
             Spacer(Modifier.height(10.dp))
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true) }
-                tab == PermTab.GROUPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            IgngPullToRefreshBox(
+                isRefreshing = bundleState.isUserRefreshing,
+                onRefresh = { bundleHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { bundleHandle.refresh() })
+                    }
+                    uiHolder.tab == PermTab.GROUPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     val accounts = perms?.accounts.orEmpty()
                     if (accounts.isEmpty()) {
                         item { IgngStateBlock(title = "还没有权限记录") }
@@ -1592,6 +1745,7 @@ fun PermissionsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                         }
                     }
                 }
+            }
             }
         }
     }

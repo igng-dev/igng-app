@@ -19,18 +19,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
+import net.igng.mcstatus.core.data.McDiskCodecs
 import net.igng.mcstatus.core.data.PublicServerStatusDto
 import net.igng.mcstatus.core.data.PublicStatusHistoryResponse
 import net.igng.mcstatus.core.data.PublicStatusResponse
@@ -63,35 +67,49 @@ import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.ServerThemeKey
 
+private class StatusWallUiHolder {
+    var preset by mutableStateOf(StatusRangePreset.H24)
+}
+
 @Composable
 fun StatusWallScreen(
     statusRepository: StatusRepository,
     onBack: () -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
-    var preset by remember { mutableStateOf(StatusRangePreset.H24) }
-    var statusResponse by remember { mutableStateOf<PublicStatusResponse?>(null) }
-    var historyResponse by remember { mutableStateOf<PublicStatusHistoryResponse?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val uiHolder = rememberScreenHolder("status_wall_ui") { StatusWallUiHolder() }
     var inspectedServer by remember { mutableStateOf<PublicServerStatusDto?>(null) }
 
-    suspend fun load(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else loading = true
-        error = null
-        val sDef = scope.async { runCatching { statusRepository.fetchPublicStatus() } }
-        val hDef = scope.async { runCatching { statusRepository.fetchPublicHistory(preset) } }
-        sDef.await().onSuccess { statusResponse = it }.onFailure { error = it.message ?: "服务器状态暂时不可用" }
-        hDef.await().onSuccess { historyResponse = it }
-        loading = false
-        refreshing = false
+    val (statusState, statusHandle) = rememberSwrResource<PublicStatusResponse>(
+        cache = statusRepository.swrCache,
+        cacheKey = McCacheKeys.STATUS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Status,
+        tags = setOf(McCacheTags.STATUS),
+        diskCodec = McDiskCodecs.status,
+        pollIntervalMs = 30_000L,
+        slotKey = "status_wall_live",
+    ) {
+        runSuspendCatching { statusRepository.fetchPublicStatus() }
     }
 
-    LaunchedEffect(preset) { load(isRefresh = statusResponse != null) }
+    val (historyState, historyHandle) = rememberSwrResource<PublicStatusHistoryResponse>(
+        cache = statusRepository.swrCache,
+        cacheKey = McCacheKeys.statusHistory(uiHolder.preset),
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Realtime,
+        tags = setOf(McCacheTags.STATUS),
+        slotKey = "status_wall_history",
+    ) {
+        runSuspendCatching { statusRepository.fetchPublicHistory(uiHolder.preset) }
+    }
 
+    val statusResponse = statusState.data
+    val historyResponse = historyState.data
     val servers = statusResponse?.servers.orEmpty()
+    val loading = statusState.isInitialLoading && servers.isEmpty()
+    val refreshing = statusState.isUserRefreshing || historyState.isUserRefreshing
+    val error = if (servers.isEmpty()) statusState.error else null
     val onlineCount = servers.count { it.online }
     val totalPlayers = servers.sumOf { it.onlinePlayers ?: 0 }
 
@@ -105,7 +123,10 @@ fun StatusWallScreen(
 
             IgngPullToRefreshBox(
                 isRefreshing = refreshing,
-                onRefresh = { scope.launch { load(isRefresh = true) } },
+                onRefresh = {
+                    statusHandle.refresh()
+                    historyHandle.refresh()
+                },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
@@ -116,7 +137,10 @@ fun StatusWallScreen(
                             description = error,
                             isError = true,
                             actionLabel = "重试",
-                            onAction = { scope.launch { load(isRefresh = false) } },
+                            onAction = {
+                                statusHandle.refresh()
+                                historyHandle.refresh()
+                            },
                         )
                     }
                     else -> LazyColumn(
@@ -135,9 +159,9 @@ fun StatusWallScreen(
                         item(key = "range") {
                             IgngSegmentedTabs(
                                 items = StatusRangePreset.entries,
-                                selected = preset,
+                                selected = uiHolder.preset,
                                 labelOf = { it.label },
-                                onSelect = { preset = it },
+                                onSelect = { uiHolder.preset = it },
                             )
                         }
 
@@ -161,7 +185,7 @@ fun StatusWallScreen(
         ServerDetailBottomSheet(
             server = server,
             series = series,
-            preset = preset,
+            preset = uiHolder.preset,
             onDismiss = { inspectedServer = null },
         )
     }

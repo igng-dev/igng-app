@@ -15,7 +15,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import net.igng.mcstatus.core.data.AuthRepository
 import net.igng.mcstatus.core.model.SiteEndpoints
+import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.IgngLocalJsonCache
+import net.igng.core.data.IgngSwrCache
 import net.igng.core.model.V1Id
 import net.igng.mcstatus.core.data.ApiClient
 import net.igng.core.network.CredentialEnvelopeSeal
@@ -41,6 +43,7 @@ class ExploreRepository(
     private val api: ApiClient,
     private val cache: LocalJsonCache,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchHomeFamilies(): List<ServerFamilyDto> {
         val raw = api.get("${endpoints.api}/api/v1/mc/servers", allowAnonymousFallback = true)
@@ -107,6 +110,7 @@ class StatusRepository(
     private val endpoints: SiteEndpoints,
     private val api: ApiClient,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchPublicStatus(): PublicStatusResponse =
         json.decodeFromString(api.get("${endpoints.api}/api/v1/mc/status", allowAnonymousFallback = true))
@@ -130,6 +134,7 @@ class ChatRepository(
     private val endpoints: SiteEndpoints,
     private val api: ApiClient,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchSources(): ChatSourcesResponse =
         json.decodeFromString(api.get("${endpoints.api}/api/v1/chat/sources", allowAnonymousFallback = true))
@@ -201,6 +206,7 @@ class WikiRepository(
     private val api: ApiClient,
     private val cache: LocalJsonCache,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchCatalog(kb: String = "IGNGmc"): WikiCatalogResponse {
         val url = "${endpoints.api}/api/v1/wiki/catalog".toHttpUrl().newBuilder()
@@ -238,6 +244,7 @@ class PlayerRepository(
     private val api: ApiClient,
     private val authRepository: AuthRepository,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchBoundAccounts(): List<BoundMcAccountDto> =
         json.decodeFromString<BoundMcAccountsResponse>(api.get("${endpoints.api}/api/v1/mc/accounts")).data
@@ -269,13 +276,16 @@ class PlayerRepository(
 
     suspend fun toggleAccountPublic(mcUsername: String, isPublic: Boolean): McActionResult {
         val body = buildJsonObject { put("is_public", isPublic) }
-        return json.decodeFromString(
+        val res: McActionResult = json.decodeFromString(
             api.patch("${endpoints.api}/api/v1/mc/accounts/${Uri.encode(mcUsername)}", body.toString()),
         )
+        swrCache.markStale(McCacheTags.PLAYER_ACCOUNTS, McCacheTags.BOOTSTRAP)
+        return res
     }
 
     suspend fun unbindAccount(mcUsername: String) {
         api.delete("${endpoints.api}/api/v1/mc/accounts/${Uri.encode(mcUsername)}")
+        swrCache.markStale(McCacheTags.PLAYER_ACCOUNTS, McCacheTags.BOOTSTRAP)
     }
 
     /**
@@ -323,9 +333,11 @@ class PlayerRepository(
             isPublic?.let { put("is_public", it) }
             description?.let { put("description", it) }
         }
-        return json.decodeFromString(
+        val res: McActionResult = json.decodeFromString(
             api.patch("${endpoints.api}/api/v1/mc/lands/${V1Id.format("land", landId)}", body.toString()),
         )
+        swrCache.markStale(McCacheTags.LANDS, McCacheTags.HALL)
+        return res
     }
 
     suspend fun fetchTeleports(): List<PlayerTeleportDto> =
@@ -375,7 +387,11 @@ class PlayerRepository(
             put("username", mcUsername)
             put("custom_name", customName)
         }
-        return json.decodeFromString(api.patch("${endpoints.api}/api/v1/mc/medals/custom-name", body.toString()))
+        val res: McActionResult = json.decodeFromString(
+            api.patch("${endpoints.api}/api/v1/mc/medals/custom-name", body.toString()),
+        )
+        swrCache.markStale(McCacheTags.MEDALS)
+        return res
     }
 
     suspend fun fetchPersonalPerfect(): PersonalPerfectResponse =
@@ -393,6 +409,7 @@ class TicketRepository(
     private val api: ApiClient,
     private val draftCache: LocalJsonCache,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchList(
         relation: String = "all",
@@ -439,17 +456,33 @@ class TicketRepository(
         )
         val detail = json.decodeFromString<TicketDetailDto>(raw)
         clearDraft()
+        swrCache.put(
+            key = McCacheKeys.ticketDetail(detail.id),
+            data = detail,
+            scope = IgngCacheScope.USER_ONLY,
+            tags = setOf(McCacheTags.TICKETS),
+        )
+        swrCache.markStale(McCacheTags.TICKETS, McCacheTags.HALL, McCacheTags.ADMIN)
         return detail.id
     }
 
-    suspend fun updateTicket(id: Int, etag: String, payload: UpdateTicketPayload): TicketDetailDto =
-        json.decodeFromString(
+    suspend fun updateTicket(id: Int, etag: String, payload: UpdateTicketPayload): TicketDetailDto {
+        val updated: TicketDetailDto = json.decodeFromString(
             api.patch(
                 url = "${endpoints.api}/api/v1/tickets/${V1Id.format("tk", id)}",
                 body = json.encodeToString(UpdateTicketPayload.serializer(), payload),
                 ifMatch = etag,
             ),
         )
+        swrCache.put(
+            key = McCacheKeys.ticketDetail(id),
+            data = updated,
+            scope = IgngCacheScope.USER_ONLY,
+            tags = setOf(McCacheTags.TICKETS),
+        )
+        swrCache.markStale(McCacheTags.TICKETS, McCacheTags.HALL, McCacheTags.ADMIN)
+        return updated
+    }
 
     suspend fun reply(id: Int, content: String, attachmentMediaIds: List<String> = emptyList()) {
         val body = buildJsonObject {
@@ -462,13 +495,36 @@ class TicketRepository(
             }
         }
         api.post("${endpoints.api}/api/v1/tickets/${V1Id.format("tk", id)}/messages", body.toString())
+        swrCache.markStale(McCacheTags.TICKETS, McCacheTags.HALL, McCacheTags.ADMIN)
     }
 
-    suspend fun close(id: Int): TicketDetailDto =
-        json.decodeFromString(api.post("${endpoints.api}/api/v1/tickets/${V1Id.format("tk", id)}/close", "{}"))
+    suspend fun close(id: Int): TicketDetailDto {
+        val updated: TicketDetailDto = json.decodeFromString(
+            api.post("${endpoints.api}/api/v1/tickets/${V1Id.format("tk", id)}/close", "{}"),
+        )
+        swrCache.put(
+            key = McCacheKeys.ticketDetail(id),
+            data = updated,
+            scope = IgngCacheScope.USER_ONLY,
+            tags = setOf(McCacheTags.TICKETS),
+        )
+        swrCache.markStale(McCacheTags.TICKETS, McCacheTags.HALL, McCacheTags.ADMIN)
+        return updated
+    }
 
-    suspend fun reopen(id: Int): TicketDetailDto =
-        json.decodeFromString(api.post("${endpoints.api}/api/v1/tickets/${V1Id.format("tk", id)}/reopen", "{}"))
+    suspend fun reopen(id: Int): TicketDetailDto {
+        val updated: TicketDetailDto = json.decodeFromString(
+            api.post("${endpoints.api}/api/v1/tickets/${V1Id.format("tk", id)}/reopen", "{}"),
+        )
+        swrCache.put(
+            key = McCacheKeys.ticketDetail(id),
+            data = updated,
+            scope = IgngCacheScope.USER_ONLY,
+            tags = setOf(McCacheTags.TICKETS),
+        )
+        swrCache.markStale(McCacheTags.TICKETS, McCacheTags.HALL, McCacheTags.ADMIN)
+        return updated
+    }
 
     suspend fun uploadAttachment(fileName: String, mimeType: String, bytes: ByteArray): UploadedMediaDto {
         val raw = api.uploadImage(
@@ -499,6 +555,7 @@ class AdminRepository(
     private val endpoints: SiteEndpoints,
     private val api: ApiClient,
     private val json: Json = api.json,
+    val swrCache: IgngSwrCache = IgngSwrCache(),
 ) {
     suspend fun fetchTicketOverview(): AdminTicketOverviewResponse =
         json.decodeFromString(api.get("${endpoints.api}/api/v1/mc/admin/tickets/overview"))
@@ -531,13 +588,24 @@ class AdminRepository(
             }
         }
         api.post("${endpoints.api}/api/v1/mc/admin/tickets/${V1Id.format("tk", id)}/messages", body.toString())
+        swrCache.markStale(McCacheTags.ADMIN, McCacheTags.TICKETS, McCacheTags.HALL)
     }
 
-    suspend fun closeAdminTicket(id: Int): TicketDetailDto =
-        json.decodeFromString(api.post("${endpoints.api}/api/v1/mc/admin/tickets/${V1Id.format("tk", id)}/close", "{}"))
+    suspend fun closeAdminTicket(id: Int): TicketDetailDto {
+        val res: TicketDetailDto = json.decodeFromString(
+            api.post("${endpoints.api}/api/v1/mc/admin/tickets/${V1Id.format("tk", id)}/close", "{}"),
+        )
+        swrCache.markStale(McCacheTags.ADMIN, McCacheTags.TICKETS, McCacheTags.HALL)
+        return res
+    }
 
-    suspend fun reopenAdminTicket(id: Int): TicketDetailDto =
-        json.decodeFromString(api.post("${endpoints.api}/api/v1/mc/admin/tickets/${V1Id.format("tk", id)}/reopen", "{}"))
+    suspend fun reopenAdminTicket(id: Int): TicketDetailDto {
+        val res: TicketDetailDto = json.decodeFromString(
+            api.post("${endpoints.api}/api/v1/mc/admin/tickets/${V1Id.format("tk", id)}/reopen", "{}"),
+        )
+        swrCache.markStale(McCacheTags.ADMIN, McCacheTags.TICKETS, McCacheTags.HALL)
+        return res
+    }
 
     suspend fun searchAdminPlayers(query: String): List<AdminPlayerResultDto> {
         val url = "${endpoints.api}/api/v1/mc/admin/players/search".toHttpUrl().newBuilder()

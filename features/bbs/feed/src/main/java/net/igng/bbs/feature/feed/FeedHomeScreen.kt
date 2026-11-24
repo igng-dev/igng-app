@@ -1,6 +1,5 @@
 package net.igng.bbs.feature.feed
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,11 +11,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -48,11 +45,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.common.BbsContinueReadingCard
 import net.igng.bbs.common.BbsPostRowCard
 import net.igng.bbs.common.BbsRecommendRail
 import net.igng.bbs.common.BbsSeriesCollapseGroup
+import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.data.BbsDiskCodecs
+import net.igng.bbs.core.model.AppPreferences
+import net.igng.bbs.core.model.BbsHomeDto
+import net.igng.bbs.core.model.CategoryDto
+import net.igng.bbs.core.model.PaginatedResponseDto
+import net.igng.bbs.core.model.PostSummaryDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngFoldedCoreGlyph
@@ -65,15 +75,31 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.igngBentoEnter
 import net.igng.core.designsystem.igngPressScale
-import net.igng.bbs.core.model.AppPreferences
-import net.igng.bbs.core.model.BbsHomeDto
-import net.igng.bbs.core.model.CategoryDto
-import net.igng.bbs.core.model.PostSummaryDto
 import net.igng.core.network.ApiResult
 
 private sealed interface FeedDisplayRow {
     data class SinglePost(val post: PostSummaryDto) : FeedDisplayRow
     data class SeriesGroup(val seriesId: String, val seriesName: String, val posts: List<PostSummaryDto>) : FeedDisplayRow
+}
+
+private class FeedHomeUiHolder {
+    val sortState = mutableStateOf("latest")
+    val selectedCategoryState = mutableStateOf<CategoryDto?>(null)
+    val expandedSeries = mutableStateMapOf<String, Boolean>()
+
+    var extraFeedKey by mutableStateOf("")
+    var extraPosts by mutableStateOf<List<PostSummaryDto>>(emptyList())
+    var loadedPage by mutableIntStateOf(1)
+    var extraTotalPages by mutableIntStateOf(1)
+    var loadingMore by mutableStateOf(false)
+
+    fun resetPagination(feedKey: String) {
+        extraFeedKey = feedKey
+        extraPosts = emptyList()
+        loadedPage = 1
+        extraTotalPages = 1
+        loadingMore = false
+    }
 }
 
 @Composable
@@ -94,80 +120,102 @@ fun FeedHomeScreen(
     val prefs by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
     val history by container.settingsRepository.readingHistory.collectAsState(initial = emptyList())
 
-    var home by remember { mutableStateOf<BbsHomeDto?>(null) }
-    var posts by remember { mutableStateOf<List<PostSummaryDto>>(emptyList()) }
-    var sort by remember { mutableStateOf("latest") }
-    var selectedCategory by remember { mutableStateOf<CategoryDto?>(null) }
-    var page by remember { mutableIntStateOf(1) }
-    var totalPages by remember { mutableIntStateOf(1) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var loadingMore by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    val expandedSeries = remember { mutableStateMapOf<String, Boolean>() }
+    val holder = rememberScreenHolder("bbs_feed_home_ui") { FeedHomeUiHolder() }
+    var sort by holder.sortState
+    var selectedCategory by holder.selectedCategoryState
+    val expandedSeries = holder.expandedSeries
 
-    suspend fun loadInitial(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else if (posts.isEmpty()) loading = true
-        errorMessage = null
+    val isDefaultFeed = selectedCategory == null && sort == "latest"
+    val feedKey = BbsCacheKeys.feed(selectedCategory?.slug, sort)
 
-        if (home == null && !isRefresh) {
-            container.feedRepository.loadCachedHome()?.let { cached ->
-                home = cached
-                if (posts.isEmpty() && selectedCategory == null && sort == "latest") {
-                    posts = cached.latestPosts
-                }
-            }
-        }
+    val (homeState, homeHandle) = rememberSwrResource<BbsHomeDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.HOME,
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.HOME),
+        diskCodec = BbsDiskCodecs.HOME,
+        legacyRawProvider = { container.settingsRepository.readCache("home") },
+        enabled = selectedCategory == null,
+        slotKey = "bbs_home_slot",
+    ) {
+        container.feedRepository.fetchHome().toKotlinResult()
+    }
 
-        val homeRes = if (selectedCategory == null) container.feedRepository.fetchHome() else null
-        val postsRes = container.feedRepository.listPosts(
+    val (feedState, feedHandle) = rememberSwrResource<PaginatedResponseDto<PostSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = feedKey,
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.FEED, BbsCacheTags.POST_LISTS),
+        diskCodec = if (isDefaultFeed) BbsDiskCodecs.DEFAULT_FEED else null,
+        slotKey = "bbs_feed_slot",
+    ) {
+        container.feedRepository.listPosts(
             page = 1,
             pageSize = 20,
             sort = sort,
             category = selectedCategory?.slug,
-        )
-
-        if (homeRes is ApiResult.Success) {
-            home = homeRes.data
-        }
-        when (postsRes) {
-            is ApiResult.Success -> {
-                posts = postsRes.data.data
-                page = postsRes.data.pagination.page
-                totalPages = postsRes.data.pagination.totalPages.coerceAtLeast(1)
-            }
-            is ApiResult.Failure -> {
-                if (posts.isEmpty()) {
-                    errorMessage = postsRes.error.message ?: "无法加载社区动态"
-                }
-            }
-        }
-        loading = false
-        refreshing = false
+        ).toKotlinResult()
     }
 
+    val home = homeState.data
+    val page1Data = feedState.data
+    val page1Posts = page1Data?.data ?: if (isDefaultFeed) home?.latestPosts.orEmpty() else emptyList()
+    val extraPosts = if (holder.extraFeedKey == feedKey) holder.extraPosts else emptyList()
+    val posts = remember(page1Posts, extraPosts) {
+        if (extraPosts.isEmpty()) {
+            page1Posts
+        } else {
+            val seen = page1Posts.mapTo(HashSet(page1Posts.size)) { it.id }
+            page1Posts + extraPosts.filterNot { it.id in seen }
+        }
+    }
+
+    val page = if (holder.extraFeedKey == feedKey && holder.loadedPage > 1) {
+        holder.loadedPage
+    } else {
+        page1Data?.pagination?.page ?: 1
+    }
+    val totalPages = if (holder.extraFeedKey == feedKey && holder.loadedPage > 1) {
+        holder.extraTotalPages.coerceAtLeast(page1Data?.pagination?.totalPages ?: 1)
+    } else {
+        (page1Data?.pagination?.totalPages ?: 1).coerceAtLeast(1)
+    }
+
+    val loading = feedState.isInitialLoading && posts.isEmpty()
+    val errorMessage = if (posts.isEmpty()) feedState.error else null
+    val refreshing = feedState.isUserRefreshing || homeState.isUserRefreshing
+    val loadingMore = holder.loadingMore && holder.extraFeedKey == feedKey
+
     suspend fun loadNextPage() {
-        if (loadingMore || page >= totalPages) return
-        loadingMore = true
-        when (val res = container.feedRepository.listPosts(
-            page = page + 1,
-            pageSize = 20,
-            sort = sort,
-            category = selectedCategory?.slug,
-        )) {
+        if (holder.loadingMore || page >= totalPages) return
+        val targetKey = feedKey
+        val nextPage = page + 1
+        holder.loadingMore = true
+        when (
+            val res = container.feedRepository.listPosts(
+                page = nextPage,
+                pageSize = 20,
+                sort = sort,
+                category = selectedCategory?.slug,
+            )
+        ) {
             is ApiResult.Success -> {
-                val seen = posts.mapTo(HashSet()) { it.id }
-                posts = posts + res.data.data.filterNot { it.id in seen }
-                page = res.data.pagination.page
-                totalPages = res.data.pagination.totalPages.coerceAtLeast(1)
+                if (feedKey == targetKey) {
+                    val existing = if (holder.extraFeedKey == targetKey) holder.extraPosts else emptyList()
+                    val seen = HashSet<String>(page1Posts.size + existing.size)
+                    page1Posts.forEach { seen.add(it.id) }
+                    existing.forEach { seen.add(it.id) }
+                    holder.extraFeedKey = targetKey
+                    holder.extraPosts = existing + res.data.data.filterNot { it.id in seen }
+                    holder.loadedPage = res.data.pagination.page
+                    holder.extraTotalPages = res.data.pagination.totalPages.coerceAtLeast(1)
+                }
             }
             is ApiResult.Failure -> Unit
         }
-        loadingMore = false
-    }
-
-    LaunchedEffect(sort, selectedCategory?.id) {
-        loadInitial(isRefresh = false)
+        holder.loadingMore = false
     }
 
     val displayRows = remember(posts, prefs.collapseSeriesInFeed) {
@@ -185,8 +233,8 @@ fun FeedHomeScreen(
             lastVisible >= (listState.layoutInfo.totalItemsCount - 4).coerceAtLeast(0)
         }
     }
-    LaunchedEffect(shouldLoadMore, posts.size) {
-        if (shouldLoadMore && posts.isNotEmpty() && page < totalPages && !loadingMore) {
+    LaunchedEffect(shouldLoadMore, posts.size, feedKey) {
+        if (shouldLoadMore && posts.isNotEmpty() && page < totalPages && !holder.loadingMore) {
             loadNextPage()
         }
     }
@@ -262,20 +310,25 @@ fun FeedHomeScreen(
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = {
-                scope.launch {
-                    container.refreshBootstrap()
-                    loadInitial(isRefresh = true)
+                holder.resetPagination(feedKey)
+                scope.launch { container.refreshBootstrap(force = true) }
+                if (selectedCategory == null) {
+                    homeHandle.silentRefresh()
                 }
+                feedHandle.refresh()
             },
             modifier = Modifier.weight(1f),
         ) {
-            if (loading && posts.isEmpty()) {
+            if (loading) {
                 IgngLoadingCenter(loading = true)
-            } else if (errorMessage != null && posts.isEmpty()) {
+            } else if (errorMessage != null) {
                 Box(modifier = Modifier.padding(16.dp)) {
                     IgngErrorTile(
-                        message = errorMessage!!,
-                        onRetry = { scope.launch { loadInitial(isRefresh = false) } },
+                        message = errorMessage,
+                        onRetry = {
+                            if (selectedCategory == null) homeHandle.silentRefresh()
+                            feedHandle.refresh()
+                        },
                     )
                 }
             } else {

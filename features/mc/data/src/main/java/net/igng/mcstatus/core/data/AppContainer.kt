@@ -10,12 +10,19 @@ import androidx.datastore.preferences.preferencesDataStore
 import coil3.ImageLoader
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import net.igng.core.auth.IgngOAuthClient
@@ -24,7 +31,11 @@ import net.igng.core.auth.OAuthCallbackResult
 import net.igng.core.auth.OAuthClientConfig
 import net.igng.core.auth.SecureSessionStore
 import net.igng.core.data.IgngAccountRepository
+import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.IgngImageLoaderFactory
+import net.igng.core.data.IgngLocalJsonCache
+import net.igng.core.data.IgngSwrCache
+import net.igng.core.data.runSuspendCatching
 import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.MotionIntensity
 import net.igng.core.model.ReaderTypographyPrefs
@@ -202,20 +213,183 @@ class IgngAppContainer(
         mediaOkHttpClient = mediaOkHttpClient,
     )
 
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val exploreCache = LocalJsonCache(appContext, "igng_explore_cache")
     val wikiCache = LocalJsonCache(appContext, "igng_wiki_cache")
     val draftCache = LocalJsonCache(appContext, "igng_draft_cache")
+    val swrDiskCache = IgngLocalJsonCache(appContext, "igng_mc_swr_cache", useCacheDir = true)
+    val swrCache = IgngSwrCache(
+        diskCache = swrDiskCache,
+        maxEntries = 200,
+        cacheScope = appScope,
+    )
 
     val settingsRepository = SettingsRepository(appContext)
     val accountRepository = IgngAccountRepository(httpClient)
     val authRepository = AuthRepository(endpoints, apiClient, oauthClient)
-    val exploreRepository = ExploreRepository(endpoints, apiClient, exploreCache)
-    val statusRepository = StatusRepository(endpoints, apiClient)
-    val chatRepository = ChatRepository(endpoints, apiClient)
-    val wikiRepository = WikiRepository(endpoints, apiClient, wikiCache)
-    val playerRepository = PlayerRepository(endpoints, apiClient, authRepository)
-    val ticketRepository = TicketRepository(endpoints, apiClient, draftCache)
-    val adminRepository = AdminRepository(endpoints, apiClient)
+    val exploreRepository = ExploreRepository(endpoints, apiClient, exploreCache, swrCache = swrCache)
+    val statusRepository = StatusRepository(endpoints, apiClient, swrCache = swrCache)
+    val chatRepository = ChatRepository(endpoints, apiClient, swrCache = swrCache)
+    val wikiRepository = WikiRepository(endpoints, apiClient, wikiCache, swrCache = swrCache)
+    val playerRepository = PlayerRepository(endpoints, apiClient, authRepository, swrCache = swrCache)
+    val ticketRepository = TicketRepository(endpoints, apiClient, draftCache, swrCache = swrCache)
+    val adminRepository = AdminRepository(endpoints, apiClient, swrCache = swrCache)
+
+    init {
+        syncSessionStampNow()
+        appScope.launch {
+            combine(activeAccount, sessionEpoch, sessionAuthStatus) { acc, epoch, status ->
+                IgngSwrCache.buildSessionStamp(acc?.userId, epoch, status.name)
+            }.collect { stamp ->
+                swrCache.updateSessionStamp(stamp)
+            }
+        }
+    }
+
+    private fun syncSessionStampNow() {
+        swrCache.updateSessionStamp(
+            IgngSwrCache.buildSessionStamp(
+                userId = activeAccount.value?.userId,
+                sessionEpoch = sessionEpoch.value,
+                authStatusName = sessionAuthStatus.value.name,
+            ),
+        )
+    }
+
+    /**
+     * Pre-warms core disk snapshots into [swrCache] RAM on app launch so Frame 0 renders
+     * instantaneously with zero skeletons or dash (`—`) placeholders.
+     */
+    fun warmCoreDiskCaches() {
+        appScope.launch {
+            coroutineScope {
+                launch {
+                    val boot = swrCache.hydrateFromDisk(
+                        key = McCacheKeys.BOOTSTRAP,
+                        scope = IgngCacheScope.SESSION_AWARE,
+                        tags = setOf(McCacheTags.BOOTSTRAP),
+                        diskCodec = McDiskCodecs.bootstrap,
+                    )?.data
+                    if (boot != null && _bootstrap.value == null) {
+                        _bootstrap.value = boot
+                    }
+                }
+                launch {
+                    swrCache.hydrateFromDisk(
+                        key = McCacheKeys.SERVERS,
+                        scope = IgngCacheScope.PUBLIC,
+                        tags = setOf(McCacheTags.SERVERS),
+                        diskCodec = McDiskCodecs.servers,
+                        legacyRawProvider = {
+                            val legacy = exploreRepository.readCachedFamilies()
+                            if (legacy.isNotEmpty()) {
+                                McDiskCodecs.servers.encode(legacy)
+                            } else {
+                                null
+                            }
+                        },
+                    )
+                }
+                launch {
+                    swrCache.hydrateFromDisk(
+                        key = McCacheKeys.STATUS,
+                        scope = IgngCacheScope.PUBLIC,
+                        tags = setOf(McCacheTags.STATUS),
+                        diskCodec = McDiskCodecs.status,
+                    )
+                }
+                launch {
+                    swrCache.hydrateFromDisk(
+                        key = McCacheKeys.wikiCatalog(),
+                        scope = IgngCacheScope.PUBLIC,
+                        tags = setOf(McCacheTags.WIKI),
+                        diskCodec = McDiskCodecs.wikiCatalog(),
+                        legacyRawProvider = {
+                            wikiRepository.readCachedCatalog()?.let { McDiskCodecs.wikiCatalog().encode(it) }
+                        },
+                    )
+                }
+                launch {
+                    swrCache.hydrateFromDisk(
+                        key = McCacheKeys.CHAT_SOURCES,
+                        scope = IgngCacheScope.SESSION_AWARE,
+                        tags = setOf(McCacheTags.CHAT_SOURCES),
+                        diskCodec = McDiskCodecs.chatSources,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Low-priority idle prefetch triggered shortly after first frame settles.
+     * Deduplicated by [IgngSwrCache] TTL & single-flight and automatically suppressed during HTTP 429 backoff.
+     */
+    suspend fun prefetchIdleTabs() {
+        if (!swrCache.isPrefetchAllowed()) return
+        val isAuthed = activeAccount.value != null && sessionAuthStatus.value == SessionAuthStatus.ACTIVE
+        coroutineScope {
+            async {
+                swrCache.fetch(
+                    key = McCacheKeys.SERVERS,
+                    scope = IgngCacheScope.PUBLIC,
+                    policy = McCachePolicies.Static,
+                    tags = setOf(McCacheTags.SERVERS),
+                    diskCodec = McDiskCodecs.servers,
+                ) { runSuspendCatching { exploreRepository.fetchHomeFamilies() } }
+            }
+            async {
+                swrCache.fetch(
+                    key = McCacheKeys.STATUS,
+                    scope = IgngCacheScope.PUBLIC,
+                    policy = McCachePolicies.Status,
+                    tags = setOf(McCacheTags.STATUS),
+                    diskCodec = McDiskCodecs.status,
+                ) { runSuspendCatching { statusRepository.fetchPublicStatus() } }
+            }
+            async {
+                swrCache.fetch(
+                    key = McCacheKeys.wikiCatalog(),
+                    scope = IgngCacheScope.PUBLIC,
+                    policy = McCachePolicies.Static,
+                    tags = setOf(McCacheTags.WIKI),
+                    diskCodec = McDiskCodecs.wikiCatalog(),
+                ) { runSuspendCatching { wikiRepository.fetchCatalog() } }
+            }
+            async {
+                swrCache.fetch(
+                    key = McCacheKeys.CHAT_SOURCES,
+                    scope = IgngCacheScope.SESSION_AWARE,
+                    policy = McCachePolicies.Chat,
+                    tags = setOf(McCacheTags.CHAT_SOURCES),
+                    diskCodec = McDiskCodecs.chatSources,
+                ) { runSuspendCatching { chatRepository.fetchSources() } }
+            }
+            if (isAuthed) {
+                async {
+                    swrCache.fetch(
+                        key = McCacheKeys.PLAYER_ACCOUNTS,
+                        scope = IgngCacheScope.USER_ONLY,
+                        policy = McCachePolicies.Standard,
+                        tags = setOf(McCacheTags.PLAYER_ACCOUNTS),
+                    ) { runSuspendCatching { playerRepository.fetchBoundAccounts() } }
+                }
+                async {
+                    swrCache.fetch(
+                        key = McCacheKeys.ticketsList(relation = "all", includeClosed = false, query = ""),
+                        scope = IgngCacheScope.USER_ONLY,
+                        policy = McCachePolicies.Standard,
+                        tags = setOf(McCacheTags.TICKETS),
+                    ) { runSuspendCatching { ticketRepository.fetchList(relation = "all", includeClosed = false, page = 1) } }
+                }
+            }
+        }
+    }
+
+    fun trimMemory(aggressive: Boolean = false) {
+        swrCache.trimMemory(aggressive)
+    }
 
     suspend fun refreshFamilyAccounts() {
         sessionManager.refreshFamilyAccounts()
@@ -244,15 +418,26 @@ class IgngAppContainer(
     suspend fun logoutActive() {
         sessionManager.logoutActive()
         _dailyExp.value = null
+        syncSessionStampNow()
+        swrCache.clearSessionDiskCache()
     }
 
-    suspend fun fetchBootstrapForCurrentSession(): BootstrapResponse =
-        apiClient.json.decodeFromString(
+    suspend fun fetchBootstrapForCurrentSession(): BootstrapResponse {
+        val boot = apiClient.json.decodeFromString<BootstrapResponse>(
             apiClient.get(
                 url = "${endpoints.api}/api/v1/mc/bootstrap",
                 allowAnonymousFallback = true,
             ),
         )
+        swrCache.put(
+            key = McCacheKeys.BOOTSTRAP,
+            data = boot,
+            scope = IgngCacheScope.SESSION_AWARE,
+            tags = setOf(McCacheTags.BOOTSTRAP),
+            diskCodec = McDiskCodecs.bootstrap,
+        )
+        return boot
+    }
 
     suspend fun settleDailyLoginForCurrentSession(): DailyExpStatus? {
         val active = activeAccount.value ?: return null
@@ -285,11 +470,13 @@ class IgngAppContainer(
         if (resetDailyExp) {
             _dailyExp.value = null
         }
+        syncSessionStampNow()
     }
 
     fun switchAccount(userId: Long) {
         sessionManager.switchAccount(userId)
         _dailyExp.value = null
+        syncSessionStampNow()
     }
 
     fun switchAccount(userId: Int) = switchAccount(userId.toLong())
@@ -300,6 +487,7 @@ class IgngAppContainer(
         if (wasActive) {
             _dailyExp.value = null
         }
+        syncSessionStampNow()
     }
 
     fun removeActiveAccount() {
@@ -317,6 +505,7 @@ class IgngAppContainer(
     suspend fun clearAllCaches() {
         exploreCache.clearAll()
         wikiCache.clearAll()
+        swrCache.clearAll()
         IgngImageLoaderFactory.clearCaches(appContext, imageLoader)
     }
 
@@ -324,5 +513,6 @@ class IgngAppContainer(
         exploreCache.sizeBytes() +
             wikiCache.sizeBytes() +
             draftCache.sizeBytes() +
+            swrCache.diskSizeBytes() +
             IgngImageLoaderFactory.diskCacheSizeBytes(appContext)
 }

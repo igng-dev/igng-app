@@ -27,6 +27,9 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAboutAppCard
 import net.igng.core.designsystem.IgngAccountVaultCard
 import net.igng.core.designsystem.IgngAmbientCanvas
@@ -41,6 +44,9 @@ import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
 import net.igng.core.network.ApiResult
 import net.igng.mcstatus.core.data.IgngAppContainer
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.model.AppPreferences
 
 @Composable
@@ -68,32 +74,22 @@ fun SettingsScreen(
     var uploadingAvatar by remember { mutableStateOf(false) }
     var savingUsername by remember { mutableStateOf(false) }
 
-    var devices by remember { mutableStateOf<List<CoreDeviceSessionDto>>(emptyList()) }
-    var devicesLoading by remember { mutableStateOf(false) }
-    var devicesError by remember { mutableStateOf<String?>(null) }
-
-    suspend fun loadDevices() {
-        if (activeAccount == null || sessionAuthStatus.requiresReauth) {
-            devices = emptyList()
-            devicesError = null
-            return
-        }
-        devicesLoading = true
-        devicesError = null
-        when (val res = container.accountRepository.listDevices()) {
-            is ApiResult.Success -> devices = res.data.data
-            is ApiResult.Failure -> devicesError = res.error.message
-        }
-        devicesLoading = false
+    val canLoadDevices = activeAccount != null && !sessionAuthStatus.requiresReauth
+    val (devicesState, devicesHandle) = rememberSwrResource<List<CoreDeviceSessionDto>>(
+        cache = container.swrCache,
+        cacheKey = McCacheKeys.CORE_DEVICES,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.DEVICES),
+        enabled = canLoadDevices,
+        slotKey = "mc_settings_devices",
+    ) {
+        container.accountRepository.listDevices().toKotlinResult().map { it.data }
     }
 
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
         container.refreshFamilyAccounts()
-    }
-
-    LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
-        loadDevices()
     }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
@@ -189,16 +185,16 @@ fun SettingsScreen(
 
                     item(key = "devices") {
                         IgngDevicesSecurityCard(
-                            devices = devices,
-                            loading = devicesLoading,
-                            error = devicesError,
-                            onRefresh = { scope.launch { loadDevices() } },
+                            devices = devicesState.data.orEmpty(),
+                            loading = devicesState.isInitialLoading,
+                            error = devicesState.error,
+                            onRefresh = { devicesHandle.refresh() },
                             onRenameDevice = { deviceId, newName ->
                                 scope.launch {
                                     when (val res = container.accountRepository.renameDevice(deviceId, newName)) {
                                         is ApiResult.Success -> {
                                             onShowMessage("设备名称已更新")
-                                            loadDevices()
+                                            devicesHandle.silentRefresh()
                                         }
                                         is ApiResult.Failure -> onShowMessage(res.error.message)
                                     }
@@ -209,7 +205,7 @@ fun SettingsScreen(
                                     when (val res = container.accountRepository.revokeDevice(deviceId)) {
                                         is ApiResult.Success -> {
                                             onShowMessage("已吊销该设备会话")
-                                            loadDevices()
+                                            devicesHandle.silentRefresh()
                                         }
                                         is ApiResult.Failure -> onShowMessage(res.error.message)
                                     }

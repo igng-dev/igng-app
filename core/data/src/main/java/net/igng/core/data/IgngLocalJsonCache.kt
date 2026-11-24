@@ -46,8 +46,23 @@ class IgngLocalJsonCache(
         if (file.exists()) runCatching { file.readText(Charsets.UTF_8) }.getOrNull() else null
     }
 
+    suspend fun readWithTimestamp(key: String): Pair<String, Long>? = withContext(Dispatchers.IO) {
+        val file = File(dir, "${sanitize(key)}.json")
+        if (!file.exists()) return@withContext null
+        val text = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return@withContext null
+        text to file.lastModified()
+    }
+
     suspend fun delete(key: String) = withContext(Dispatchers.IO) {
         File(dir, "${sanitize(key)}.json").delete()
+        Unit
+    }
+
+    suspend fun deleteByPrefix(prefix: String) = withContext(Dispatchers.IO) {
+        val safePrefix = sanitize(prefix)
+        dir.listFiles()?.forEach { file ->
+            if (file.name.startsWith(safePrefix)) file.delete()
+        }
         Unit
     }
 
