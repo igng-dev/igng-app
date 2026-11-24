@@ -31,7 +31,7 @@ class DtoDeserializationTest {
     @Test
     fun decodesBootstrapAndOAuthTokenFixtures() {
         val boot = json.decodeFromString<BootstrapResponse>(fixture("bootstrap.json"))
-        assertEquals("1.16", boot.apiVersion)
+        assertEquals("1.18", boot.apiVersion)
         assertEquals("https://www.igng.net", boot.urls.apiBaseUrl)
         assertTrue(boot.features.loginHistory.available)
         assertTrue(boot.features.penaltyHistory.available)
@@ -236,7 +236,10 @@ class DtoDeserializationTest {
         assertTrue(messages.hasMore)
         assertEquals("yunying", messages.persona?.id)
         assertEquals(1024, messages.senderProfiles["qq:10001"]?.igngId)
+        assertEquals("https://q1.qlogo.cn/g?b=qq&nk=10001&s=100", messages.senderProfiles["qq:10001"]?.avatarUrl)
+        assertEquals("https://img.igng.net/avatars/a.webp", messages.senderProfiles["qq:10001"]?.igngAvatarUrl)
         assertEquals("云萤 Pro", messages.senderProfiles["qq:10001"]?.badges?.firstOrNull()?.label)
+        assertEquals("微信群友小陈", messages.senderProfiles["wechat:700000000000101"]?.platformNickname)
         assertEquals("https://wx.qlogo.cn/mmhead/ver_1/sample/0", messages.senderProfiles["wechat:700000000000101"]?.avatarUrl)
         assertEquals("/api/v1/mc/avatars/Alice_CN?size=64", messages.senderProfiles["player:alice_cn"]?.avatarUrl)
         val msg = messages.messages.first()
@@ -255,6 +258,9 @@ class DtoDeserializationTest {
         assertEquals(2, forward.resolvedNodes.size)
         assertEquals(2, forward.structure.first().children.size)
         assertEquals("Alice", forward.structure.first().children.first().nickname)
+        assertEquals(1, forward.structure.first().children.first().attachments.first().index)
+        assertEquals("/api/v1/chat/media/qq-90001/1", forward.structure.first().children.first().attachments.first().url)
+        assertEquals("https://q1.qlogo.cn/g?b=qq&nk=10001&s=100", forward.senderProfiles["qq:10001"]?.avatarUrl)
 
         val wikiCatalog = json.decodeFromString<WikiCatalogResponse>(fixture("wiki_catalog.json"))
         assertEquals("IGNGmc", wikiCatalog.knowledgeBase?.slug)

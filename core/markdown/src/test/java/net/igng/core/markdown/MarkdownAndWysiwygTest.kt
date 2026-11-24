@@ -58,6 +58,24 @@ class MarkdownAndWysiwygTest {
     }
 
     @Test
+    fun parsesInlineFontColorSpanAndStripsStrayHtmlTagsInsideMarkdown() {
+        val md = "普通文字 <font style=\"color:#ECAA04;\">**重要提示**</font> 与 <span style=\"color: #f00\">警示</span><br/>换行后</font>"
+        val doc = MarkdownParser.parse(md)
+        val para = doc.blocks.first() as MarkdownBlock.Paragraph
+        val coloredSpans = para.inlines.filterIsInstance<InlineSpan.Colored>()
+        assertEquals(2, coloredSpans.size)
+        assertEquals("#ECAA04", coloredSpans[0].hexColor)
+        assertEquals("重要提示", MarkdownParser.extractPlainText(coloredSpans[0].children))
+        assertEquals("#FF0000", coloredSpans[1].hexColor)
+        val fullPlain = MarkdownParser.extractPlainText(para.inlines)
+        assertFalse(fullPlain.contains("<font"))
+        assertFalse(fullPlain.contains("</font>"))
+        assertFalse(fullPlain.contains("<span"))
+        assertTrue(fullPlain.contains("重要提示"))
+        assertTrue(fullPlain.contains("\n换行后"))
+    }
+
+    @Test
     fun wysiwygRoundTripPreservesStructureAndSupportsUndoRedo() {
         val original = """
             # 文章标题

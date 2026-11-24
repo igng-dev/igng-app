@@ -157,6 +157,7 @@ fun ChatConversationScreen(
     chatRepository: ChatRepository,
     activeAccount: SavedAccount?,
     boundMcUsernames: List<String>,
+    sessionEpoch: Int = 0,
     onBack: () -> Unit,
     onOpenPlayerPassport: (Int) -> Unit,
     onOpenMcCharacter: (String) -> Unit,
@@ -180,7 +181,7 @@ fun ChatConversationScreen(
         }
     }
 
-    val holder = rememberScreenHolder("chat_conv_${source}_$targetId") {
+    val holder = rememberScreenHolder("chat_conv_${source}_${targetId}_${activeAccount?.userId ?: 0L}_$sessionEpoch") {
         val initFilter = ChatFilterState(focusedId = initialFocusMessageId.orEmpty())
         val cached = if (!initFilter.isActive) {
             chatRepository.swrCache.peek<ChatLogsResponse>(latestCacheKey, IgngCacheScope.SESSION_AWARE)?.data
@@ -384,8 +385,8 @@ fun ChatConversationScreen(
         }
     }
 
-    // Load only on cold start or filter change; never re-blank on predictive back!
-    LaunchedEffect(source, targetId, filter) {
+    // Load only on cold start, filter change, or session switch; never re-blank on predictive back!
+    LaunchedEffect(source, targetId, filter, activeAccount?.userId, sessionEpoch) {
         if (holder.loadedFilter != filter || messages.isEmpty()) {
             loadMessages(older = false, silent = false, activeFilter = filter)
         }
@@ -755,6 +756,7 @@ fun ChatConversationScreen(
             platform = platform,
             targetId = targetId,
             channelTitle = title.ifBlank { sessionKind.label },
+            endpoints = endpoints,
             chatRepository = chatRepository,
             activeAccount = activeAccount,
             boundMcUsernames = boundMcSet,
@@ -804,6 +806,8 @@ fun ChatConversationScreen(
     if (activeForwardId != null) {
         ForwardViewerSheet(
             messageId = activeForwardId,
+            platform = platform,
+            sessionProfiles = profiles,
             loading = forwardLoading,
             detail = forwardDetail,
             error = forwardError,

@@ -77,8 +77,10 @@
       "user_id": "usr_1024",
       "igng_nickname": "Alice",
       "igng_username": "alice",
+      "platform_nickname": null,
       "display_name": "Alice (10001)",
-      "avatar_url": "https://img.igng.net/avatars/a.webp",
+      "avatar_url": "https://q1.qlogo.cn/g?b=qq&nk=10001&s=100",
+      "igng_avatar_url": "https://img.igng.net/avatars/a.webp",
       "badges": [
         {
           "key": "pro",
@@ -95,8 +97,10 @@
       "user_id": null,
       "igng_nickname": null,
       "igng_username": null,
-      "display_name": "微信用户",
+      "platform_nickname": "微信群友小陈",
+      "display_name": "微信群友小陈",
       "avatar_url": "https://wx.qlogo.cn/mmhead/ver_1/sample/0",
+      "igng_avatar_url": null,
       "badges": [],
       "relationship": null,
       "luckperms_groups": []
@@ -107,8 +111,10 @@
       "user_id": "usr_1024",
       "igng_nickname": "Alice",
       "igng_username": "alice",
+      "platform_nickname": null,
       "display_name": "Alice_CN",
       "avatar_url": "/api/v1/mc/avatars/Alice_CN?size=64",
+      "igng_avatar_url": "https://img.igng.net/avatars/a.webp",
       "badges": [],
       "relationship": null,
       "luckperms_groups": [

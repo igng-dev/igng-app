@@ -377,6 +377,7 @@ fun IgngMcApp(
                             chatRepository = container.chatRepository,
                             activeAccount = activeAccount,
                             boundMcUsernames = boundMcUsernames,
+                            sessionEpoch = sessionEpoch,
                             onBack = { navController.popBackStack() },
                             onOpenPlayerPassport = { id -> navController.navigate(AppRoute.PlayerPassport(id)) },
                             onOpenMcCharacter = { name -> navController.navigate(AppRoute.McCharacter(name)) },

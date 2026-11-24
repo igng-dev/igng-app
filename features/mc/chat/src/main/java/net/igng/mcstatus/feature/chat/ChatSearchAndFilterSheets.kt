@@ -63,6 +63,7 @@ import net.igng.core.designsystem.IgngStateBlock
 import net.igng.core.designsystem.IgngTextField
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.model.SavedAccount
+import net.igng.mcstatus.core.model.SiteEndpoints
 
 data class ChatFilterState(
     val dayKey: String = "",
@@ -83,6 +84,7 @@ fun ChatSearchSheet(
     platform: String,
     targetId: String,
     channelTitle: String,
+    endpoints: SiteEndpoints = SiteEndpoints(),
     chatRepository: ChatRepository,
     activeAccount: SavedAccount?,
     boundMcUsernames: Set<String>,
@@ -215,7 +217,7 @@ fun ChatSearchSheet(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
-                            ChatSenderAvatar(sender = sender, size = 34.dp)
+                            ChatSenderAvatar(sender = sender, size = 34.dp, endpoints = endpoints)
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),

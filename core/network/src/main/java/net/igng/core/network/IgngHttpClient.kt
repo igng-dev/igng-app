@@ -66,58 +66,62 @@ class IgngHttpClient(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     val endpoints: IgngCoreEndpoints get() = config.endpoints
 
-    val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+    private fun configureCoreInterceptors(
+        builder: OkHttpClient.Builder,
+        defaultAccept: String,
+        extraInterceptor: okhttp3.Interceptor?,
+    ): OkHttpClient.Builder = builder
         .addInterceptor { chain ->
             val original = chain.request()
             val urlStr = original.url.toString()
             val skipAuth = original.header(SKIP_AUTH_HEADER) != null
-            val builder = original.newBuilder()
+            val reqBuilder = original.newBuilder()
                 .removeHeader(SKIP_AUTH_HEADER)
                 .header("User-Agent", config.userAgent)
 
             if (endpoints.isTrustedAuthHost(urlStr)) {
-                builder
+                reqBuilder
                     .header("X-Client-Id", config.clientId)
                     .header("X-Client-Version", config.clientVersion)
                     .header("X-Device-Id", deviceIdProvider())
                 if (original.header("Accept").isNullOrBlank()) {
-                    builder.header("Accept", "application/json")
+                    reqBuilder.header("Accept", defaultAccept)
                 }
                 if (!skipAuth && original.header("Authorization").isNullOrBlank()) {
                     tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
-                        builder.header("Authorization", "Bearer $token")
+                        reqBuilder.header("Authorization", "Bearer $token")
                     }
                 }
             }
-            chain.proceed(builder.build())
+            chain.proceed(reqBuilder.build())
         }
         .apply {
             if (extraInterceptor != null) addInterceptor(extraInterceptor)
         }
-        .build()
+
+    val okHttpClient: OkHttpClient = configureCoreInterceptors(
+        builder = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS),
+        defaultAccept = "application/json",
+        extraInterceptor = extraInterceptor,
+    ).build()
 
     /**
      * Derived OkHttpClient for Coil image loading & binary media fetching.
-     * Attaches IGNG gateway auth ONLY to trusted hosts and transparently handles 401 responses
-     * via the shared [SingleFlightTokenRefresher], with safe anonymous fallback if the session
-     * is invalidated so public images continue rendering.
+     * Shares connection pool & dispatcher with [okHttpClient], sends an image-first `Accept`
+     * header on trusted IGNG hosts, attaches auth ONLY to trusted hosts, and transparently handles
+     * 401 responses via [SingleFlightTokenRefresher] with safe anonymous fallback for public media.
      */
     val mediaOkHttpClient: OkHttpClient = okHttpClient.newBuilder()
-        .addInterceptor { chain ->
-            val original = chain.request()
-            val urlStr = original.url.toString()
-            if (endpoints.isTrustedAuthHost(urlStr) && original.header("Accept").isNullOrBlank()) {
-                chain.proceed(
-                    original.newBuilder()
-                        .header("Accept", "image/webp,image/*,*/*;q=0.8")
-                        .build(),
-                )
-            } else {
-                chain.proceed(original)
-            }
+        .apply {
+            interceptors().clear()
+            configureCoreInterceptors(
+                builder = this,
+                defaultAccept = "image/webp,image/*,*/*;q=0.8",
+                extraInterceptor = extraInterceptor,
+            )
         }
         .authenticator { _, response ->
             if (responseCount(response) >= 2) return@authenticator null
@@ -540,6 +544,7 @@ class IgngHttpClient(
     ): ByteArray = withContext(Dispatchers.IO) {
         fun buildReq(override: String?, skipAuth: Boolean): Request = Request.Builder()
             .url(url)
+            .header("Accept", "*/*")
             .apply {
                 if (skipAuth) {
                     header(SKIP_AUTH_HEADER, "1")

@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 import net.igng.mcstatus.core.data.ChatAttachmentDto
+import net.igng.mcstatus.core.data.ChatForwardChildDto
 import net.igng.mcstatus.core.data.ChatGroupSourceDto
 import net.igng.mcstatus.core.data.ChatLastMessageDto
 import net.igng.mcstatus.core.data.ChatMessageDto
@@ -445,6 +446,23 @@ fun senderGroupKeyOf(message: ChatMessageDto): String {
     return "player:${message.senderName.trim().lowercase()}"
 }
 
+private val PLACEHOLDER_QQ_NAME_REGEX = Regex("^QQ\\s+\\d+(?:\\*+\\d*)?$", RegexOption.IGNORE_CASE)
+
+/**
+ * Returns true if [name] is blank or merely a placeholder (raw numeric QQ ID, `QQ 123***45`,
+ * or generic `"微信用户"`), rather than a genuine user nickname.
+ */
+fun isPlaceholderChatNickname(name: String?, senderId: String? = null): Boolean {
+    val clean = name?.trim().orEmpty()
+    if (clean.isEmpty()) return true
+    val rawId = senderId?.trim().orEmpty()
+    if (rawId.isNotEmpty() && clean == rawId) return true
+    if (clean.length >= 5 && clean.all(Char::isDigit)) return true
+    if (PLACEHOLDER_QQ_NAME_REGEX.matches(clean)) return true
+    if (clean == "微信用户") return true
+    return false
+}
+
 fun resolveChatSender(
     message: ChatMessageDto,
     profiles: Map<String, ChatSenderProfileDto>,
@@ -465,27 +483,34 @@ fun resolveChatSender(
     val profile = profiles[profileKey]
     val boundIgngId = if (!isAccountSelf && profile?.bound == true) profile.igngId else null
 
-    val snapshotName = if (isIm && !isBot) message.senderName.trim() else ""
-    val profileNickname = profile?.igngNickname
+    // Plan A: prioritize platform-native nickname (QQ group card/nick, WeChat display name);
+    // show bound IGNG nickname as secondary label when distinct.
+    val rawSnapshot = if (isIm && !isBot) message.senderName.trim() else ""
+    val nativeName = rawSnapshot.takeUnless { isPlaceholderChatNickname(it, rawId) }
+        ?: profile?.platformNickname?.trim()?.takeUnless { isPlaceholderChatNickname(it, rawId) }
+    val igngNickname = if (boundIgngId != null) profile?.igngNickname?.trim()?.takeIf { it.isNotBlank() } else null
+
     val displayName: String
     var secondaryName: String? = null
     when {
         isBot -> displayName = "云萤"
         isAccountSelf -> displayName = if (isService) "云萤程序" else "云萤账号"
         !isIm -> displayName = rawId.ifBlank { "玩家" }
-        boundIgngId != null && !profileNickname.isNullOrBlank() -> {
-            displayName = profileNickname
-            if (snapshotName.isNotBlank() && snapshotName != displayName && !snapshotName.startsWith("QQ ")) {
-                secondaryName = snapshotName
+        nativeName != null -> {
+            displayName = nativeName
+            if (!igngNickname.isNullOrBlank() && !igngNickname.equals(nativeName, ignoreCase = true)) {
+                secondaryName = "IGNG: $igngNickname"
             }
         }
-        snapshotName.isNotBlank() -> displayName = snapshotName
+        !igngNickname.isNullOrBlank() -> displayName = igngNickname
         isWechat -> displayName = "微信用户"
         else -> displayName = if (rawId.isNotBlank()) "QQ $rawId" else "QQ 用户"
     }
 
-    // Audit C-7: never query qlogo with masked QQ IDs (containing '*'), and MC always uses skin heads
-    // routed through the unified v1 gateway proxy first with multi-mirror fallback.
+    // Platform-native avatar priority (aligned with chat.igng.net + Audit C-7):
+    // - MC: first-party skin head proxy -> mirrors (both anonymous and logged-in)
+    // - QQ: QQ avatar FIRST when numeric (logged-in); anonymous masked IDs stay initials-only
+    // - WeChat: WeChat native avatar FIRST -> fallback
     val profileAvatar = normalizeChatAvatarUrl(profile?.avatarUrl)
     val msgAvatar = normalizeChatAvatarUrl(message.senderAvatar)?.takeUnless { it.contains('*') }
     val avatarCandidates: List<String> = when {
@@ -502,12 +527,16 @@ fun resolveChatSender(
                 add("https://vzge.me/face/64/$encoded")
             }.distinct()
         }.orEmpty()
-        else -> buildList {
-            profileAvatar?.let { add(it) }
-            msgAvatar?.let { add(it) }
-            if (isQq && ChatPlatformRules.isNumericQqId(rawId)) {
+        isQq -> buildList {
+            if (ChatPlatformRules.isNumericQqId(rawId)) {
                 add("https://q1.qlogo.cn/g?b=qq&nk=$rawId&s=100")
             }
+            profileAvatar?.takeUnless { it.contains('*') }?.let { add(it) }
+            msgAvatar?.let { add(it) }
+        }.distinct()
+        else -> buildList {
+            profileAvatar?.takeUnless { it.contains('*') }?.let { add(it) }
+            msgAvatar?.let { add(it) }
         }.distinct()
     }
     val avatarUrl: String? = avatarCandidates.firstOrNull()
@@ -526,7 +555,7 @@ fun resolveChatSender(
         isBot -> ""
         isAccountSelf -> if (isService) "程" else "账"
         !isIm -> displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
-        isWechat || boundIgngId != null || (snapshotName.isNotBlank() && !snapshotName.startsWith("QQ ")) ->
+        isWechat || nativeName != null || igngNickname != null ->
             displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "微"
         else -> digits.takeLast(2).ifBlank { "QQ" }
     }
@@ -567,6 +596,76 @@ fun resolveChatSender(
         badges = badges,
         relationship = profile?.relationship,
         filterSenderId = filterSenderId,
+    )
+}
+
+/**
+ * Resolves a merged-forward child entry's sender identity (nickname + platform-native avatar)
+ * using the merged [profiles] map from the conversation and `/forward` response.
+ */
+fun resolveForwardChildSender(
+    child: ChatForwardChildDto,
+    profiles: Map<String, ChatSenderProfileDto>,
+    defaultPlatform: String = "qq",
+): ResolvedChatSender {
+    val rawId = child.senderId?.trim().orEmpty()
+    val isWechat = ChatPlatformRules.isWechatSyntheticId(rawId) ||
+        (rawId.isEmpty() && defaultPlatform.equals("wechat", ignoreCase = true))
+    val platform = if (isWechat) "wechat" else "qq"
+    val profile = rawId.takeIf { it.isNotBlank() }?.let { id ->
+        profiles["$platform:$id"] ?: profiles["wechat:$id"] ?: profiles["qq:$id"]
+    }
+    val nativeName = child.nickname.trim().takeUnless { isPlaceholderChatNickname(it, rawId) }
+        ?: profile?.platformNickname?.trim()?.takeUnless { isPlaceholderChatNickname(it, rawId) }
+    val igngNickname = if (profile?.bound == true) profile.igngNickname?.trim()?.takeIf { it.isNotBlank() } else null
+    val displayName = when {
+        nativeName != null -> nativeName
+        !igngNickname.isNullOrBlank() -> igngNickname
+        child.nickname.isNotBlank() -> child.nickname.trim()
+        isWechat -> "微信用户"
+        rawId.isNotBlank() -> "QQ $rawId"
+        else -> "匿名"
+    }
+    val secondaryName = if (nativeName != null && !igngNickname.isNullOrBlank() && !igngNickname.equals(nativeName, ignoreCase = true)) {
+        "IGNG: $igngNickname"
+    } else {
+        null
+    }
+    val profileAvatar = normalizeChatAvatarUrl(profile?.avatarUrl)?.takeUnless { it.contains('*') }
+    val avatarCandidates = buildList {
+        if (!isWechat && ChatPlatformRules.isNumericQqId(rawId)) {
+            add("https://q1.qlogo.cn/g?b=qq&nk=$rawId&s=100")
+        }
+        profileAvatar?.let { add(it) }
+    }.distinct()
+    val toneKey = if (rawId.isNotBlank() && !rawId.contains('*')) "$platform:$rawId" else "fwd:$displayName"
+    val digits = rawId.filter(Char::isDigit)
+    val initials = when {
+        nativeName != null || !igngNickname.isNullOrBlank() || isWechat ->
+            displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        digits.isNotEmpty() -> digits.takeLast(2)
+        else -> displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+    }
+    return ResolvedChatSender(
+        groupKey = toneKey,
+        displayName = displayName,
+        secondaryName = secondaryName,
+        igngUsername = if (profile?.bound == true) profile.igngUsername else null,
+        avatarUrl = avatarCandidates.firstOrNull(),
+        fallbackAvatarUrls = avatarCandidates.drop(1),
+        initials = initials,
+        toneIndex = ChatPlatformRules.identityToneIndex(toneKey),
+        isBot = false,
+        isAccountSelf = false,
+        isService = false,
+        sourceLabel = null,
+        isMine = false,
+        isMc = false,
+        boundIgngId = if (profile?.bound == true) profile.igngId else null,
+        mcUsername = null,
+        badges = profile?.badges.orEmpty(),
+        relationship = profile?.relationship,
+        filterSenderId = rawId.takeIf { it.isNotBlank() && !it.contains('*') },
     )
 }
 
