@@ -1,12 +1,8 @@
 package net.igng.core.designsystem
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,11 +23,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +50,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.collectLatest
 import net.igng.core.model.MotionIntensity
 
 /**
@@ -72,7 +71,8 @@ fun rememberIgngDockBottomPadding(dockVisible: Boolean = true): PaddingValues {
 /**
  * Animated visibility host for [IgngFloatingDockBar].
  * Remembers the last active tab id while exiting so the active capsule never snaps back
- * to tab 0 when pushing a detail screen.
+ * to tab 0 when pushing a detail screen, and seamlessly peeks upward during predictive-back
+ * gestures that are returning to a top-level tab without replaying or flashing on commit.
  */
 @Composable
 fun IgngDockHost(
@@ -83,18 +83,61 @@ fun IgngDockHost(
     modifier: Modifier = Modifier,
 ) {
     val intensity = IgngTheme.motionIntensity
-    var lastStableId by remember { mutableStateOf(selectedId ?: items.firstOrNull()?.id.orEmpty()) }
-    if (!selectedId.isNullOrBlank()) {
-        lastStableId = selectedId
+    val predictiveBack = LocalIgngPredictiveBackState.current
+
+    val isPredictivePeeking = predictiveBack != null &&
+        predictiveBack.willRevealDock &&
+        predictiveBack.phase != IgngPredictiveBackPhase.Idle &&
+        intensity != MotionIntensity.REDUCED
+
+    val targetId = selectedId
+        ?: predictiveBack?.targetTabId?.takeIf { isPredictivePeeking }
+    var lastStableId by remember { mutableStateOf(targetId ?: items.firstOrNull()?.id.orEmpty()) }
+    if (!targetId.isNullOrBlank()) {
+        lastStableId = targetId
     }
 
-    AnimatedVisibility(
-        visible = visible,
-        enter = slideInVertically(IgngMotion.dockSpring(intensity)) { (it * 0.85f).roundToInt() } +
-            fadeIn(IgngMotion.microTween(intensity)),
-        exit = slideOutVertically(IgngMotion.dockSpring(intensity)) { (it * 0.85f).roundToInt() } +
-            fadeOut(IgngMotion.microTween(intensity)),
-        modifier = modifier,
+    val dockVisibility = remember { Animatable(if (visible) 1f else 0f) }
+
+    // Hand off seamlessly between live predictive peek and standard dockSpring transitions
+    LaunchedEffect(isPredictivePeeking, visible, intensity, predictiveBack) {
+        if (isPredictivePeeking && predictiveBack != null) {
+            snapshotFlow { predictiveBack.dockRevealProgress }.collectLatest { peek ->
+                dockVisibility.snapTo(peek.coerceIn(0f, 1f))
+            }
+        } else {
+            val target = if (visible) 1f else 0f
+            if (intensity == MotionIntensity.REDUCED) {
+                dockVisibility.snapTo(target)
+            } else {
+                dockVisibility.animateTo(
+                    targetValue = target,
+                    animationSpec = IgngMotion.dockSpring(intensity),
+                )
+            }
+        }
+    }
+
+    val progress = dockVisibility.value
+    if (progress <= 0.005f) return
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            val clamped = progress.coerceIn(0f, 1f)
+            alpha = if (intensity == MotionIntensity.REDUCED) {
+                if (visible) 1f else 0f
+            } else {
+                (clamped * 1.18f).coerceIn(0f, 1f)
+            }
+            translationY = if (intensity == MotionIntensity.REDUCED) {
+                0f
+            } else {
+                (1f - clamped) * 56.dp.toPx()
+            }
+            val s = if (intensity == MotionIntensity.FULL) 0.94f + 0.06f * clamped else 1f
+            scaleX = s
+            scaleY = s
+        },
     ) {
         IgngFloatingDockBar(
             items = items,

@@ -3,13 +3,6 @@ package net.igng.mcstatus
 import net.igng.mcstatus.core.model.adminRole
 
 import android.content.Intent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -45,8 +38,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
@@ -62,11 +53,15 @@ import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngDockHost
 import net.igng.core.designsystem.IgngLoadingVeil
-import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngNavTabItem
+import net.igng.core.designsystem.IgngPredictiveBackProfile
+import net.igng.core.designsystem.IgngPredictiveNavHost
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.LocalIgngDockBottomPadding
+import net.igng.core.designsystem.LocalIgngPredictiveBackState
+import net.igng.core.designsystem.igngComposable
 import net.igng.core.designsystem.rememberIgngDockBottomPadding
+import net.igng.core.designsystem.rememberIgngPredictiveBackState
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.core.model.SessionAuthStatus
 import net.igng.mcstatus.feature.admin.AdminPocketConsoleScreen
@@ -237,21 +232,19 @@ fun IgngMcApp(
             }
         }
 
-        fun NavDestination?.isTopLevelTab(): Boolean =
-            this?.hasRoute<AppRoute.Explore>() == true ||
-                this?.hasRoute<AppRoute.Chat>() == true ||
-                this?.hasRoute<AppRoute.Wiki>() == true ||
-                this?.hasRoute<AppRoute.PlayerCenter>() == true
+        fun NavDestination?.resolveTabId(): String? = when {
+            this?.hasRoute<AppRoute.Explore>() == true -> "explore"
+            this?.hasRoute<AppRoute.Chat>() == true -> "chat"
+            this?.hasRoute<AppRoute.Wiki>() == true -> "wiki"
+            this?.hasRoute<AppRoute.PlayerCenter>() == true -> "player"
+            else -> null
+        }
+
+        fun NavDestination?.isTopLevelTab(): Boolean = resolveTabId() != null
 
         val backStackEntry by navController.currentBackStackEntryAsState()
         val dest = backStackEntry?.destination
-        val activeTabId = when {
-            dest?.hasRoute<AppRoute.Explore>() == true -> "explore"
-            dest?.hasRoute<AppRoute.Chat>() == true -> "chat"
-            dest?.hasRoute<AppRoute.Wiki>() == true -> "wiki"
-            dest?.hasRoute<AppRoute.PlayerCenter>() == true -> "player"
-            else -> null
-        }
+        val activeTabId = dest.resolveTabId()
 
         val navItems = remember {
             listOf(
@@ -263,46 +256,25 @@ fun IgngMcApp(
         }
 
         val bottomBarPadding = rememberIgngDockBottomPadding(dockVisible = activeTabId != null)
+        val predictiveBackState = rememberIgngPredictiveBackState()
 
-        CompositionLocalProvider(LocalIgngDockBottomPadding provides bottomBarPadding) {
+        CompositionLocalProvider(
+            LocalIgngDockBottomPadding provides bottomBarPadding,
+            LocalIgngPredictiveBackState provides predictiveBackState,
+        ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 containerColor = colors.canvas,
                 bottomBar = {},
             ) { _ ->
-                NavHost(
+                IgngPredictiveNavHost(
                     navController = navController,
                     startDestination = AppRoute.Explore,
-                    enterTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabEnter(intensity)
-                        } else {
-                            IgngMotion.pushEnter(intensity)
-                        }
-                    },
-                    exitTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabExit(intensity)
-                        } else {
-                            IgngMotion.pushExit(intensity)
-                        }
-                    },
-                    popEnterTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabEnter(intensity)
-                        } else {
-                            IgngMotion.popEnter(intensity)
-                        }
-                    },
-                    popExitTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabExit(intensity)
-                        } else {
-                            IgngMotion.popExit(intensity)
-                        }
-                    },
+                    isTopLevelTab = { it.isTopLevelTab() },
+                    resolveTabId = { it.resolveTabId() },
+                    predictiveBackState = predictiveBackState,
                 ) {
-                    composable<AppRoute.Explore> {
+                    igngComposable<AppRoute.Explore> {
                         ExploreScreen(
                             exploreRepository = container.exploreRepository,
                             statusRepository = container.statusRepository,
@@ -328,7 +300,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.Chat> {
+                    igngComposable<AppRoute.Chat> {
                         ChatSessionListScreen(
                             endpoints = container.endpoints,
                             chatRepository = container.chatRepository,
@@ -357,13 +329,13 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.CommunityChannels> {
+                    igngComposable<AppRoute.CommunityChannels> {
                         CommunityChannelsScreen(
                             onBack = { navController.popBackStack() },
                         )
                     }
 
-                    composable<AppRoute.ChatConversation> { entry ->
+                    igngComposable<AppRoute.ChatConversation> { entry ->
                         val route = entry.toRoute<AppRoute.ChatConversation>()
                         val boundMcUsernames = remember(bootstrap) {
                             bootstrap?.viewer?.boundMcAccounts?.map { it.username }.orEmpty()
@@ -390,7 +362,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.Wiki> {
+                    igngComposable<AppRoute.Wiki> {
                         WikiCatalogScreen(
                             wikiRepository = container.wikiRepository,
                             settingsRepository = container.settingsRepository,
@@ -399,7 +371,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.PlayerCenter> {
+                    igngComposable<AppRoute.PlayerCenter> {
                         PlayerCenterScreen(
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
@@ -432,7 +404,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.GlobalSearch> {
+                    igngComposable<AppRoute.GlobalSearch> {
                         GlobalSearchScreen(
                             exploreRepository = container.exploreRepository,
                             onBack = { navController.popBackStack() },
@@ -441,14 +413,16 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.StatusWall> {
+                    igngComposable<AppRoute.StatusWall> {
                         StatusWallScreen(
                             statusRepository = container.statusRepository,
                             onBack = { navController.popBackStack() },
                         )
                     }
 
-                    composable<AppRoute.WorldMap> { entry ->
+                    igngComposable<AppRoute.WorldMap>(
+                        predictiveBackProfile = IgngPredictiveBackProfile.SurfaceSlide,
+                    ) { entry ->
                         val route = entry.toRoute<AppRoute.WorldMap>()
                         WorldMapScreen(
                             endpoints = container.endpoints,
@@ -459,7 +433,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.FamilyDetail> { entry ->
+                    igngComposable<AppRoute.FamilyDetail> { entry ->
                         val route = entry.toRoute<AppRoute.FamilyDetail>()
                         val fam = selectedFamilyCache[route.familySlug]
                         if (fam != null) {
@@ -473,7 +447,7 @@ fun IgngMcApp(
                         }
                     }
 
-                    composable<AppRoute.PlayerPassport> { entry ->
+                    igngComposable<AppRoute.PlayerPassport> { entry ->
                         val route = entry.toRoute<AppRoute.PlayerPassport>()
                         PlayerPassportScreen(
                             igngId = route.igngId,
@@ -483,7 +457,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.McCharacter> { entry ->
+                    igngComposable<AppRoute.McCharacter> { entry ->
                         val route = entry.toRoute<AppRoute.McCharacter>()
                         McCharacterPublicScreen(
                             username = route.username,
@@ -493,14 +467,14 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.CommunityHall> {
+                    igngComposable<AppRoute.CommunityHall> {
                         CommunityHallScreen(
                             exploreRepository = container.exploreRepository,
                             onBack = { navController.popBackStack() },
                         )
                     }
 
-                    composable<AppRoute.PerfectRoster> {
+                    igngComposable<AppRoute.PerfectRoster> {
                         PerfectRosterScreen(
                             exploreRepository = container.exploreRepository,
                             onBack = { navController.popBackStack() },
@@ -508,7 +482,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.WikiArticle> { entry ->
+                    igngComposable<AppRoute.WikiArticle> { entry ->
                         val route = entry.toRoute<AppRoute.WikiArticle>()
                         WikiArticleScreen(
                             pageId = route.pageId,
@@ -518,34 +492,34 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.Characters> {
+                    igngComposable<AppRoute.Characters> {
                         CharactersScreen(container.endpoints, container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.Vault> {
+                    igngComposable<AppRoute.Vault> {
                         VaultScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.Lands> {
+                    igngComposable<AppRoute.Lands> {
                         MyLandsScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.Teleports> {
+                    igngComposable<AppRoute.Teleports> {
                         MyTeleportsScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.FakePlayers> {
+                    igngComposable<AppRoute.FakePlayers> {
                         MyFakePlayersScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.VanillaStats> {
+                    igngComposable<AppRoute.VanillaStats> {
                         VanillaStatsScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.Medals> {
+                    igngComposable<AppRoute.Medals> {
                         MyMedalsScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.PersonalPerfect> {
+                    igngComposable<AppRoute.PersonalPerfect> {
                         PersonalPerfectScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.Permissions> {
+                    igngComposable<AppRoute.Permissions> {
                         PermissionsScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    composable<AppRoute.LoginActivity> {
+                    igngComposable<AppRoute.LoginActivity> {
                         LoginActivityScreen(
                             bootstrap = bootstrap,
                             endpoints = container.endpoints,
@@ -554,7 +528,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.Tickets> {
+                    igngComposable<AppRoute.Tickets> {
                         TicketsScreen(
                             ticketRepository = container.ticketRepository,
                             onBack = { navController.popBackStack() },
@@ -563,7 +537,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.TicketDetail> { entry ->
+                    igngComposable<AppRoute.TicketDetail> { entry ->
                         val route = entry.toRoute<AppRoute.TicketDetail>()
                         TicketDetailScreen(
                             ticketId = route.ticketId,
@@ -573,7 +547,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.CreateTicket> {
+                    igngComposable<AppRoute.CreateTicket> {
                         CreateTicketScreen(
                             endpoints = container.endpoints,
                             ticketRepository = container.ticketRepository,
@@ -585,7 +559,7 @@ fun IgngMcApp(
                         )
                     }
 
-                    composable<AppRoute.AdminConsole> {
+                    igngComposable<AppRoute.AdminConsole> {
                         val role = activeAccount?.adminRole
                         if (role != null) {
                             AdminPocketConsoleScreen(
@@ -599,7 +573,7 @@ fun IgngMcApp(
                         }
                     }
 
-                    composable<AppRoute.Settings> {
+                    igngComposable<AppRoute.Settings> {
                         SettingsScreen(
                             container = container,
                             preferences = preferences,

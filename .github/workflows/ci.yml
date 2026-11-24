@@ -130,6 +130,7 @@ jobs:
         run: |
           sh ./gradlew \
             :core:model:testDebugUnitTest \
+            :core:designsystem:testDebugUnitTest \
             :core:network:testDebugUnitTest \
             :core:auth:testDebugUnitTest \
             :core:data:testDebugUnitTest \
