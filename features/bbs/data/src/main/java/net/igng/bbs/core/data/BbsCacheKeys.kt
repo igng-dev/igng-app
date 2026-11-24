@@ -38,8 +38,11 @@ object BbsCacheKeys {
     const val TAGS = "bbs:tags"
     const val RULES = "bbs:rules"
 
-    fun feed(categorySlug: String?, sort: String): String =
-        "bbs:feed:${categorySlug.orEmpty().ifBlank { "all" }}:$sort"
+    fun feed(categorySlug: String?, sort: String, excludeSeries: Boolean = false): String {
+        val scope = categorySlug.orEmpty().ifBlank { "all" }
+        val suffix = if (excludeSeries) ":noser" else ""
+        return "bbs:feed:$scope:$sort$suffix"
+    }
 
     fun tagFeed(tag: String, sort: String): String =
         "bbs:tag:${tag.trim().lowercase()}:$sort"
@@ -92,9 +95,9 @@ object BbsCachePolicies {
 
 object BbsDiskCodecs {
     val BOOTSTRAP = jsonDiskCodec("bbs_bootstrap", BbsBootstrapDto.serializer())
-    val HOME = jsonDiskCodec("bbs_home", BbsHomeDto.serializer())
+    val HOME = jsonDiskCodec("bbs_home_v2", BbsHomeDto.serializer())
     val DEFAULT_FEED = jsonDiskCodec(
-        "bbs_feed_all_latest",
+        "bbs_feed_all_latest_noser",
         PaginatedResponseDto.serializer(PostSummaryDto.serializer()),
     )
     val DEFAULT_COLUMNS = jsonDiskCodec(

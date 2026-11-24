@@ -32,7 +32,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -40,7 +39,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +73,7 @@ import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngImageGalleryLightbox
 import net.igng.core.designsystem.IgngInfoBanner
+import net.igng.core.designsystem.IgngLazyColumnScrollbar
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
@@ -85,8 +84,10 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.IgngTopRefreshBar
 import net.igng.core.designsystem.ProvideIgngReaderSurface
 import net.igng.core.designsystem.readerSurfaceColors
+import net.igng.core.designsystem.rememberIgngReadingProgress
 import net.igng.core.designsystem.rememberIgngScrollBarVisibility
 import net.igng.core.markdown.IgngMarkdownBlockView
 import net.igng.core.markdown.MarkdownParser
@@ -173,13 +174,7 @@ fun PostReaderScreen(
     val totalBlocks = document?.blocks?.size ?: 0
     val commentsAnchorIndex = headerItemsCount + totalBlocks + 1
 
-    val readingProgress by remember(totalBlocks) {
-        derivedStateOf {
-            val totalItems = listState.layoutInfo.totalItemsCount.coerceAtLeast(1)
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            (lastVisible.toFloat() / totalItems.toFloat()).coerceIn(0f, 1f)
-        }
-    }
+    val readingProgress by rememberIgngReadingProgress(listState)
 
     val barVisibility = rememberIgngScrollBarVisibility(hideThreshold = 32.dp, showThreshold = 20.dp)
     LaunchedEffect(listState.firstVisibleItemIndex) {
@@ -198,7 +193,7 @@ fun PostReaderScreen(
                 numericId = d.numericId,
                 title = d.title,
                 authorName = d.author?.displayName ?: "匿名用户",
-                categoryName = d.category?.name,
+                categoryName = d.category?.let { BbsFormatters.categoryDisplayName(it) },
                 progressRatio = readingProgress,
                 scrollIndex = listState.firstVisibleItemIndex,
             ),
@@ -217,7 +212,7 @@ fun PostReaderScreen(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 IgngTopBar(
-                    title = detail?.category?.name ?: "文章阅读",
+                    title = detail?.category?.let { BbsFormatters.categoryDisplayName(it) } ?: "文章阅读",
                     onBack = onBack,
                     actions = {
                         if (document?.toc?.isNotEmpty() == true) {
@@ -248,15 +243,13 @@ fun PostReaderScreen(
                     },
                 )
 
-                // Hairline reading progress indicator
-                LinearProgressIndicator(
-                    progress = { readingProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp),
-                    color = colors.accent,
-                    trackColor = colors.line,
-                )
+                val showArticlePullRefresh = detail != null && (!detail.restrictedWarning || acknowledgedRestriction)
+                if (!showArticlePullRefresh) {
+                    IgngTopRefreshBar(
+                        active = detailState.isInitialLoading || detailState.isRevalidating || detailState.isUserRefreshing,
+                        showIdleDivider = true,
+                    )
+                }
 
                 when {
                     detailState.isInitialLoading && detail == null -> IgngLoadingCenter(loading = true)
@@ -291,13 +284,16 @@ fun PostReaderScreen(
                         } else {
                             IgngPullToRefreshBox(
                                 isRefreshing = detailState.isUserRefreshing,
+                                isRevalidating = detailState.isRevalidating,
+                                showIdleDivider = true,
                                 onRefresh = {
                                     detailHandle.refresh()
                                     commentsRefreshSignal++
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {
-                                LazyColumn(
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    LazyColumn(
                                     state = listState,
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -400,13 +396,17 @@ fun PostReaderScreen(
                                                 }
                                             }
                                             // Tags
-                                            if (d.tags.isNotEmpty()) {
+                                            val displayTags = BbsFormatters.visiblePostTags(d.tags, d.category)
+                                            if (displayTags.isNotEmpty()) {
                                                 FlowRow(
                                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                                 ) {
-                                                    d.tags.forEach { tag ->
-                                                        IgngTagChip(text = "#$tag", onClick = { onOpenTag(tag) })
+                                                    displayTags.forEach { tag ->
+                                                        IgngTagChip(
+                                                            text = BbsFormatters.tagDisplayLabel(tag),
+                                                            onClick = { onOpenTag(tag) },
+                                                        )
                                                     }
                                                 }
                                             }
@@ -503,6 +503,15 @@ fun PostReaderScreen(
                                             onRequireLogin = onRequireLogin,
                                         )
                                     }
+                                    }
+
+                                    IgngLazyColumnScrollbar(
+                                        listState = listState,
+                                        thumbColor = readerSecondary,
+                                        activeThumbColor = colors.accent,
+                                        bottomPadding = navBottomPadding + 84.dp,
+                                        modifier = Modifier.align(Alignment.CenterEnd),
+                                    )
                                 }
                             }
                         }

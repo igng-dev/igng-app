@@ -86,6 +86,7 @@ import net.igng.bbs.core.data.CreateCreatorPostRequest
 import net.igng.bbs.core.data.LocalEditorDraft
 import net.igng.bbs.core.data.SubmitCreatorPostRequest
 import net.igng.bbs.core.data.UpdateCreatorPostRequest
+import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.ListWrapperDto
 import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberSwrResource
@@ -740,7 +741,7 @@ fun NativeWysiwygEditorScreen(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     bootstrap?.categories.orEmpty().forEach { cat ->
                         IgngTagChip(
-                            text = cat.name,
+                            text = BbsFormatters.categoryDisplayName(cat),
                             selected = selectedCategoryId == cat.id,
                             onClick = { selectedCategoryId = cat.id },
                         )

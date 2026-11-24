@@ -4,13 +4,9 @@ import net.igng.core.designsystem.*
 import net.igng.core.model.MotionIntensity
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -30,17 +26,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ThumbUp
@@ -171,9 +162,9 @@ fun BbsRecommendRail(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    slot.post.category?.name?.let { cat ->
+                    slot.post.category?.let { cat ->
                         Text(
-                            text = cat,
+                            text = BbsFormatters.categoryDisplayName(cat),
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.textMuted,
                         )
@@ -252,6 +243,7 @@ fun BbsPostRowCard(
     onAuthorClick: (() -> Unit)? = null,
     onTagClick: ((String) -> Unit)? = null,
     showModerationBadge: Boolean = false,
+    showSeriesBadge: Boolean = true,
 ) {
     val colors = IgngTheme.colors
     IgngTile(
@@ -329,7 +321,8 @@ fun BbsPostRowCard(
         }
 
         // Category / Column / Tags pill row
-        val hasMetaChips = post.category != null || post.column != null || post.tags.isNotEmpty()
+        val shownTags = BbsFormatters.visiblePostTags(post.tags, post.category).take(2)
+        val hasMetaChips = post.category != null || post.column != null || shownTags.isNotEmpty()
         if (hasMetaChips) {
             Spacer(Modifier.height(10.dp))
             Row(
@@ -337,14 +330,14 @@ fun BbsPostRowCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 post.category?.let { cat ->
-                    IgngTagChip(text = cat.name, tone = IgngTone.ACCENT)
+                    IgngTagChip(text = BbsFormatters.categoryDisplayName(cat), tone = IgngTone.ACCENT)
                 }
                 post.column?.let { col ->
                     IgngTagChip(text = col.name, tone = IgngTone.NEUTRAL)
                 }
-                post.tags.take(2).forEach { tag ->
+                shownTags.forEach { tag ->
                     IgngTagChip(
-                        text = "#$tag",
+                        text = BbsFormatters.tagDisplayLabel(tag),
                         tone = IgngTone.NEUTRAL,
                         onClick = onTagClick?.let { fn -> { fn(tag) } },
                     )
@@ -364,14 +357,16 @@ fun BbsPostRowCard(
             MetricMini(icon = Icons.Rounded.ThumbUpOffAlt, count = post.likeCount)
             MetricMini(icon = Icons.AutoMirrored.Rounded.Comment, count = post.commentCount)
             Spacer(Modifier.weight(1f))
-            post.series?.let { ser ->
-                Text(
-                    text = "系列 · ${ser.name}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.accent,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (showSeriesBadge) {
+                post.series?.let { ser ->
+                    Text(
+                        text = "系列 · ${ser.name}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.accent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -390,86 +385,6 @@ private fun MetricMini(icon: ImageVector, count: Int) {
             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
             color = colors.textMuted,
         )
-    }
-}
-
-/**
- * Collapsible series group card with smooth spring accordion expansion.
- */
-@Composable
-fun BbsSeriesCollapseGroup(
-    seriesName: String,
-    posts: List<PostSummaryDto>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    onPostClick: (PostSummaryDto) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = IgngTheme.colors
-    val intensity = IgngTheme.motionIntensity
-    IgngTile(modifier = modifier.fillMaxWidth(), soft = true, padding = PaddingValues(14.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .igngPressScale(haptic = true, onClick = onToggle),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "系列 · $seriesName",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = colors.accent,
-                )
-                Text(
-                    text = "共 ${posts.size} 篇文章 · 点击${if (expanded) "收起" else "展开"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textSecondary,
-                )
-            }
-            Icon(
-                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                contentDescription = if (expanded) "收起" else "展开",
-                tint = colors.textSecondary,
-            )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(IgngMotion.standardSpring(intensity)) + fadeIn(IgngMotion.easeTween(180, intensity)),
-            exit = shrinkVertically(IgngMotion.standardSpring(intensity)) + fadeOut(IgngMotion.easeTween(140, intensity)),
-        ) {
-            Column(
-                modifier = Modifier.padding(top = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                posts.forEach { post ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(IgngRadius.control))
-                            .background(colors.tile)
-                            .border(1.dp, colors.line, RoundedCornerShape(IgngRadius.control))
-                            .igngPressScale(onClick = { onPostClick(post) })
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = post.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = BbsFormatters.compactCount(post.views),
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = colors.textMuted,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 

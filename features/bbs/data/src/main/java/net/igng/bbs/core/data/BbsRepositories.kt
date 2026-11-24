@@ -179,9 +179,9 @@ class FeedRepository(
         tag: String? = null,
         columnId: String? = null,
         authorId: String? = null,
-    ): ApiResult<PaginatedResponseDto<PostSummaryDto>> = http.get(
-        path = "/bbs/posts",
-        query = mapOf(
+        excludeSeries: Boolean = false,
+    ): ApiResult<PaginatedResponseDto<PostSummaryDto>> {
+        val baseQuery = mapOf(
             "page" to page.toString(),
             "page_size" to pageSize.toString(),
             "sort_by" to sort,
@@ -189,8 +189,25 @@ class FeedRepository(
             "tag" to tag,
             "column_id" to columnId,
             "author_id" to authorId,
-        ),
-    )
+        )
+        val primary = http.get<PaginatedResponseDto<PostSummaryDto>>(
+            path = "/bbs/posts",
+            query = if (excludeSeries) baseQuery + ("exclude_series" to "true") else baseQuery,
+        )
+        // Graceful rollout compatibility if backend has not yet deployed v1.17 exclude_series param
+        if (excludeSeries && primary is ApiResult.Failure &&
+            primary.error.httpStatus == 400 &&
+            primary.error.errorCode == "validation.invalid_parameter"
+        ) {
+            return when (val fallback = http.get<PaginatedResponseDto<PostSummaryDto>>(path = "/bbs/posts", query = baseQuery)) {
+                is ApiResult.Success -> ApiResult.Success(
+                    fallback.data.copy(data = fallback.data.data.filter { it.series == null }),
+                )
+                is ApiResult.Failure -> fallback
+            }
+        }
+        return primary
+    }
 
     suspend fun search(
         query: String,

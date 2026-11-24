@@ -43,7 +43,7 @@ class BbsSwrPropagationTest {
             tags = setOf(BbsCacheTags.HOME),
         )
         cache.put(
-            key = BbsCacheKeys.feed(null, "latest"),
+            key = BbsCacheKeys.feed(null, "latest", excludeSeries = true),
             data = PaginatedResponseDto(data = listOf(postSummary)),
             scope = IgngCacheScope.SESSION_AWARE,
             tags = setOf(BbsCacheTags.FEED, BbsCacheTags.POST_LISTS),
@@ -59,7 +59,7 @@ class BbsSwrPropagationTest {
         assertEquals(11, home.latestPosts.single().likeCount)
         assertEquals(11, home.recommendations.single().post.likeCount)
 
-        val feed = cache.peek<PaginatedResponseDto<PostSummaryDto>>(BbsCacheKeys.feed(null, "latest"))!!.data
+        val feed = cache.peek<PaginatedResponseDto<PostSummaryDto>>(BbsCacheKeys.feed(null, "latest", excludeSeries = true))!!.data
         assertEquals(11, feed.data.single().likeCount)
     }
 

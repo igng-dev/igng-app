@@ -92,10 +92,12 @@ import net.igng.core.designsystem.IgngDockHost
 import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngNavTabItem
 import net.igng.core.designsystem.IgngPredictiveNavHost
+import net.igng.core.designsystem.IgngPullRefreshStyle
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.LocalIgngDockBottomPadding
 import net.igng.core.designsystem.LocalIgngPredictiveBackState
+import net.igng.core.designsystem.LocalIgngPullRefreshStyle
 import net.igng.core.designsystem.igngComposable
 import net.igng.core.designsystem.rememberIgngDockBottomPadding
 import net.igng.core.designsystem.rememberIgngPredictiveBackState
@@ -279,6 +281,7 @@ fun BbsAppRoot(
         CompositionLocalProvider(
             LocalIgngDockBottomPadding provides dockBottomPadding,
             LocalIgngPredictiveBackState provides predictiveBackState,
+            LocalIgngPullRefreshStyle provides IgngPullRefreshStyle.TopBar,
         ) {
             IgngAmbientCanvas(modifier = Modifier.fillMaxSize()) {
                 IgngPredictiveNavHost(

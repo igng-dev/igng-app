@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,9 +28,11 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -290,7 +293,170 @@ fun IgngLoadingVeil(
 }
 
 /**
- * Custom IGNG Pull-to-Refresh where drag distance physically folds the 4 corners inward.
+ * Visual style for [IgngPullToRefreshBox] refresh feedback.
+ * - [FloatingGlyph]: centered floating Folded Core glyph overlaid near the top.
+ * - [TopBar]: crisp 2dp top hairline bar that expands symmetrically on pull and sweeps smoothly
+ *   while refreshing or revalidating, leaving reading/feed content completely unobstructed.
+ */
+enum class IgngPullRefreshStyle {
+    FloatingGlyph,
+    TopBar,
+}
+
+val LocalIgngPullRefreshStyle = staticCompositionLocalOf { IgngPullRefreshStyle.FloatingGlyph }
+
+/**
+ * Subtle 2dp top hairline refresh status bar.
+ * - During pull-down gesture (`!active && pullProgress > 0f`): expands smoothly from center.
+ * - During active refresh / background revalidation (`active == true`): smooth sweeping bar
+ *   respecting all 3 [net.igng.core.model.MotionIntensity] tiers.
+ * - When idle: fades seamlessly to transparent (or a crisp 1dp hairline divider when [showIdleDivider] is true)
+ *   with zero layout shift.
+ */
+@Composable
+fun IgngTopRefreshBar(
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    pullProgress: Float = 0f,
+    showIdleDivider: Boolean = false,
+    color: Color = IgngTheme.colors.accent,
+    trackColor: Color = IgngTheme.colors.line,
+) {
+    val intensity = IgngTheme.motionIntensity
+    val reduced = IgngTheme.motionReduced
+    val clampedPull = pullProgress.coerceIn(0f, 1f)
+    val engaged = active || clampedPull > 0.02f
+
+    val barAlpha by animateFloatAsState(
+        targetValue = if (engaged) 1f else 0f,
+        animationSpec = IgngMotion.microTween(intensity),
+        label = "topRefreshBarAlpha",
+    )
+
+    val sweepPhase = if (active && !reduced) {
+        val durationMs = if (intensity == net.igng.core.model.MotionIntensity.CALM) 1600 else 1250
+        val transition = rememberInfiniteTransition(label = "topRefreshSweep")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = durationMs, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "topRefreshSweepPhase",
+        ).value
+    } else {
+        0f
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(2.dp)
+            .semantics {
+                if (active) {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = "正在刷新"
+                }
+            },
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            if (w <= 0f || h <= 0f) return@Canvas
+
+            if (showIdleDivider && barAlpha < 0.99f) {
+                val dividerHeight = 1.dp.toPx().coerceAtMost(h)
+                drawRect(
+                    color = trackColor.copy(alpha = (1f - barAlpha).coerceIn(0f, 1f)),
+                    topLeft = Offset(0f, h - dividerHeight),
+                    size = Size(w, dividerHeight),
+                )
+            }
+
+            if (barAlpha <= 0.01f) return@Canvas
+
+            drawRect(
+                color = color.copy(alpha = 0.16f * barAlpha),
+                topLeft = Offset.Zero,
+                size = Size(w, h),
+            )
+
+            when {
+                active && reduced -> {
+                    drawRect(
+                        color = color.copy(alpha = 0.78f * barAlpha),
+                        topLeft = Offset.Zero,
+                        size = Size(w, h),
+                    )
+                }
+                active -> {
+                    // Primary sweeping segment + staggered secondary trail for fluid indeterminate motion
+                    drawSweepSegment(
+                        phase = sweepPhase,
+                        width = w,
+                        height = h,
+                        segmentRatio = 0.38f,
+                        color = color,
+                        alpha = 0.95f * barAlpha,
+                    )
+                    drawSweepSegment(
+                        phase = (sweepPhase + 0.52f) % 1f,
+                        width = w,
+                        height = h,
+                        segmentRatio = 0.22f,
+                        color = color,
+                        alpha = 0.58f * barAlpha,
+                    )
+                }
+                else -> {
+                    val fillWidth = w * clampedPull
+                    val startX = (w - fillWidth) * 0.5f
+                    drawRect(
+                        color = color.copy(alpha = (0.45f + 0.55f * clampedPull) * barAlpha),
+                        topLeft = Offset(startX, 0f),
+                        size = Size(fillWidth, h),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun DrawScope.drawSweepSegment(
+    phase: Float,
+    width: Float,
+    height: Float,
+    segmentRatio: Float,
+    color: Color,
+    alpha: Float,
+) {
+    val segWidth = width * segmentRatio
+    val travel = width + segWidth
+    val startX = phase * travel - segWidth
+    val endX = startX + segWidth
+    val clampedStart = startX.coerceIn(0f, width)
+    val clampedEnd = endX.coerceIn(0f, width)
+    if (clampedEnd <= clampedStart) return
+    drawRect(
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                color.copy(alpha = 0f),
+                color.copy(alpha = alpha),
+                color.copy(alpha = alpha),
+                color.copy(alpha = 0f),
+            ),
+            startX = startX,
+            endX = endX,
+        ),
+        topLeft = Offset(clampedStart, 0f),
+        size = Size(clampedEnd - clampedStart, height),
+    )
+}
+
+/**
+ * Custom IGNG Pull-to-Refresh supporting both [IgngPullRefreshStyle.FloatingGlyph] (4-corner Folded Core)
+ * and [IgngPullRefreshStyle.TopBar] (unobtrusive 2dp top refresh hairline bar).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -298,6 +464,9 @@ fun IgngPullToRefreshBox(
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    isRevalidating: Boolean = false,
+    indicatorStyle: IgngPullRefreshStyle = LocalIgngPullRefreshStyle.current,
+    showIdleDivider: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val state = rememberPullToRefreshState()
@@ -319,29 +488,41 @@ fun IgngPullToRefreshBox(
         state = state,
         modifier = modifier,
         indicator = {
-            val intensity = IgngTheme.motionIntensity
             val fraction = state.distanceFraction.coerceIn(0f, 1.3f)
-            val show = isRefreshing || fraction > 0.04f
-            val alpha by animateFloatAsState(
-                targetValue = if (show) 1f else 0f,
-                animationSpec = IgngMotion.microTween(intensity),
-                label = "ptrAlpha",
-            )
-            if (alpha > 0.01f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 12.dp)
-                        .graphicsLayer {
-                            this.alpha = alpha
-                            translationY = if (isRefreshing) 4.dp.toPx() else (fraction * 14.dp.toPx()).coerceAtMost(20.dp.toPx())
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    IgngFoldedCoreGlyph(
-                        size = FoldedCoreSize.Md,
-                        manualProgress = if (isRefreshing) null else fraction,
+            when (indicatorStyle) {
+                IgngPullRefreshStyle.TopBar -> {
+                    IgngTopRefreshBar(
+                        active = isRefreshing || isRevalidating,
+                        pullProgress = if (isRefreshing) 1f else fraction,
+                        showIdleDivider = showIdleDivider,
+                        modifier = Modifier.align(Alignment.TopCenter),
                     )
+                }
+                IgngPullRefreshStyle.FloatingGlyph -> {
+                    val intensity = IgngTheme.motionIntensity
+                    val show = isRefreshing || fraction > 0.04f
+                    val alpha by animateFloatAsState(
+                        targetValue = if (show) 1f else 0f,
+                        animationSpec = IgngMotion.microTween(intensity),
+                        label = "ptrAlpha",
+                    )
+                    if (alpha > 0.01f) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 12.dp)
+                                .graphicsLayer {
+                                    this.alpha = alpha
+                                    translationY = if (isRefreshing) 4.dp.toPx() else (fraction * 14.dp.toPx()).coerceAtMost(20.dp.toPx())
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            IgngFoldedCoreGlyph(
+                                size = FoldedCoreSize.Md,
+                                manualProgress = if (isRefreshing) null else fraction,
+                            )
+                        }
+                    }
                 }
             }
         },

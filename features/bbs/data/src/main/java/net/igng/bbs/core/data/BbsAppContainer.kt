@@ -157,10 +157,9 @@ class BbsAppContainer(
                 scope = IgngCacheScope.SESSION_AWARE,
                 tags = setOf(BbsCacheTags.HOME),
                 diskCodec = BbsDiskCodecs.HOME,
-                legacyRawProvider = { settingsRepository.readCache("home") },
             )
             swrCache.hydrateFromDisk(
-                key = BbsCacheKeys.feed(categorySlug = null, sort = "latest"),
+                key = BbsCacheKeys.feed(categorySlug = null, sort = "latest", excludeSeries = true),
                 scope = IgngCacheScope.SESSION_AWARE,
                 tags = setOf(BbsCacheTags.FEED, BbsCacheTags.POST_LISTS),
                 diskCodec = BbsDiskCodecs.DEFAULT_FEED,

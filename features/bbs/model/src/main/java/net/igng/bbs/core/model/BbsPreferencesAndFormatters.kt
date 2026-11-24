@@ -18,12 +18,45 @@ data class AppPreferences(
 )
 
 object BbsFormatters {
+    private const val ESSAY_CATEGORY_SLUG = "essay"
+    private const val ESSAY_DISPLAY_LABEL = "Ink随笔"
+
     fun compactCount(value: Int): String = IgngCoreFormatters.compactCount(value)
     fun relativeTime(isoUtc: String?, now: Instant = Instant.now()): String =
         IgngCoreFormatters.relativeTime(isoUtc, now)
     fun fullDateTime(isoUtc: String?): String = IgngCoreFormatters.fullDateTime(isoUtc)
     fun formatBytes(bytes: Long): String = IgngCoreFormatters.formatBytes(bytes)
     fun readingMinutesLabel(minutes: Int): String = "约 ${minutes.coerceAtLeast(1)} 分钟阅读"
+
+    fun isEssayCategory(category: CategoryDto?): Boolean {
+        if (category == null) return false
+        if (category.slug.equals(ESSAY_CATEGORY_SLUG, ignoreCase = true)) return true
+        return isEssayLabel(category.name)
+    }
+
+    fun isEssayLabel(raw: String?): Boolean {
+        if (raw.isNullOrBlank()) return false
+        val normalized = raw.trim().removePrefix("#").replace(Regex("\\s+"), "").lowercase()
+        return normalized == "ink随笔"
+    }
+
+    fun categoryDisplayName(category: CategoryDto): String =
+        if (isEssayCategory(category)) ESSAY_DISPLAY_LABEL else category.name
+
+    fun categoryDisplayName(slug: String?, name: String?): String {
+        if (slug.equals(ESSAY_CATEGORY_SLUG, ignoreCase = true) || isEssayLabel(name)) {
+            return ESSAY_DISPLAY_LABEL
+        }
+        return name?.trim().orEmpty().ifBlank { slug.orEmpty() }
+    }
+
+    fun tagDisplayLabel(tag: String): String {
+        val clean = tag.trim().removePrefix("#")
+        return if (isEssayLabel(clean)) ESSAY_DISPLAY_LABEL else "#$clean"
+    }
+
+    fun visiblePostTags(tags: List<String>, category: CategoryDto?): List<String> =
+        if (isEssayCategory(category)) tags.filterNot(::isEssayLabel) else tags
 
     fun postStatusLabel(status: Int, banStatus: Int, moderationStatus: String? = null): String = when {
         status == 3 -> "已删除"
