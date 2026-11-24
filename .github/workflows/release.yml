@@ -239,9 +239,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$APP_KEY" = "bbs" ]; then
-            sh ./gradlew :core:model:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :features:bbs:model:testDebugUnitTest :features:bbs:data:testDebugUnitTest :apps:bbs:testDebugUnitTest --no-daemon
+            sh ./gradlew :core:model:testDebugUnitTest :core:designsystem:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :features:bbs:model:testDebugUnitTest :features:bbs:data:testDebugUnitTest :apps:bbs:testDebugUnitTest --no-daemon
           elif [ "$APP_KEY" = "mc" ]; then
-            sh ./gradlew :core:model:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :features:mc:model:testDebugUnitTest :features:mc:data:testDebugUnitTest :features:mc:chat:testDebugUnitTest :apps:mc:testDebugUnitTest --no-daemon
+            sh ./gradlew :core:model:testDebugUnitTest :core:designsystem:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :features:mc:model:testDebugUnitTest :features:mc:data:testDebugUnitTest :features:mc:chat:testDebugUnitTest :apps:mc:testDebugUnitTest --no-daemon
           fi
 
       - name: 构建正式签名 Release APK（BBS）
