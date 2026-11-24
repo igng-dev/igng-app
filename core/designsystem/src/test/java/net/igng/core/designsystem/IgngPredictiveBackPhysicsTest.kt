@@ -1,12 +1,32 @@
 package net.igng.core.designsystem
 
+import androidx.compose.runtime.MonotonicFrameClock
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import net.igng.core.model.MotionIntensity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class IgngPredictiveBackPhysicsTest {
+
+    private class VirtualFrameClock(
+        private val frameStepMs: Long = 16L,
+    ) : MonotonicFrameClock {
+        private var nowNanos: Long = 0L
+
+        override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R {
+            delay(frameStepMs)
+            nowNanos += frameStepMs * 1_000_000L
+            return onFrame(nowNanos)
+        }
+    }
 
     private val widthPx = 1080f
     private val heightPx = 2400f
@@ -334,5 +354,226 @@ class IgngPredictiveBackPhysicsTest {
         assertTrue("Dock peeks monotonically with drag", mid > start && deep > mid)
         assertTrue("Dock leaves subtle headroom before commit", deep < 0.9f)
         assertEquals("Dock reaches full rest on commit completion", 1f, committed, 0.0001f)
+    }
+
+    @Test
+    fun asyncNavHostPopCommitsCleanlyAndHoldsExitingHiddenUntilDispose() = runTest {
+        val frameClock = VirtualFrameClock()
+        val state = IgngPredictiveBackState()
+        val scope = kotlinx.coroutines.CoroutineScope(coroutineContext + frameClock)
+
+        state.startDrag(
+            exitingId = "entry-B",
+            enteringId = "entry-A",
+            swipeEdge = IgngPredictiveBackEdge.LEFT,
+            touchY = heightPx * 0.5f,
+            rawProgress = 0.05f,
+            frameTimeMs = 100L,
+            revealDock = true,
+            dockTargetTabId = "feed",
+            intensity = MotionIntensity.FULL,
+        )
+        state.updateDrag(
+            touchY = heightPx * 0.5f,
+            rawProgress = 0.15f,
+            frameTimeMs = 130L,
+            intensity = MotionIntensity.FULL,
+            onHapticTick = {},
+        )
+
+        // Simulate NavHost's PredictiveBackHandler: back stack does NOT pop synchronously inside
+        // childDispatcher.onBackPressed(); it pops asynchronously in a coroutine right afterwards.
+        var currentEntryId = "entry-B"
+        var exitingStillInAnimatedContent = true
+
+        state.enterCommittingSync()
+        assertEquals(IgngPredictiveBackPhase.Committing, state.phase)
+
+        // Async pop queued ahead of commit coroutine (mirrors Channel.close -> NavHost coroutine)
+        scope.launch { currentEntryId = "entry-A" }
+
+        state.runCommitAnimation(
+            scope = scope,
+            intensity = MotionIntensity.FULL,
+            hasPopped = { currentEntryId != "entry-B" },
+            isEntryStillVisible = { exitingStillInAnimatedContent },
+            awaitNextFrame = { frameClock.withFrameNanos {} },
+        )
+
+        // Advance past commit fly-out duration (<= 230ms) + old broken 95ms grace window,
+        // while AnimatedContent has NOT yet disposed entry-B (e.g. fast flick or 2x anim scale).
+        advanceTimeBy(400L)
+        runCurrent()
+
+        assertEquals(
+            "State must remain Committing while exiting page is still composed",
+            IgngPredictiveBackPhase.Committing,
+            state.phase,
+        )
+        assertEquals(1f, state.visualCommitProgress, 0.0001f)
+        assertEquals(1f, state.dockRevealProgress, 0.0001f)
+        assertTrue(state.isSuppressedExiting("entry-B"))
+
+        val hiddenCard = state.resolveCardTransform(
+            entryId = "entry-B",
+            widthPx = widthPx,
+            heightPx = heightPx,
+            density = density,
+            intensity = MotionIntensity.FULL,
+            profile = IgngPredictiveBackProfile.CardPeel,
+        )
+        assertTrue("Exiting page must remain actively hidden, never snap to Identity", hiddenCard.active)
+        assertEquals(0f, hiddenCard.alpha, 0.0001f)
+
+        // Now AnimatedContent finishes its hold-alive transition and disposes entry-B
+        exitingStillInAnimatedContent = false
+        state.onSurfaceDisposed("entry-B")
+
+        assertEquals(IgngPredictiveBackPhase.Idle, state.phase)
+        assertFalse(state.isGestureSession)
+        assertFalse(state.isSuppressedExiting("entry-B"))
+    }
+
+    @Test
+    fun rapidSecondBackSwipeKeepsPreviousExitingEntrySuppressedUntilDisposed() = runTest {
+        val frameClock = VirtualFrameClock()
+        val state = IgngPredictiveBackState()
+        val scope = kotlinx.coroutines.CoroutineScope(coroutineContext + frameClock)
+
+        state.startDrag(
+            exitingId = "entry-C",
+            enteringId = "entry-B",
+            swipeEdge = IgngPredictiveBackEdge.RIGHT,
+            touchY = heightPx * 0.4f,
+            rawProgress = 0.4f,
+            frameTimeMs = 100L,
+            revealDock = false,
+            dockTargetTabId = null,
+            intensity = MotionIntensity.FULL,
+        )
+        state.enterCommittingSync()
+        state.runCommitAnimation(
+            scope = scope,
+            intensity = MotionIntensity.FULL,
+            hasPopped = { true },
+            isEntryStillVisible = { true },
+            awaitNextFrame = { frameClock.withFrameNanos {} },
+        )
+        advanceTimeBy(120L)
+        runCurrent()
+
+        // User starts a 2nd back swipe from B -> A before entry-C has been disposed
+        state.startDrag(
+            exitingId = "entry-B",
+            enteringId = "entry-A",
+            swipeEdge = IgngPredictiveBackEdge.LEFT,
+            touchY = heightPx * 0.5f,
+            rawProgress = 0.25f,
+            frameTimeMs = 250L,
+            revealDock = true,
+            dockTargetTabId = "feed",
+            intensity = MotionIntensity.FULL,
+            visibleEntryIds = setOf("entry-A", "entry-B", "entry-C"),
+        )
+
+        val priorCard = state.resolveCardTransform(
+            entryId = "entry-C",
+            widthPx = widthPx,
+            heightPx = heightPx,
+            density = density,
+            intensity = MotionIntensity.FULL,
+            profile = IgngPredictiveBackProfile.CardPeel,
+        )
+        assertTrue(priorCard.active)
+        assertEquals("Superseded committing entry must stay invisible (alpha=0)", 0f, priorCard.alpha, 0.0001f)
+
+        // When entry-C finally disposes, it cleans itself up without interrupting B -> A drag
+        state.onSurfaceDisposed("entry-C")
+        assertFalse(state.isSuppressedExiting("entry-C"))
+        assertEquals(IgngPredictiveBackPhase.Dragging, state.phase)
+        assertEquals("entry-B", state.exitingEntryId)
+    }
+
+    @Test
+    fun interceptedNestedBackHandlerReboundsToIdleCleanly() = runTest {
+        val frameClock = VirtualFrameClock()
+        val state = IgngPredictiveBackState()
+        val scope = kotlinx.coroutines.CoroutineScope(coroutineContext + frameClock)
+
+        state.startDrag(
+            exitingId = "entry-B",
+            enteringId = "entry-A",
+            swipeEdge = IgngPredictiveBackEdge.LEFT,
+            touchY = heightPx * 0.5f,
+            rawProgress = 0.5f,
+            frameTimeMs = 100L,
+            revealDock = true,
+            dockTargetTabId = "feed",
+            intensity = MotionIntensity.CALM,
+        )
+        state.enterCommittingSync()
+        state.runCommitAnimation(
+            scope = scope,
+            intensity = MotionIntensity.CALM,
+            hasPopped = { false }, // Nested BackHandler consumed back without popping NavHost
+            isEntryStillVisible = { false },
+            awaitNextFrame = { frameClock.withFrameNanos {} },
+        )
+
+        // Wait past the 2-frame pop check + CALM 200ms rebound
+        advanceTimeBy(350L)
+        runCurrent()
+
+        assertEquals(IgngPredictiveBackPhase.Idle, state.phase)
+        assertEquals(0f, state.visualDragProgress, 0.0001f)
+        assertEquals(0f, state.visualCommitProgress, 0.0001f)
+        assertEquals(0f, state.dockRevealProgress, 0.0001f)
+        assertFalse(state.isSuppressedExiting("entry-B"))
+    }
+
+    @Test
+    fun cancelDragDefersChildCancelUntilReboundFinishesAndHidesUnderlayUntilDispose() = runTest {
+        val frameClock = VirtualFrameClock()
+        val state = IgngPredictiveBackState()
+        val scope = kotlinx.coroutines.CoroutineScope(coroutineContext + frameClock)
+
+        state.startDrag(
+            exitingId = "entry-B",
+            enteringId = "entry-A",
+            swipeEdge = IgngPredictiveBackEdge.LEFT,
+            touchY = heightPx * 0.5f,
+            rawProgress = 0.45f,
+            frameTimeMs = 100L,
+            revealDock = true,
+            dockTargetTabId = "feed",
+            intensity = MotionIntensity.CALM,
+        )
+
+        var childCancelDispatched = false
+        state.cancelDrag(
+            scope = scope,
+            intensity = MotionIntensity.CALM,
+            onReboundFinished = { childCancelDispatched = true },
+            isUnderlayStillVisible = { true },
+        )
+
+        // Mid-rebound: child cancel must NOT have fired yet so underlay A stays alive behind card B
+        advanceTimeBy(80L)
+        runCurrent()
+        assertFalse("Child cancel must be deferred during rebound", childCancelDispatched)
+        assertEquals(IgngPredictiveBackPhase.Cancelling, state.phase)
+        assertFalse(state.suppressUnderlayDuringCancelSettle)
+
+        // After rebound finishes (200ms CALM): child cancel fires and underlay is suppressed until dispose
+        advanceTimeBy(180L)
+        runCurrent()
+        assertTrue("Child cancel must fire once rebound reaches 0f", childCancelDispatched)
+        assertTrue(state.suppressUnderlayDuringCancelSettle)
+        assertEquals(0f, state.visualDragProgress, 0.0001f)
+
+        // Once NavHost snaps back and disposes underlay A, state resets cleanly
+        state.onSurfaceDisposed("entry-A")
+        assertEquals(IgngPredictiveBackPhase.Idle, state.phase)
+        assertFalse(state.suppressUnderlayDuringCancelSettle)
     }
 }

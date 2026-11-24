@@ -271,6 +271,7 @@ fun IgngMcApp(
         }
 
         val bottomBarPadding = rememberIgngDockBottomPadding(dockVisible = activeTabId != null)
+        val topLevelBottomBarPadding = rememberIgngDockBottomPadding(dockVisible = true)
         val predictiveBackState = rememberIgngPredictiveBackState()
 
         CompositionLocalProvider(
@@ -295,7 +296,7 @@ fun IgngMcApp(
                             statusRepository = container.statusRepository,
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
-                            bottomPadding = bottomBarPadding,
+                            bottomPadding = topLevelBottomBarPadding,
                             onOpenSearch = { navController.navigate(AppRoute.GlobalSearch) },
                             onOpenStatusWall = { navController.navigate(AppRoute.StatusWall) },
                             onOpenMap = { fam, season -> navController.navigate(AppRoute.WorldMap(fam, season)) },
@@ -321,7 +322,7 @@ fun IgngMcApp(
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
                             sessionEpoch = sessionEpoch,
-                            bottomPadding = bottomBarPadding,
+                            bottomPadding = topLevelBottomBarPadding,
                             onSignIn = { startOAuth(forceLogin = false) },
                             onOpenSession = { session ->
                                 navController.navigate(
@@ -380,7 +381,7 @@ fun IgngMcApp(
                         WikiCatalogScreen(
                             wikiRepository = container.wikiRepository,
                             settingsRepository = container.settingsRepository,
-                            bottomPadding = bottomBarPadding,
+                            bottomPadding = topLevelBottomBarPadding,
                             onOpenArticle = { pageId -> navController.navigate(AppRoute.WikiArticle(pageId)) },
                         )
                     }
@@ -394,7 +395,7 @@ fun IgngMcApp(
                             familyAccounts = familyAccounts,
                             playerRepository = container.playerRepository,
                             ticketRepository = container.ticketRepository,
-                            bottomPadding = bottomBarPadding,
+                            bottomPadding = topLevelBottomBarPadding,
                             onSignIn = { startOAuth(forceLogin = false) },
                             onOpenPassport = { id -> navController.navigate(AppRoute.PlayerPassport(id)) },
                             onNavigate = { target ->
