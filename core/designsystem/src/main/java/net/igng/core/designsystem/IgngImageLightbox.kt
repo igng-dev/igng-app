@@ -1,6 +1,10 @@
 package net.igng.core.designsystem
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -27,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,15 +41,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import kotlin.math.abs
+import kotlin.math.sign
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import net.igng.core.model.MotionIntensity
 
 /**
- * Full-screen gesture lightbox supporting pinch zoom, double-tap zoom, and vertical drag-to-dismiss.
+ * Full-screen gesture lightbox supporting pinch zoom, double-tap zoom, spring-physics vertical
+ * drag-to-dismiss, and directional height-aware predictive back dismissal.
  */
 @Composable
 fun IgngImageLightbox(
@@ -61,7 +73,8 @@ fun IgngImageLightbox(
 }
 
 /**
- * Multi-image gesture lightbox supporting horizontal swipe paging, pinch/double-tap zoom, and drag-to-dismiss.
+ * Multi-image gesture lightbox supporting horizontal swipe paging, pinch/double-tap zoom,
+ * spring-physics vertical drag-to-dismiss, and directional height-aware predictive back dismissal.
  */
 @Composable
 fun IgngImageLightbox(
@@ -73,13 +86,28 @@ fun IgngImageLightbox(
     if (imageUrls.isEmpty()) return
     val safeInitial = initialIndex.coerceIn(0, imageUrls.lastIndex)
     val pagerState = rememberPagerState(initialPage = safeInitial) { imageUrls.size }
-    var dragY by remember { mutableFloatStateOf(0f) }
+    val colors = IgngTheme.colors
+    val intensity = IgngTheme.motionIntensity
+    val haptic = rememberIgngHaptics()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
-    val backdropAlpha by animateFloatAsState(
-        targetValue = (1f - (abs(dragY) / 700f)).coerceIn(0.25f, 0.96f),
-        animationSpec = IgngMotion.microTween(IgngTheme.motionReduced),
-        label = "lightboxBackdrop",
-    )
+    val dragYAnim = remember { Animatable(0f) }
+    val dismissAlphaAnim = remember { Animatable(1f) }
+    var verticalDismissing by remember { mutableStateOf(false) }
+
+    // Predictive-back state inside the Dialog window (reuses the same Bento Peel physics engine)
+    val backProgressAnim = remember { Animatable(0f) }
+    val backCommitAnim = remember { Animatable(0f) }
+    var backEdge by remember { mutableStateOf(IgngPredictiveBackEdge.NONE) }
+    var backStartY by remember { mutableFloatStateOf(Float.NaN) }
+    var backCurrentY by remember { mutableFloatStateOf(Float.NaN) }
+    var backThresholdCrossed by remember { mutableStateOf(false) }
+    var backActive by remember { mutableStateOf(false) }
+    var backCancelJob by remember { mutableStateOf<Job?>(null) }
+
+    val dragDismissThresholdPx = with(density) { 120.dp.toPx() }
+    val dragBackdropFadeRangePx = with(density) { 360.dp.toPx() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -88,97 +116,269 @@ fun IgngImageLightbox(
             decorFitsSystemWindows = false,
         ),
     ) {
+        PredictiveBackHandler(enabled = !verticalDismissing) { backEvents ->
+            var lastTimeMs = 0L
+            var lastProgress = 0f
+            var smoothedVel = 0f
+            var started = false
+            try {
+                backEvents.collect { event ->
+                    val edge = IgngPredictiveBackEdge.fromCompat(event.swipeEdge)
+                    val p = if (event.progress.isFinite()) event.progress.coerceIn(0f, 1f) else 0f
+                    if (!started) {
+                        started = true
+                        backCancelJob?.cancel()
+                        backCancelJob = null
+                        backEdge = edge
+                        backStartY = event.touchY
+                        backCurrentY = event.touchY
+                        backThresholdCrossed = false
+                        backActive = edge != IgngPredictiveBackEdge.NONE && intensity != MotionIntensity.REDUCED
+                        backCommitAnim.snapTo(0f)
+                    } else if (event.touchY.isFinite() && event.touchY >= 0f) {
+                        backCurrentY = if (backCurrentY.isFinite() && backCurrentY >= 0f) {
+                            backCurrentY * 0.35f + event.touchY * 0.65f
+                        } else {
+                            event.touchY
+                        }
+                        if (!backStartY.isFinite() || backStartY < 0f) {
+                            backStartY = event.touchY
+                        }
+                    }
+
+                    if (event.frameTimeMillis > lastTimeMs && lastTimeMs > 0L) {
+                        val dtSec = (event.frameTimeMillis - lastTimeMs).coerceAtLeast(1L) / 1000f
+                        val inst = ((p - lastProgress) / dtSec).coerceIn(0f, 5f)
+                        smoothedVel = smoothedVel * 0.6f + inst * 0.4f
+                    }
+                    lastTimeMs = event.frameTimeMillis
+                    lastProgress = p
+
+                    if (backActive) {
+                        val (nextCrossed, shouldTick) = IgngPredictiveBackPhysics.evaluateHapticDetent(
+                            rawProgress = p,
+                            alreadyTriggered = backThresholdCrossed,
+                        )
+                        backThresholdCrossed = nextCrossed
+                        if (shouldTick) haptic(IgngHapticKind.Tick)
+                        backProgressAnim.snapTo(p)
+                    }
+                }
+
+                // Gesture committed
+                if (backActive && intensity != MotionIntensity.REDUCED) {
+                    val durMs = IgngPredictiveBackPhysics.computeCommitDurationMs(
+                        releaseProgress = backProgressAnim.value,
+                        velocityPerSec = smoothedVel,
+                        intensity = intensity,
+                    )
+                    backCommitAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = durMs, easing = LinearEasing),
+                    )
+                }
+                onDismiss()
+            } catch (e: CancellationException) {
+                backThresholdCrossed = false
+                if (backActive) {
+                    backCancelJob?.cancel()
+                    backCancelJob = scope.launch {
+                        val spec = when (intensity) {
+                            MotionIntensity.REDUCED -> tween<Float>(0)
+                            MotionIntensity.CALM -> tween(200, easing = IgngMotion.Ease)
+                            MotionIntensity.FULL -> spring(dampingRatio = 0.80f, stiffness = 520f)
+                        }
+                        backProgressAnim.animateTo(0f, spec)
+                        backActive = false
+                        backEdge = IgngPredictiveBackEdge.NONE
+                    }
+                }
+                throw e
+            }
+        }
+
+        val currentDragY = dragYAnim.value
+        val dragBackdropFactor = (1f - (abs(currentDragY) / dragBackdropFadeRangePx)).coerceIn(0.18f, 1f)
+        val backDragFade = 1f - IgngPredictiveBackPhysics.easeDragProgress(backProgressAnim.value) * 0.58f
+        val backCommitFade = 1f - backCommitAnim.value
+        val backdropAlpha = (0.96f * dragBackdropFactor * backDragFade * backCommitFade * dismissAlphaAnim.value)
+            .coerceIn(0f, 0.96f)
+
+        val chromeAlpha = (
+            (1f - (abs(currentDragY) / (dragDismissThresholdPx * 1.1f))).coerceIn(0f, 1f) *
+                (1f - IgngPredictiveBackPhysics.easeDragProgress(backProgressAnim.value) * 1.5f).coerceIn(0f, 1f) *
+                (1f - backCommitAnim.value * 2f).coerceIn(0f, 1f) *
+                dismissAlphaAnim.value
+            ).coerceIn(0f, 1f)
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = backdropAlpha)),
             contentAlignment = Alignment.Center,
         ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = imageUrls.size > 1,
-            ) { page ->
-                val url = imageUrls[page]
-                val caption = titles.getOrNull(page)
-                ZoomableLightboxPage(
-                    imageUrl = url,
-                    title = caption,
-                    dragY = dragY,
-                    onDragDelta = { dragY += it },
-                    onDragEnd = {
-                        if (abs(dragY) > 180f) onDismiss() else dragY = 0f
-                    },
-                    onDragCancel = { dragY = 0f },
-                    onDismiss = onDismiss,
-                )
-            }
-
-            val currentTitle = titles.getOrNull(pagerState.currentPage)
-            Row(
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .fillMaxSize()
+                    .igngPredictiveCardLayer(
+                        transformProvider = { widthPx, heightPx, dens ->
+                            if (backActive) {
+                                IgngPredictiveBackPhysics.computeCardTransform(
+                                    edge = backEdge,
+                                    rawProgress = backProgressAnim.value,
+                                    commitProgress = backCommitAnim.value,
+                                    startTouchY = backStartY,
+                                    currentTouchY = backCurrentY,
+                                    widthPx = widthPx,
+                                    heightPx = heightPx,
+                                    density = dens,
+                                    intensity = intensity,
+                                    profile = IgngPredictiveBackProfile.CardPeel,
+                                    thresholdCrossed = backThresholdCrossed,
+                                )
+                            } else {
+                                IgngPredictiveCardTransform.Identity
+                            }
+                        },
+                        canvasColor = Color.Black,
+                        borderColor = Color.White.copy(alpha = 0.24f),
+                        accentColor = colors.accent,
+                        drawCardChrome = true,
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                if (!currentTitle.isNullOrBlank()) {
-                    Text(
-                        text = currentTitle,
-                        style = IgngTheme.type.bodyMedium,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = imageUrls.size > 1 && !backActive && !verticalDismissing,
+                ) { page ->
+                    val url = imageUrls[page]
+                    val caption = titles.getOrNull(page)
+                    ZoomableLightboxPage(
+                        imageUrl = url,
+                        title = caption,
+                        dragY = currentDragY,
+                        dismissAlpha = dismissAlphaAnim.value,
+                        onDragDelta = { delta ->
+                            if (!verticalDismissing && !backActive) {
+                                scope.launch { dragYAnim.snapTo(dragYAnim.value + delta) }
+                            }
+                        },
+                        onDragEnd = {
+                            if (verticalDismissing) return@ZoomableLightboxPage
+                            val dist = dragYAnim.value
+                            if (abs(dist) >= dragDismissThresholdPx) {
+                                verticalDismissing = true
+                                haptic(IgngHapticKind.Tick)
+                                scope.launch {
+                                    if (intensity == MotionIntensity.REDUCED) {
+                                        onDismiss()
+                                        return@launch
+                                    }
+                                    val targetY = dist + (sign(dist).takeIf { it != 0f } ?: 1f) * with(density) { 260.dp.toPx() }
+                                    launch {
+                                        dragYAnim.animateTo(
+                                            targetValue = targetY,
+                                            animationSpec = tween(durationMillis = 190, easing = IgngMotion.Ease),
+                                        )
+                                    }
+                                    dismissAlphaAnim.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = tween(durationMillis = 175, easing = IgngMotion.Ease),
+                                    )
+                                    onDismiss()
+                                }
+                            } else {
+                                scope.launch {
+                                    dragYAnim.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = IgngMotion.standardSpring(intensity),
+                                    )
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            if (!verticalDismissing) {
+                                scope.launch {
+                                    dragYAnim.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = IgngMotion.standardSpring(intensity),
+                                    )
+                                }
+                            }
+                        },
+                        onDismiss = onDismiss,
                     )
-                } else {
-                    Spacer(Modifier.weight(1f))
                 }
-                if (imageUrls.size > 1) {
-                    Box(
-                        modifier = Modifier
-                            .clip(IgngTheme.radii.pill)
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                    ) {
+
+                val currentTitle = titles.getOrNull(pagerState.currentPage)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .graphicsLayer { alpha = chromeAlpha }
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (!currentTitle.isNullOrBlank()) {
                         Text(
-                            text = "${pagerState.currentPage + 1} / ${imageUrls.size}",
-                            style = IgngTheme.type.badge,
+                            text = currentTitle,
+                            style = IgngTheme.type.bodyMedium,
                             color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    if (imageUrls.size > 1) {
+                        Box(
+                            modifier = Modifier
+                                .clip(IgngTheme.radii.pill)
+                                .background(Color.Black.copy(alpha = 0.55f))
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                        ) {
+                            Text(
+                                text = "${pagerState.currentPage + 1} / ${imageUrls.size}",
+                                style = IgngTheme.type.badge,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "关闭",
+                            tint = Color.White,
                         )
                     }
                 }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f)),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "关闭",
-                        tint = Color.White,
-                    )
-                }
-            }
 
-            if (imageUrls.size > 1) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(bottom = 18.dp)
-                        .clip(IgngTheme.radii.pill)
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .padding(horizontal = 12.dp, vertical = 5.dp),
-                ) {
-                    Text(
-                        text = "左右滑动切换 · 双击放大 · 下拉关闭",
-                        style = IgngTheme.type.badge,
-                        color = Color.White.copy(alpha = 0.85f),
-                    )
+                if (imageUrls.size > 1) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .graphicsLayer { alpha = chromeAlpha }
+                            .navigationBarsPadding()
+                            .padding(bottom = 18.dp)
+                            .clip(IgngTheme.radii.pill)
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                    ) {
+                        Text(
+                            text = "左右滑动切换 · 双击放大 · 下拉或侧滑关闭",
+                            style = IgngTheme.type.badge,
+                            color = Color.White.copy(alpha = 0.85f),
+                        )
+                    }
                 }
             }
         }
@@ -190,6 +390,7 @@ private fun ZoomableLightboxPage(
     imageUrl: String,
     title: String?,
     dragY: Float,
+    dismissAlpha: Float,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit,
@@ -241,16 +442,16 @@ private fun ZoomableLightboxPage(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val dismissScale = (1f - abs(dragY) / 1600f).coerceIn(0.8f, 1f)
+                    val dismissScale = (1f - abs(dragY) / 1450f).coerceIn(0.76f, 1f)
                     scaleX = scale * dismissScale
                     scaleY = scale * dismissScale
                     translationX = offset.x
                     translationY = offset.y + dragY
+                    alpha = dismissAlpha
                 },
         )
     }
 }
-
 
 @Composable
 fun IgngImageGalleryLightbox(

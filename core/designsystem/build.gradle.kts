@@ -17,7 +17,11 @@ dependencies {
     api(libs.androidx.compose.animation)
     api(libs.androidx.compose.material3)
     api(libs.androidx.compose.material.icons.extended)
+    api(libs.androidx.activity.compose)
     api(libs.coil.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.browser)
+    implementation(libs.androidx.navigation.compose)
+
+    testImplementation(libs.junit)
 }

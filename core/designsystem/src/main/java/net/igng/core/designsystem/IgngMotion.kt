@@ -12,6 +12,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.TweenSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -21,6 +22,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -157,30 +159,55 @@ object IgngMotion {
     fun pushEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
         MotionIntensity.REDUCED -> fadeIn(snap())
         MotionIntensity.CALM -> fadeIn(tween(200, easing = Ease))
-        MotionIntensity.FULL -> slideInHorizontally(tween(280, easing = Ease)) { (it * 0.12f).toInt() } +
-            fadeIn(tween(220, easing = Ease))
+        MotionIntensity.FULL -> slideInHorizontally(tween(300, easing = Ease)) { (it * 0.14f).toInt() } +
+            scaleIn(tween(300, easing = Ease), initialScale = 0.985f) +
+            fadeIn(tween(210, easing = Ease))
     }
 
     fun pushExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
         MotionIntensity.REDUCED -> fadeOut(snap())
         MotionIntensity.CALM -> fadeOut(tween(160, easing = Ease))
-        MotionIntensity.FULL -> slideOutHorizontally(tween(240, easing = Ease)) { -(it * 0.04f).toInt() } +
-            fadeOut(tween(170, easing = Ease))
+        MotionIntensity.FULL -> slideOutHorizontally(tween(260, easing = Ease)) { -(it * 0.05f).toInt() } +
+            scaleOut(tween(260, easing = Ease), targetScale = 0.972f) +
+            fadeOut(tween(220, easing = Ease), targetAlpha = 0.86f)
     }
 
     fun popEnter(intensity: MotionIntensity): EnterTransition = when (intensity) {
         MotionIntensity.REDUCED -> fadeIn(snap())
         MotionIntensity.CALM -> fadeIn(tween(180, easing = Ease))
-        MotionIntensity.FULL -> slideInHorizontally(tween(240, easing = Ease)) { -(it * 0.04f).toInt() } +
-            fadeIn(tween(190, easing = Ease))
+        MotionIntensity.FULL -> slideInHorizontally(tween(260, easing = Ease)) { -(it * 0.05f).toInt() } +
+            scaleIn(tween(260, easing = Ease), initialScale = 0.972f) +
+            fadeIn(tween(200, easing = Ease), initialAlpha = 0.86f)
     }
 
     fun popExit(intensity: MotionIntensity): ExitTransition = when (intensity) {
         MotionIntensity.REDUCED -> fadeOut(snap())
         MotionIntensity.CALM -> fadeOut(tween(160, easing = Ease))
-        MotionIntensity.FULL -> slideOutHorizontally(tween(260, easing = Ease)) { (it * 0.12f).toInt() } +
-            fadeOut(tween(180, easing = Ease))
+        MotionIntensity.FULL -> slideOutHorizontally(tween(260, easing = Ease)) { (it * 0.16f).toInt() } +
+            scaleOut(tween(240, easing = Ease), targetScale = 0.962f) +
+            fadeOut(tween(210, easing = Ease))
     }
+
+    /**
+     * Hold-alive transitions used by [IgngPredictiveNavHost] during active 2D predictive-back
+     * sessions. They keep both exiting and entering destinations composed across the full gesture
+     * and fly-out window while letting [IgngPredictivePageSurface] own all spatial transforms.
+     */
+    fun predictiveHoldEnter(): EnterTransition = fadeIn(
+        animationSpec = tween(
+            durationMillis = IgngPredictiveBackPhysics.HOLD_ALIVE_DURATION_MS,
+            easing = LinearEasing,
+        ),
+        initialAlpha = 0.999f,
+    )
+
+    fun predictiveHoldExit(): ExitTransition = fadeOut(
+        animationSpec = tween(
+            durationMillis = IgngPredictiveBackPhysics.HOLD_ALIVE_DURATION_MS,
+            easing = LinearEasing,
+        ),
+        targetAlpha = 0.999f,
+    )
 
     // --- Legacy boolean overloads retained for compatibility ---
 

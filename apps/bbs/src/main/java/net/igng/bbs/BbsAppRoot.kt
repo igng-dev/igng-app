@@ -46,8 +46,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
@@ -91,10 +89,14 @@ import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngDockHost
 import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngNavTabItem
+import net.igng.core.designsystem.IgngPredictiveNavHost
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.LocalIgngDockBottomPadding
+import net.igng.core.designsystem.LocalIgngPredictiveBackState
+import net.igng.core.designsystem.igngComposable
 import net.igng.core.designsystem.rememberIgngDockBottomPadding
+import net.igng.core.designsystem.rememberIgngPredictiveBackState
 import net.igng.core.model.SessionAuthStatus
 
 @Composable
@@ -218,23 +220,22 @@ fun BbsAppRoot(
             }
         }
 
-        fun NavDestination?.isTopLevelTab(): Boolean =
-            this?.hasRoute<BbsRoute.Feed>() == true ||
-                this?.hasRoute<BbsRoute.Columns>() == true ||
-                this?.hasRoute<BbsRoute.Creator>() == true ||
-                this?.hasRoute<BbsRoute.Profile>() == true
+        fun NavDestination?.resolveTabId(): String? = when {
+            this?.hasRoute<BbsRoute.Feed>() == true -> "feed"
+            this?.hasRoute<BbsRoute.Columns>() == true -> "columns"
+            this?.hasRoute<BbsRoute.Creator>() == true -> "creator"
+            this?.hasRoute<BbsRoute.Profile>() == true -> "profile"
+            else -> null
+        }
+
+        fun NavDestination?.isTopLevelTab(): Boolean = resolveTabId() != null
 
         val currentBackStack by navController.currentBackStackEntryAsState()
         val dest = currentBackStack?.destination
-        val activeTabId = when {
-            dest?.hasRoute<BbsRoute.Feed>() == true -> "feed"
-            dest?.hasRoute<BbsRoute.Columns>() == true -> "columns"
-            dest?.hasRoute<BbsRoute.Creator>() == true -> "creator"
-            dest?.hasRoute<BbsRoute.Profile>() == true -> "profile"
-            else -> null
-        }
+        val activeTabId = dest.resolveTabId()
         val showBottomBar = activeTabId != null
         val dockBottomPadding = rememberIgngDockBottomPadding(dockVisible = showBottomBar)
+        val predictiveBackState = rememberIgngPredictiveBackState()
 
         val tabs = remember {
             listOf(
@@ -245,41 +246,19 @@ fun BbsAppRoot(
             )
         }
 
-        CompositionLocalProvider(LocalIgngDockBottomPadding provides dockBottomPadding) {
+        CompositionLocalProvider(
+            LocalIgngDockBottomPadding provides dockBottomPadding,
+            LocalIgngPredictiveBackState provides predictiveBackState,
+        ) {
             IgngAmbientCanvas(modifier = Modifier.fillMaxSize()) {
-                NavHost(
+                IgngPredictiveNavHost(
                     navController = navController,
                     startDestination = BbsRoute.Feed,
-                    enterTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabEnter(intensity)
-                        } else {
-                            IgngMotion.pushEnter(intensity)
-                        }
-                    },
-                    exitTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabExit(intensity)
-                        } else {
-                            IgngMotion.pushExit(intensity)
-                        }
-                    },
-                    popEnterTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabEnter(intensity)
-                        } else {
-                            IgngMotion.popEnter(intensity)
-                        }
-                    },
-                    popExitTransition = {
-                        if (initialState.destination.isTopLevelTab() && targetState.destination.isTopLevelTab()) {
-                            IgngMotion.tabExit(intensity)
-                        } else {
-                            IgngMotion.popExit(intensity)
-                        }
-                    },
+                    isTopLevelTab = { it.isTopLevelTab() },
+                    resolveTabId = { it.resolveTabId() },
+                    predictiveBackState = predictiveBackState,
                 ) {
-                    composable<BbsRoute.Feed> {
+                    igngComposable<BbsRoute.Feed> {
                         FeedHomeScreen(
                             container = container,
                             onOpenPost = { navController.navigate(BbsRoute.PostDetail(it)) },
@@ -293,7 +272,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Columns> {
+                    igngComposable<BbsRoute.Columns> {
                         ColumnSquareScreen(
                             container = container,
                             onOpenColumn = { navController.navigate(BbsRoute.ColumnDetail(it)) },
@@ -302,7 +281,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Creator> {
+                    igngComposable<BbsRoute.Creator> {
                         CreatorHubScreen(
                             container = container,
                             onNewArticle = { navController.navigate(BbsRoute.CreatorEditor()) },
@@ -318,7 +297,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Profile> {
+                    igngComposable<BbsRoute.Profile> {
                         ProfileCenterScreen(
                             container = container,
                             onLogin = { launchSso() },
@@ -342,7 +321,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Search> {
+                    igngComposable<BbsRoute.Search> {
                         SearchScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -353,11 +332,11 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Rules> {
+                    igngComposable<BbsRoute.Rules> {
                         RulesScreen(container = container, onBack = { navController.popBackStack() })
                     }
 
-                    composable<BbsRoute.Inbox> {
+                    igngComposable<BbsRoute.Inbox> {
                         InboxScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -366,7 +345,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Category> { entry ->
+                    igngComposable<BbsRoute.Category> { entry ->
                         val route = entry.toRoute<BbsRoute.Category>()
                         CategoryFeedScreen(
                             container = container,
@@ -379,7 +358,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Tag> { entry ->
+                    igngComposable<BbsRoute.Tag> { entry ->
                         val route = entry.toRoute<BbsRoute.Tag>()
                         TagFeedScreen(
                             container = container,
@@ -391,7 +370,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.ColumnDetail> { entry ->
+                    igngComposable<BbsRoute.ColumnDetail> { entry ->
                         val route = entry.toRoute<BbsRoute.ColumnDetail>()
                         ColumnDetailScreen(
                             container = container,
@@ -405,7 +384,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.PostDetail> { entry ->
+                    igngComposable<BbsRoute.PostDetail> { entry ->
                         val route = entry.toRoute<BbsRoute.PostDetail>()
                         PostReaderScreen(
                             container = container,
@@ -421,7 +400,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.UserProfile> { entry ->
+                    igngComposable<BbsRoute.UserProfile> { entry ->
                         val route = entry.toRoute<BbsRoute.UserProfile>()
                         UserProfileScreen(
                             container = container,
@@ -432,7 +411,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.CreatorEditor> { entry ->
+                    igngComposable<BbsRoute.CreatorEditor> { entry ->
                         val route = entry.toRoute<BbsRoute.CreatorEditor>()
                         NativeWysiwygEditorScreen(
                             container = container,
@@ -446,7 +425,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.CreatorPosts> {
+                    igngComposable<BbsRoute.CreatorPosts> {
                         CreatorPostsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -456,7 +435,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.CreatorColumns> {
+                    igngComposable<BbsRoute.CreatorColumns> {
                         CreatorColumnsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -464,11 +443,11 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.CreatorSeries> {
+                    igngComposable<BbsRoute.CreatorSeries> {
                         CreatorSeriesScreen(container = container, onBack = { navController.popBackStack() })
                     }
 
-                    composable<BbsRoute.CreatorComments> {
+                    igngComposable<BbsRoute.CreatorComments> {
                         CreatorCommentsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -476,15 +455,15 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.CreatorReviews> {
+                    igngComposable<BbsRoute.CreatorReviews> {
                         CreatorReviewsScreen(container = container, onBack = { navController.popBackStack() })
                     }
 
-                    composable<BbsRoute.CreatorMedia> {
+                    igngComposable<BbsRoute.CreatorMedia> {
                         CreatorMediaScreen(container = container, onBack = { navController.popBackStack() })
                     }
 
-                    composable<BbsRoute.Favorites> {
+                    igngComposable<BbsRoute.Favorites> {
                         FavoritesScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -492,7 +471,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.Following> {
+                    igngComposable<BbsRoute.Following> {
                         FollowingScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -500,7 +479,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.History> {
+                    igngComposable<BbsRoute.History> {
                         ReadingHistoryScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -508,7 +487,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.AccountSecurity> {
+                    igngComposable<BbsRoute.AccountSecurity> {
                         AccountSecurityScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -518,11 +497,11 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.PrivacyPreferences> {
+                    igngComposable<BbsRoute.PrivacyPreferences> {
                         PrivacyPreferencesScreen(container = container, onBack = { navController.popBackStack() })
                     }
 
-                    composable<BbsRoute.AppSettings> {
+                    igngComposable<BbsRoute.AppSettings> {
                         AppSettingsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
@@ -530,7 +509,7 @@ fun BbsAppRoot(
                         )
                     }
 
-                    composable<BbsRoute.AdminConsole> {
+                    igngComposable<BbsRoute.AdminConsole> {
                         AdminConsoleScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
