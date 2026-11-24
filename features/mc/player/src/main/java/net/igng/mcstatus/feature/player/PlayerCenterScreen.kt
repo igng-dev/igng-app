@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -75,6 +76,7 @@ import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.IgngUpdateDotBadge
 import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.core.model.FamilySharedAccountHint
 import net.igng.mcstatus.core.model.DailyExpStatus
@@ -105,6 +107,7 @@ fun PlayerCenterScreen(
     sessionEpoch: Int = 0,
     dailyExp: DailyExpStatus?,
     familyAccounts: List<FamilySharedAccountHint> = emptyList(),
+    hasAppUpdate: Boolean = false,
     playerRepository: PlayerRepository,
     ticketRepository: TicketRepository,
     bottomPadding: PaddingValues,
@@ -154,13 +157,22 @@ fun PlayerCenterScreen(
                     else -> "登录以管理角色、工单与游戏资产"
                 },
                 actions = {
-                    IgngButton(
-                        text = "设置",
-                        onClick = { onNavigate(PlayerDestination.SETTINGS) },
-                        style = IgngButtonStyle.Secondary,
-                        icon = Icons.Rounded.Settings,
-                        compact = true,
-                    )
+                    Box {
+                        IgngButton(
+                            text = "设置",
+                            onClick = { onNavigate(PlayerDestination.SETTINGS) },
+                            style = IgngButtonStyle.Secondary,
+                            icon = Icons.Rounded.Settings,
+                            compact = true,
+                        )
+                        if (hasAppUpdate) {
+                            IgngUpdateDotBadge(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 2.dp, y = (-2).dp),
+                            )
+                        }
+                    }
                 },
             )
 

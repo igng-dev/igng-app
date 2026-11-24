@@ -28,6 +28,7 @@ dependencies {
     implementation(project(":core:auth"))
     implementation(project(":core:data"))
     implementation(project(":core:markdown"))
+    implementation(project(":core:updater"))
     implementation(project(":features:bbs:model"))
     implementation(project(":features:bbs:common"))
     implementation(project(":features:bbs:data"))

@@ -18,7 +18,7 @@ Worktree: `~/dev/.wt/IGNG应用/<slug>`
   - `:apps:mc` — IGNGmc 官方客户端，包名 `net.igng.mcstatus`，OAuth 客户端 `igng_mc_android`，回调 `igngmc://auth/callback`。
   - `:apps:ink` — （规划中）IGNG Ink 官方客户端，包名 `net.igng.ink`。
 - **严格的模块依赖红线（编译期强制）**：
-  - `:core:*`（`model` / `designsystem` / `network` / `auth` / `markdown`）**必须保持绝对领域无关**：禁止在 `:core:*` 中引入任何 `bbs`、`mc` 或 `ink` 的专有 DTO、路由、文案或业务枚举。
+  - `:core:*`（`model` / `designsystem` / `network` / `auth` / `data` / `markdown` / `updater`）**必须保持绝对领域无关**：禁止在 `:core:*` 中引入任何 `bbs`、`mc` 或 `ink` 的专有 DTO、路由、文案或业务枚举。
   - `:apps:bbs` 与 `:features:bbs:*` **严格只覆盖 BBS 社区领域，严禁依赖 `:features:mc:*` 或未来 `:features:ink:*`**，不得引入任何 `ink_*` 字段、接口或入口。
   - `:apps:mc` 与 `:features:mc:*` **严禁依赖 `:features:bbs:*` 或未来 `:features:ink:*`**。
   - `:build-logic`、`gradle/libs.versions.toml` 与根 `gradle.properties` 为全仓唯一构建约定、依赖版本与统一应用版本真源，禁止在各模块重复硬编码 SDK 版本、第三方库版本号或 `versionCode` / `versionName`。
@@ -26,7 +26,7 @@ Worktree: `~/dev/.wt/IGNG应用/<slug>`
 
 ## Client API v1 契约与跨仓联动规则（强制）
 
-- **唯一 API 网关原则**：所有应用统一通过 `IGNG站点`（同级仓库 `~/dev/IGNG/IGNG站点`）的一方 Client API v1（`https://www.igng.net/api/v1/**`）与官方 OAuth 2.1 PKCE 认证中心（`https://sso.igng.net/oauth/authorize`、`POST /api/oauth/token`）通信；禁止直接请求旧站内部 `/api/**` 接口（显式声明的 WebView 地图与浏览器外链跳转除外）。
+- **唯一 API 网关原则**：所有应用统一通过 `IGNG站点`（同级仓库 `~/dev/IGNG/IGNG站点`）的一方 Client API v1（`https://www.igng.net/api/v1/**`）与官方 OAuth 2.1 PKCE 认证中心（`https://sso.igng.net/oauth/authorize`、`POST /api/oauth/token`）通信；禁止直接请求旧站内部 `/api/**` 接口（显式声明的 WebView 地图、浏览器外链跳转，以及 `:core:updater` 访问本公开仓库 GitHub Releases 更新源除外——更新源请求严格无认证、绝不附带 Bearer Token 或 `X-Device-Id`）。
 - **认证与请求头契约**：
   - 所有 `/api/v1/**` 请求必须携带 `X-Client-Id`、`X-Client-Version`、`X-Device-Id` 与 `User-Agent`；所有 `/api/v1/**` `POST` 请求自动携带 `Idempotency-Key`；支持乐观锁的 `PATCH` 请求携带 `If-Match`。
   - Bearer 令牌仅注入受信的 IGNG 域名（`www.igng.net` / `sso.igng.net` 及对应配置域名）；`refresh_token` 单次使用且轮换，并发 401 刷新必须经由 `:core:network` 的 `SingleFlightTokenRefresher` 互斥锁，401 自动刷新仅针对 `isSessionAuthFailure`（会话失效），不误伤业务级 401。
@@ -65,7 +65,7 @@ Worktree: `~/dev/.wt/IGNG应用/<slug>`
   - **全仓统一版本号与一次发全的原子 Release**：
     - 统一版本号唯一真源位于根 `gradle.properties`（`IGNG_APP_VERSION_NAME`、`IGNG_APP_VERSION_CODE`），由 `IgngAndroidApplicationConventionPlugin` 自动注入所有 `:apps:*` 模块；正式版遵循 `versionCode = major * 10000 + minor * 100 + patch` 且严格大于历史遗留最大值 `20302`（自 `3.0.0` / `30000` 起跳）。
     - 发布新版：先通过 PR 递增根 `gradle.properties` 的 `IGNG_APP_VERSION_NAME` 与 `IGNG_APP_VERSION_CODE`，合并后再推送统一 tag `v<versionName>`（或手动触发 `workflow_dispatch`，支持 `dry_run` 预演验签）。
-    - 三段式原子工作流（`prepare → build (matrix) → publish`）：全部应用通过单测、`apksigner verify` 各自专属证书 SHA-256 指纹核对、`aapt2 dump badging` 统一版本核对与 `verify-release-dex.py` 校验后，才一次性发布包含全部 APK 与统一 `SHA256SUMS.txt` 的 GitHub Release（正式版自动标记为 `Latest`）。
+    - 三段式原子工作流（`prepare → build (matrix) → publish`）：全部应用通过单测、`apksigner verify` 各自专属证书 SHA-256 指纹核对、`aapt2 dump badging` 统一版本核对与 `verify-release-dex.py` 校验后，才一次性发布包含全部 APK、统一 `SHA256SUMS.txt` 与机器可读 `update-manifest.json` 的 GitHub Release（正式版自动标记为 `Latest`）。
   - 禁止移动、删除或覆写已发布的 tag、Release 与历史 APK 资产。
 
 ## 权限与安全红线

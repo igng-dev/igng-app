@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,10 +35,14 @@ import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAboutAppCard
 import net.igng.core.designsystem.IgngAccountVaultCard
 import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngAppUpdateCard
+import net.igng.core.designsystem.IgngAppUpdateSheet
 import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngCacheCard
 import net.igng.core.designsystem.IgngDevicesSecurityCard
 import net.igng.core.designsystem.IgngProfileIdentityCard
+import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.model.CoreDeviceSessionDto
 import net.igng.core.model.FamilySharedAccountHint
@@ -65,10 +71,13 @@ fun SettingsScreen(
     onShowMessage: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
+    val updateSnapshot by container.appUpdateManager.snapshot.collectAsState()
 
     var cacheBytes by remember { mutableLongStateOf(0L) }
     var clearingCache by remember { mutableStateOf(false) }
+    var showUpdateSheet by remember { mutableStateOf(false) }
 
     var usernameInput by remember(activeAccount?.username) { mutableStateOf(activeAccount?.username.orEmpty()) }
     var uploadingAvatar by remember { mutableStateOf(false) }
@@ -90,6 +99,11 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
         container.refreshFamilyAccounts()
+    }
+
+    LifecycleResumeEffect(Unit) {
+        container.appUpdateManager.onResumeHost()
+        onPauseOrDispose { }
     }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
@@ -231,11 +245,11 @@ fun SettingsScreen(
                     )
                 }
 
-                // 4. Unified Cache & About
+                // 4. Unified Cache, Self-Update & About
                 item(key = "cache") {
                     IgngCacheCard(
                         cacheBytes = cacheBytes,
-                        subtitlePrefix = "Wiki 离线文章、服务器目录与本地图片缓存",
+                        subtitlePrefix = "Wiki 离线文章、服务器目录、更新包与本地图片缓存",
                         clearing = clearingCache,
                         onClearCache = {
                             scope.launch {
@@ -249,6 +263,23 @@ fun SettingsScreen(
                     )
                 }
 
+                item(key = "app_update") {
+                    IgngAppUpdateCard(
+                        snapshot = updateSnapshot,
+                        onCheckNow = { container.appUpdateManager.checkForUpdatesAsync(manual = true) },
+                        onStartUpdate = { container.appUpdateManager.startOneClickUpdate() },
+                        onCancelDownload = { container.appUpdateManager.cancelDownload() },
+                        onOpenInstallPermission = {
+                            container.appUpdateManager.openInstallPermissionSettings().onFailure {
+                                onShowMessage("无法打开系统安装权限设置，请在系统应用设置中手动开启")
+                            }
+                        },
+                        onTogglePrerelease = { enabled -> container.appUpdateManager.setIncludePrerelease(enabled) },
+                        onOpenReleasePage = { url -> IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark) },
+                        onOpenDetails = { showUpdateSheet = true },
+                    )
+                }
+
                 item(key = "about") {
                     IgngAboutAppCard(
                         appName = "IGNGmc",
@@ -258,6 +289,24 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+    }
+
+    if (showUpdateSheet) {
+        updateSnapshot.activeRelease?.let { release ->
+            IgngAppUpdateSheet(
+                snapshot = updateSnapshot,
+                release = release,
+                onDismiss = { showUpdateSheet = false },
+                onStartUpdate = { container.appUpdateManager.startOneClickUpdate() },
+                onCancelDownload = { container.appUpdateManager.cancelDownload() },
+                onOpenInstallPermission = {
+                    container.appUpdateManager.openInstallPermissionSettings().onFailure {
+                        onShowMessage("无法打开系统安装权限设置，请在系统应用设置中手动开启")
+                    }
+                },
+                onOpenReleasePage = { url -> IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark) },
+            )
         }
     }
 }

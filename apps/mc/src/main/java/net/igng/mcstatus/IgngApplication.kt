@@ -23,6 +23,7 @@ class IgngApplication : Application(), SingletonImageLoader.Factory {
                 chatBaseUrl = BuildConfig.CHAT_BASE_URL,
             ),
             clientVersion = BuildConfig.VERSION_NAME,
+            clientVersionCode = BuildConfig.VERSION_CODE,
         )
         container.warmCoreDiskCaches()
     }

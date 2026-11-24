@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Create
 import androidx.compose.material.icons.rounded.Gavel
 import androidx.compose.material.icons.rounded.Group
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ManageAccounts
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -82,6 +85,7 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
+import net.igng.core.designsystem.IgngUpdateDotBadge
 import net.igng.core.model.SessionAuthStatus
 import net.igng.core.network.ApiResult
 
@@ -107,6 +111,7 @@ fun ProfileCenterScreen(
     val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
     val familyAccounts by container.familyAccounts.collectAsState()
     val bootstrap by container.bootstrap.collectAsState()
+    val updateSnapshot by container.appUpdateManager.snapshot.collectAsState()
     var refreshing by remember { mutableStateOf(false) }
     val sessionExpired = activeAccount != null && sessionAuthStatus.requiresReauth
 
@@ -285,7 +290,30 @@ fun ProfileCenterScreen(
                 item(key = "app_shortcuts") {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         IgngSectionHeader("应用")
-                        ProfileRowItem("外观、动效与阅读设置", "主题、三档动效强度、通知与缓存", Icons.Rounded.Settings, onOpenAppSettings)
+                        ProfileRowItem(
+                            title = "外观、动效与阅读设置",
+                            subtitle = "主题、三档动效强度、更新、通知与缓存",
+                            icon = Icons.Rounded.Settings,
+                            onClick = onOpenAppSettings,
+                            trailing = if (updateSnapshot.hasBadgeAlert) {
+                                {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        IgngUpdateDotBadge()
+                                        Icon(
+                                            imageVector = Icons.Rounded.ChevronRight,
+                                            contentDescription = null,
+                                            tint = colors.textMuted,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                        )
                         ProfileRowItem("社区规范与申诉准则", "查看现行 IGNG BBS 社区条款", Icons.Rounded.Gavel, onOpenRules)
                     }
                 }
@@ -301,6 +329,7 @@ private fun ProfileRowItem(
     icon: ImageVector,
     onClick: () -> Unit,
     accentTint: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = IgngTheme.colors
     net.igng.core.designsystem.IgngNavRowTile(
@@ -308,6 +337,7 @@ private fun ProfileRowItem(
         subtitle = subtitle,
         icon = icon,
         iconTint = if (accentTint) colors.warning else colors.accent,
+        trailing = trailing,
         accentBorder = if (accentTint) colors.warning else null,
         onClick = onClick,
     )

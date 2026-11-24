@@ -28,6 +28,7 @@ import net.igng.core.data.IgngImageLoaderFactory
 import net.igng.core.data.IgngLocalJsonCache
 import net.igng.core.data.IgngSwrCache
 import net.igng.core.data.toKotlinResult
+import net.igng.core.model.AppUpdateConfig
 import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
@@ -36,6 +37,7 @@ import net.igng.core.network.ApiResult
 import net.igng.core.network.IgngClientConfig
 import net.igng.core.network.IgngHttpClient
 import net.igng.core.network.SessionExpiredNotifier
+import net.igng.core.updater.AppUpdateManager
 
 class BbsAppContainer(
     context: Context,
@@ -85,6 +87,19 @@ class BbsAppContainer(
     val swrDiskCache = IgngLocalJsonCache(appContext, "igngbbs_swr_v2_cache", useCacheDir = true)
     val swrCache = IgngSwrCache(diskCache = swrDiskCache, cacheScope = appScope)
     val accountRepository = IgngAccountRepository(httpClient)
+    val appUpdateManager = AppUpdateManager(
+        context = appContext,
+        config = AppUpdateConfig(
+            appKey = "bbs",
+            appName = "IGNG BBS",
+            packageName = appContext.packageName,
+            currentVersionName = appVersion,
+            currentVersionCode = appVersionCode,
+            assetPrefix = "igng-bbs-v",
+            userAgent = "IGNGbbs-Android/$appVersion",
+        ),
+        appScope = appScope,
+    )
 
     val feedRepository = FeedRepository(httpClient, settingsRepository, swrCache)
     val columnRepository = ColumnRepository(httpClient, swrCache)
@@ -168,6 +183,7 @@ class BbsAppContainer(
                 tags = setOf(BbsCacheTags.RULES),
                 diskCodec = BbsDiskCodecs.RULES,
             )
+            appUpdateManager.cleanupObsoleteApks()
         }
     }
 
@@ -332,11 +348,13 @@ class BbsAppContainer(
     suspend fun cacheSizeBytes(): Long =
         settingsRepository.cacheSizeBytes() +
             swrCache.diskSizeBytes() +
-            IgngImageLoaderFactory.diskCacheSizeBytes(appContext)
+            IgngImageLoaderFactory.diskCacheSizeBytes(appContext) +
+            appUpdateManager.cacheSizeBytes()
 
     suspend fun clearAllCaches() {
         settingsRepository.clearLocalCache()
         swrCache.clearAll()
         IgngImageLoaderFactory.clearCaches(appContext, imageLoader)
+        appUpdateManager.clearCachedApks()
     }
 }
