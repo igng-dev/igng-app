@@ -24,6 +24,14 @@ class BbsApplication : Application(), SingletonImageLoader.Factory {
             appVersion = BuildConfig.VERSION_NAME,
             appVersionCode = BuildConfig.VERSION_CODE,
         )
+        container.warmCoreDiskCaches()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (::container.isInitialized && level >= TRIM_MEMORY_BACKGROUND) {
+            container.trimMemory(aggressive = level > TRIM_MEMORY_BACKGROUND)
+        }
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader = container.imageLoader

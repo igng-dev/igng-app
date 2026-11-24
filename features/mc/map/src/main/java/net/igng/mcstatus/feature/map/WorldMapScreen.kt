@@ -54,8 +54,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.mcstatus.core.data.ExploreRepository
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
+import net.igng.mcstatus.core.data.McDiskCodecs
 import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.mcstatus.core.data.ServerSeasonDto
 import net.igng.core.designsystem.IgngAmbientCanvas
@@ -76,6 +84,10 @@ data class MapTargetItem(
     val isArchived: Boolean = false,
 )
 
+private class WorldMapSelectionHolder {
+    var selectedKey by mutableStateOf<String?>(null)
+}
+
 @Composable
 fun WorldMapScreen(
     endpoints: SiteEndpoints,
@@ -86,17 +98,28 @@ fun WorldMapScreen(
 ) {
     val context = LocalContext.current
     val colors = IgngTheme.colors
-    var targets by remember { mutableStateOf<List<MapTargetItem>>(emptyList()) }
-    var selected by remember { mutableStateOf<MapTargetItem?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    val selectionHolder = rememberScreenHolder("world_map_selection") { WorldMapSelectionHolder() }
     var showSwitcher by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        loading = true
-        val families = runCatching { exploreRepository.fetchHomeFamilies() }
-            .getOrElse { exploreRepository.readCachedFamilies() }
-        val built = families.flatMap { fam ->
+    val (familiesState, _) = rememberSwrResource<List<ServerFamilyDto>>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.SERVERS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Static,
+        tags = setOf(McCacheTags.SERVERS),
+        diskCodec = McDiskCodecs.servers,
+        legacyRawProvider = {
+            val legacy = exploreRepository.readCachedFamilies()
+            if (legacy.isNotEmpty()) McDiskCodecs.servers.encode(legacy) else null
+        },
+        slotKey = "world_map_servers",
+    ) {
+        runSuspendCatching { exploreRepository.fetchHomeFamilies() }
+    }
+
+    val targets = remember(familiesState.data) {
+        familiesState.data.orEmpty().flatMap { fam ->
             fam.allKnownSeasons
                 .filter { it.hasViewableMap }
                 .map { season ->
@@ -108,14 +131,21 @@ fun WorldMapScreen(
                     )
                 }
         }
-        targets = built
-        selected = built.firstOrNull {
-            it.family.slug == initialFamilySlug && (initialSeasonSlug == null || it.season.slug == initialSeasonSlug)
-        } ?: built.firstOrNull { !it.isSnapshot && !it.isArchived }
-            ?: built.firstOrNull { !it.isSnapshot }
-            ?: built.firstOrNull()
-        loading = false
     }
+
+    val selected = remember(targets, selectionHolder.selectedKey, initialFamilySlug, initialSeasonSlug) {
+        val pickedKey = selectionHolder.selectedKey
+        if (pickedKey != null) {
+            targets.firstOrNull { "${it.family.slug}:${it.season.slug}" == pickedKey }
+        } else {
+            null
+        } ?: targets.firstOrNull {
+            it.family.slug == initialFamilySlug && (initialSeasonSlug == null || it.season.slug == initialSeasonSlug)
+        } ?: targets.firstOrNull { !it.isSnapshot && !it.isArchived }
+            ?: targets.firstOrNull { !it.isSnapshot }
+            ?: targets.firstOrNull()
+    }
+    val loading = familiesState.isInitialLoading && targets.isEmpty()
 
     IgngAmbientCanvas {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -248,7 +278,7 @@ fun WorldMapScreen(
                     val active = item == selected
                     IgngInteractiveTile(
                         onClick = {
-                            selected = item
+                            selectionHolder.selectedKey = "${item.family.slug}:${item.season.slug}"
                             showSwitcher = false
                         },
                         accentBorder = if (active) colors.accent else null,

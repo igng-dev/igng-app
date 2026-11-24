@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -41,8 +40,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.data.BbsDiskCodecs
+import net.igng.bbs.core.model.ColumnDetailDto
+import net.igng.bbs.core.model.ColumnSummaryDto
+import net.igng.bbs.core.model.PaginatedResponseDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
@@ -58,11 +68,16 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.designsystem.igngBentoEnter
-import net.igng.bbs.core.model.ColumnDetailDto
-import net.igng.bbs.core.model.ColumnSummaryDto
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.network.ApiResult
+
+private class ColumnSquareUiHolder {
+    val mineOnlyState = mutableStateOf(false)
+    val searchState = mutableStateOf("")
+    val submittedSearchState = mutableStateOf("")
+    val selectedCategoryIdState = mutableStateOf<String?>(null)
+}
 
 @Composable
 fun ColumnSquareScreen(
@@ -72,34 +87,41 @@ fun ColumnSquareScreen(
     bottomInsetPadding: PaddingValues = PaddingValues(bottom = 96.dp),
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
     val bootstrap by container.bootstrap.collectAsState()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
 
-    var mineOnly by remember { mutableStateOf(false) }
-    var search by remember { mutableStateOf("") }
-    var selectedCategoryId by remember { mutableStateOf<String?>(null) }
-    var columns by remember { mutableStateOf<List<ColumnSummaryDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val holder = rememberScreenHolder("bbs_column_square_ui") { ColumnSquareUiHolder() }
+    var mineOnly by holder.mineOnlyState
+    var search by holder.searchState
+    var submittedSearch by holder.submittedSearchState
+    var selectedCategoryId by holder.selectedCategoryIdState
 
-    suspend fun load(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else if (columns.isEmpty()) loading = true
-        error = null
-        when (val res = container.columnRepository.listColumns(
-            query = search.trim().ifBlank { null },
-            categoryId = selectedCategoryId,
-            mine = mineOnly,
-        )) {
-            is ApiResult.Success -> columns = res.data.data
-            is ApiResult.Failure -> if (columns.isEmpty()) error = res.error.message
+    LaunchedEffect(activeAccount == null) {
+        if (activeAccount == null && mineOnly) {
+            mineOnly = false
         }
-        loading = false
-        refreshing = false
     }
 
-    LaunchedEffect(mineOnly, selectedCategoryId, activeAccount?.userId) { load(false) }
+    val isDefaultQuery = !mineOnly && selectedCategoryId == null && submittedSearch.isBlank()
+    val cacheKey = BbsCacheKeys.columns(mineOnly, selectedCategoryId, submittedSearch)
+
+    val (colState, colHandle) = rememberSwrResource<PaginatedResponseDto<ColumnSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = cacheKey,
+        scope = if (mineOnly) IgngCacheScope.USER_ONLY else IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.COLUMNS),
+        diskCodec = if (isDefaultQuery) BbsDiskCodecs.DEFAULT_COLUMNS else null,
+        slotKey = "bbs_column_square",
+    ) {
+        container.columnRepository.listColumns(
+            query = submittedSearch.ifBlank { null },
+            categoryId = selectedCategoryId,
+            mine = mineOnly,
+        ).toKotlinResult()
+    }
+
+    val columns = colState.data?.data.orEmpty()
 
     Column(
         modifier = Modifier
@@ -138,7 +160,18 @@ fun ColumnSquareScreen(
                 ),
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.textMuted) },
             )
-            IgngTagChip(text = "筛选", tone = IgngTone.ACCENT, onClick = { scope.launch { load(true) } })
+            IgngTagChip(
+                text = "筛选",
+                tone = IgngTone.ACCENT,
+                onClick = {
+                    val trimmed = search.trim()
+                    if (trimmed == submittedSearch) {
+                        colHandle.refresh()
+                    } else {
+                        submittedSearch = trimmed
+                    }
+                },
+            )
         }
         Spacer(Modifier.height(10.dp))
         LazyRow(
@@ -160,14 +193,14 @@ fun ColumnSquareScreen(
         Spacer(Modifier.height(8.dp))
 
         IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { scope.launch { load(true) } },
+            isRefreshing = colState.isUserRefreshing,
+            onRefresh = { colHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
             when {
-                loading && columns.isEmpty() -> IgngLoadingCenter(loading = true)
-                error != null && columns.isEmpty() -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { load(false) } })
+                colState.isInitialLoading && columns.isEmpty() -> IgngLoadingCenter(loading = true)
+                colState.error != null && columns.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = colState.error!!, onRetry = { colHandle.refresh() })
                 }
                 columns.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngEmptyTile(
@@ -262,28 +295,23 @@ fun ColumnDetailScreen(
     val scope = rememberCoroutineScope()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
 
-    var detail by remember { mutableStateOf<ColumnDetailDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val (detailState, detailHandle) = rememberSwrResource<ColumnDetailDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.columnDetail(columnIdOrSlug),
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Detail,
+        tags = setOf(BbsCacheTags.COLUMNS),
+        slotKey = "bbs_column_detail_$columnIdOrSlug",
+    ) {
+        container.columnRepository.getColumnDetail(columnIdOrSlug).toKotlinResult()
+    }
+
+    val detail = detailState.data
     var feedback by remember { mutableStateOf<String?>(null) }
     var showApplyDialog by remember { mutableStateOf(false) }
     var applyMessage by remember { mutableStateOf("") }
     var showSubDialog by remember { mutableStateOf(false) }
     var subVerification by remember { mutableStateOf("") }
-
-    suspend fun load(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else loading = true
-        error = null
-        when (val res = container.columnRepository.getColumnDetail(columnIdOrSlug)) {
-            is ApiResult.Success -> detail = res.data
-            is ApiResult.Failure -> error = res.error.message
-        }
-        loading = false
-        refreshing = false
-    }
-
-    LaunchedEffect(columnIdOrSlug, activeAccount?.userId) { load(false) }
 
     Column(
         modifier = Modifier
@@ -300,24 +328,24 @@ fun ColumnDetailScreen(
                     IgngTagChip(
                         text = "投稿发文",
                         tone = IgngTone.ACCENT,
-                        onClick = { onOpenEditorForColumn(detail!!.id) },
+                        onClick = { onOpenEditorForColumn(detail.id) },
                     )
                 }
             },
         )
 
         IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { scope.launch { load(true) } },
+            isRefreshing = detailState.isUserRefreshing,
+            onRefresh = { detailHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
             when {
-                loading && detail == null -> IgngLoadingCenter(loading = true)
-                error != null && detail == null -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { load(false) } })
+                detailState.isInitialLoading && detail == null -> IgngLoadingCenter(loading = true)
+                detailState.error != null && detail == null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = detailState.error!!, onRetry = { detailHandle.refresh() })
                 }
                 detail != null -> {
-                    val col = detail!!
+                    val col = detail
                     val vs = col.viewerState
                     LazyColumn(
                         contentPadding = rememberIgngPageContentPadding(),
@@ -369,7 +397,7 @@ fun ColumnDetailScreen(
                                                 onClick = {
                                                     scope.launch {
                                                         when (val r = container.columnRepository.leaveColumn(col.id)) {
-                                                            is ApiResult.Success -> { feedback = "已退出专栏"; load(true) }
+                                                            is ApiResult.Success -> { feedback = "已退出专栏"; detailHandle.silentRefresh() }
                                                             is ApiResult.Failure -> feedback = r.error.message
                                                         }
                                                     }
@@ -383,7 +411,7 @@ fun ColumnDetailScreen(
                                                     if (activeAccount == null) { onRequireLogin(); return@IgngPrimaryButton }
                                                     scope.launch {
                                                         when (val r = container.columnRepository.joinColumn(col.id)) {
-                                                            is ApiResult.Success -> { feedback = r.data.message.ifBlank { "已加入专栏" }; load(true) }
+                                                            is ApiResult.Success -> { feedback = r.data.message.ifBlank { "已加入专栏" }; detailHandle.silentRefresh() }
                                                             is ApiResult.Failure -> feedback = r.error.message
                                                         }
                                                     }
@@ -409,7 +437,7 @@ fun ColumnDetailScreen(
                                                 onClick = {
                                                     scope.launch {
                                                         when (val r = container.columnRepository.unsubscribeColumn(col.id)) {
-                                                            is ApiResult.Success -> { feedback = "已取消订阅"; load(true) }
+                                                            is ApiResult.Success -> { feedback = "已取消订阅"; detailHandle.silentRefresh() }
                                                             is ApiResult.Failure -> feedback = r.error.message
                                                         }
                                                     }
@@ -424,7 +452,7 @@ fun ColumnDetailScreen(
                                                     if (col.subscriptionMode == "direct") {
                                                         scope.launch {
                                                             when (val r = container.columnRepository.subscribeColumn(col.id)) {
-                                                                is ApiResult.Success -> { feedback = "订阅成功"; load(true) }
+                                                                is ApiResult.Success -> { feedback = "订阅成功"; detailHandle.silentRefresh() }
                                                                 is ApiResult.Failure -> feedback = r.error.message
                                                             }
                                                         }
@@ -491,7 +519,7 @@ fun ColumnDetailScreen(
     if (showApplyDialog && detail != null) {
         AlertDialog(
             onDismissRequest = { showApplyDialog = false },
-            title = { Text("申请加入「${detail!!.name}」") },
+            title = { Text("申请加入「${detail.name}」") },
             text = {
                 OutlinedTextField(
                     value = applyMessage,
@@ -502,11 +530,11 @@ fun ColumnDetailScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val colId = detail!!.id
+                    val colId = detail.id
                     showApplyDialog = false
                     scope.launch {
                         when (val r = container.columnRepository.joinColumn(colId, applyMessage.trim().ifBlank { null })) {
-                            is ApiResult.Success -> { feedback = r.data.message.ifBlank { "已提交申请" }; applyMessage = ""; load(true) }
+                            is ApiResult.Success -> { feedback = r.data.message.ifBlank { "已提交申请" }; applyMessage = ""; detailHandle.silentRefresh() }
                             is ApiResult.Failure -> feedback = r.error.message
                         }
                     }
@@ -517,7 +545,7 @@ fun ColumnDetailScreen(
     }
 
     if (showSubDialog && detail != null) {
-        val isSecret = detail!!.subscriptionMode == "verification"
+        val isSecret = detail.subscriptionMode == "verification"
         AlertDialog(
             onDismissRequest = { showSubDialog = false },
             title = { Text(if (isSecret) "输入订阅口令" else "提交订阅申请") },
@@ -531,7 +559,7 @@ fun ColumnDetailScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val colId = detail!!.id
+                    val colId = detail.id
                     showSubDialog = false
                     scope.launch {
                         val r = if (isSecret) {
@@ -540,7 +568,7 @@ fun ColumnDetailScreen(
                             container.columnRepository.subscribeColumn(colId, message = subVerification.trim())
                         }
                         when (r) {
-                            is ApiResult.Success -> { feedback = "已提交订阅（状态：${r.data.status}）"; subVerification = ""; load(true) }
+                            is ApiResult.Success -> { feedback = "已提交订阅（状态：${r.data.status}）"; subVerification = ""; detailHandle.silentRefresh() }
                             is ApiResult.Failure -> feedback = r.error.message
                         }
                     }

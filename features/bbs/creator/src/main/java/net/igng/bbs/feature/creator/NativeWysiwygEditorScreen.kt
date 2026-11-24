@@ -79,10 +79,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.CreateCreatorPostRequest
 import net.igng.bbs.core.data.LocalEditorDraft
 import net.igng.bbs.core.data.SubmitCreatorPostRequest
 import net.igng.bbs.core.data.UpdateCreatorPostRequest
+import net.igng.bbs.core.model.ListWrapperDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
@@ -149,7 +156,17 @@ fun NativeWysiwygEditorScreen(
     var tagsInput by remember { mutableStateOf("") }
     var requestSummary by remember { mutableStateOf(false) }
     var requestTags by remember { mutableStateOf(false) }
-    var myColumns by remember { mutableStateOf<List<ColumnSummaryDto>>(emptyList()) }
+    val (myColumnsState, _) = rememberSwrResource<ListWrapperDto<ColumnSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_COLUMNS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR, BbsCacheTags.COLUMNS),
+        slotKey = "bbs_editor_columns",
+    ) {
+        container.creatorRepository.listColumns().toKotlinResult()
+    }
+    val myColumns = myColumnsState.data?.data.orEmpty()
 
     var loading by remember { mutableStateOf(postId != null) }
     var busy by remember { mutableStateOf(false) }
@@ -227,14 +244,10 @@ fun NativeWysiwygEditorScreen(
         }
     }
 
-    // Load initial post & columns & check local auto-draft
+    // Load initial post & check local auto-draft
     LaunchedEffect(postId) {
         if (selectedCategoryId == null) {
             selectedCategoryId = bootstrap?.categories?.firstOrNull()?.id
-        }
-        when (val cols = container.creatorRepository.listColumns()) {
-            is ApiResult.Success -> myColumns = cols.data.data
-            is ApiResult.Failure -> Unit
         }
         if (postId != null) {
             loading = true

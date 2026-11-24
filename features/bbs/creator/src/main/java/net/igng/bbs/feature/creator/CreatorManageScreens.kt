@@ -1,8 +1,5 @@
 package net.igng.bbs.feature.creator
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -25,10 +22,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -44,7 +39,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,13 +50,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.igng.bbs.common.BbsRiskMeterCard
 import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.CreateAppealRequest
 import net.igng.bbs.core.data.CreateCreatorColumnRequest
 import net.igng.bbs.core.data.CreateSeriesRequest
@@ -70,7 +67,24 @@ import net.igng.bbs.core.data.CreatorColumnActionRequest
 import net.igng.bbs.core.data.CreatorColumnDetailDto
 import net.igng.bbs.core.data.InviteCollaboratorRequest
 import net.igng.bbs.core.data.UpdateSeriesRequest
-import net.igng.bbs.common.BbsRiskMeterCard
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.ColumnEventDto
+import net.igng.bbs.core.model.ColumnSummaryDto
+import net.igng.bbs.core.model.CreatorCommentDto
+import net.igng.bbs.core.model.CreatorInvitesDto
+import net.igng.bbs.core.model.CreatorMediaListDto
+import net.igng.bbs.core.model.CreatorReviewsResponseDto
+import net.igng.bbs.core.model.CreatorSeriesDetailDto
+import net.igng.bbs.core.model.ListWrapperDto
+import net.igng.bbs.core.model.PaginatedResponseDto
+import net.igng.bbs.core.model.PostAnalyticsDto
+import net.igng.bbs.core.model.PostSummaryDto
+import net.igng.bbs.core.model.PostVersionDto
+import net.igng.bbs.core.model.SeriesSummaryDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.ChartPoint
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
@@ -81,7 +95,6 @@ import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
-import net.igng.core.designsystem.IgngSecondaryButton
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
@@ -89,19 +102,11 @@ import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.rememberIgngPageContentPadding
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.ColumnEventDto
-import net.igng.bbs.core.model.ColumnSummaryDto
-import net.igng.bbs.core.model.CreatorCommentDto
-import net.igng.bbs.core.model.CreatorInvitesDto
-import net.igng.bbs.core.model.CreatorMediaListDto
-import net.igng.bbs.core.model.CreatorReviewsResponseDto
-import net.igng.bbs.core.model.CreatorSeriesDetailDto
-import net.igng.bbs.core.model.PostAnalyticsDto
-import net.igng.bbs.core.model.PostSummaryDto
-import net.igng.bbs.core.model.PostVersionDto
-import net.igng.bbs.core.model.SeriesSummaryDto
 import net.igng.core.network.ApiResult
+
+private class CreatorPostsUiHolder {
+    val filterState = mutableStateOf("all")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,12 +119,33 @@ fun CreatorPostsScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var filter by remember { mutableStateOf("all") }
-    var posts by remember { mutableStateOf<List<PostSummaryDto>>(emptyList()) }
-    var invites by remember { mutableStateOf<CreatorInvitesDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val holder = rememberScreenHolder("bbs_creator_posts_ui") { CreatorPostsUiHolder() }
+    var filter by holder.filterState
+
+    val (postsState, postsHandle) = rememberSwrResource<PaginatedResponseDto<PostSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.creatorPosts(filter),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR),
+        slotKey = "bbs_creator_posts_slot",
+    ) {
+        container.creatorRepository.listPosts(filter = filter, pageSize = 30).toKotlinResult()
+    }
+
+    val (invitesState, invitesHandle) = rememberSwrResource<CreatorInvitesDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_INVITES,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR),
+        slotKey = "bbs_creator_invites_slot",
+    ) {
+        container.creatorRepository.listInvites().toKotlinResult()
+    }
+
+    val posts = postsState.data?.data.orEmpty()
+    val invites = invitesState.data
     var notice by remember { mutableStateOf<String?>(null) }
 
     var analyticsData by remember { mutableStateOf<PostAnalyticsDto?>(null) }
@@ -129,22 +155,10 @@ fun CreatorPostsScreen(
     var inviteUserId by remember { mutableStateOf("") }
     var inviteRoleTitle by remember { mutableStateOf("联合作者") }
 
-    suspend fun load(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else if (posts.isEmpty()) loading = true
-        error = null
-        when (val res = container.creatorRepository.listPosts(filter = filter, pageSize = 30)) {
-            is ApiResult.Success -> posts = res.data.data
-            is ApiResult.Failure -> if (posts.isEmpty()) error = res.error.message
-        }
-        when (val inv = container.creatorRepository.listInvites()) {
-            is ApiResult.Success -> invites = inv.data
-            is ApiResult.Failure -> Unit
-        }
-        loading = false
-        refreshing = false
+    fun reloadSilently() {
+        postsHandle.silentRefresh()
+        invitesHandle.silentRefresh()
     }
-
-    LaunchedEffect(filter) { load(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
@@ -162,11 +176,18 @@ fun CreatorPostsScreen(
         }
         Spacer(Modifier.height(8.dp))
 
-        IgngPullToRefreshBox(isRefreshing = refreshing, onRefresh = { scope.launch { load(true) } }, modifier = Modifier.weight(1f)) {
+        IgngPullToRefreshBox(
+            isRefreshing = postsState.isUserRefreshing,
+            onRefresh = {
+                postsHandle.refresh()
+                invitesHandle.silentRefresh()
+            },
+            modifier = Modifier.weight(1f),
+        ) {
             when {
-                loading && posts.isEmpty() -> IgngLoadingCenter(loading = true)
-                error != null && posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { load(false) } })
+                postsState.isInitialLoading && posts.isEmpty() -> IgngLoadingCenter(loading = true)
+                postsState.error != null && posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = postsState.error!!, onRetry = { postsHandle.refresh() })
                 }
                 else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     notice?.let { msg -> item { IgngInfoBanner("提示", msg, IgngTone.ACCENT) } }
@@ -183,7 +204,7 @@ fun CreatorPostsScreen(
                                     IgngTagChip(text = "接受邀请", tone = IgngTone.SUCCESS, onClick = {
                                         scope.launch {
                                             when (val r = container.creatorRepository.respondInvite(inv.id, "accept")) {
-                                                is ApiResult.Success -> { notice = "已接受协作邀请"; load(true) }
+                                                is ApiResult.Success -> { notice = "已接受协作邀请"; reloadSilently() }
                                                 is ApiResult.Failure -> notice = r.error.message
                                             }
                                         }
@@ -191,7 +212,7 @@ fun CreatorPostsScreen(
                                     IgngTagChip(text = "拒绝", tone = IgngTone.DANGER, onClick = {
                                         scope.launch {
                                             when (val r = container.creatorRepository.respondInvite(inv.id, "reject")) {
-                                                is ApiResult.Success -> { notice = "已拒绝邀请"; load(true) }
+                                                is ApiResult.Success -> { notice = "已拒绝邀请"; reloadSilently() }
                                                 is ApiResult.Failure -> notice = r.error.message
                                             }
                                         }
@@ -257,7 +278,7 @@ fun CreatorPostsScreen(
                                             IgngTagChip("撤回送审", tone = IgngTone.WARNING, onClick = {
                                                 scope.launch {
                                                     when (val r = container.creatorRepository.withdrawSubmission(post.id)) {
-                                                        is ApiResult.Success -> { notice = "已撤回本次送审"; load(true) }
+                                                        is ApiResult.Success -> { notice = "已撤回本次送审"; reloadSilently() }
                                                         is ApiResult.Failure -> notice = r.error.message
                                                     }
                                                 }
@@ -268,7 +289,7 @@ fun CreatorPostsScreen(
                                         IgngTagChip("删除", tone = IgngTone.DANGER, onClick = {
                                             scope.launch {
                                                 when (val r = container.creatorRepository.deletePost(post.id)) {
-                                                    is ApiResult.Success -> { notice = "文章已删除"; load(true) }
+                                                    is ApiResult.Success -> { notice = "文章已删除"; reloadSilently() }
                                                     is ApiResult.Failure -> notice = r.error.message
                                                 }
                                             }
@@ -369,30 +390,42 @@ fun CreatorColumnsScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var columns by remember { mutableStateOf<List<ColumnSummaryDto>>(emptyList()) }
-    var events by remember { mutableStateOf<List<ColumnEventDto>>(emptyList()) }
+
+    val (colsState, colsHandle) = rememberSwrResource<ListWrapperDto<ColumnSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_COLUMNS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR, BbsCacheTags.COLUMNS),
+        slotKey = "bbs_creator_columns_slot",
+    ) {
+        container.creatorRepository.listColumns().toKotlinResult()
+    }
+
+    val (eventsState, eventsHandle) = rememberSwrResource<ListWrapperDto<ColumnEventDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_COLUMN_EVENTS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR, BbsCacheTags.COLUMNS),
+        slotKey = "bbs_creator_col_events_slot",
+    ) {
+        container.creatorRepository.listColumnEvents().toKotlinResult()
+    }
+
+    val columns = colsState.data?.data.orEmpty()
+    val events = eventsState.data?.data.orEmpty()
     var manageDetail by remember { mutableStateOf<CreatorColumnDetailDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
     var notice by remember { mutableStateOf<String?>(null) }
     var showCreate by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var newSlug by remember { mutableStateOf("") }
     var newDesc by remember { mutableStateOf("") }
 
-    suspend fun load() {
-        loading = true
-        when (val c = container.creatorRepository.listColumns()) {
-            is ApiResult.Success -> columns = c.data.data
-            is ApiResult.Failure -> notice = c.error.message
-        }
-        when (val ev = container.creatorRepository.listColumnEvents()) {
-            is ApiResult.Success -> events = ev.data.data
-            is ApiResult.Failure -> Unit
-        }
-        loading = false
+    fun reloadSilently() {
+        colsHandle.silentRefresh()
+        eventsHandle.silentRefresh()
     }
-
-    LaunchedEffect(Unit) { load() }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
@@ -400,76 +433,87 @@ fun CreatorColumnsScreen(
             onBack = onBack,
             actions = { IgngTagChip("+ 新建专栏", tone = IgngTone.ACCENT, onClick = { showCreate = true }) },
         )
-        if (loading && columns.isEmpty()) {
-            IgngLoadingCenter(loading = true)
-        } else {
-            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                notice?.let { msg -> item { IgngInfoBanner("提示", msg, IgngTone.ACCENT) } }
-
-                val pendingEvents = events.filter { it.canRespond }
-                if (pendingEvents.isNotEmpty()) {
-                    item { IgngSectionHeader("待回应专栏申请与邀请（${pendingEvents.size}）") }
-                    items(pendingEvents, key = { it.id }) { ev ->
-                        IgngTile(soft = true) {
-                            Text("${ev.column?.name ?: "专栏"} · ${ev.type}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                            ev.message?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary) }
-                            Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IgngTagChip("同意", tone = IgngTone.SUCCESS, onClick = {
-                                    scope.launch {
-                                        when (val r = container.creatorRepository.respondColumnEvent(ev.id, "accept")) {
-                                            is ApiResult.Success -> { notice = r.data.message ?: "已同意"; load() }
-                                            is ApiResult.Failure -> notice = r.error.message
-                                        }
-                                    }
-                                })
-                                IgngTagChip("拒绝", tone = IgngTone.DANGER, onClick = {
-                                    scope.launch {
-                                        when (val r = container.creatorRepository.respondColumnEvent(ev.id, "reject")) {
-                                            is ApiResult.Success -> { notice = r.data.message ?: "已拒绝"; load() }
-                                            is ApiResult.Failure -> notice = r.error.message
-                                        }
-                                    }
-                                })
-                            }
-                        }
-                    }
+        IgngPullToRefreshBox(
+            isRefreshing = colsState.isUserRefreshing,
+            onRefresh = {
+                colsHandle.refresh()
+                eventsHandle.silentRefresh()
+            },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                colsState.isInitialLoading && columns.isEmpty() -> IgngLoadingCenter(loading = true)
+                colsState.error != null && columns.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = colsState.error!!, onRetry = { colsHandle.refresh() })
                 }
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    notice?.let { msg -> item { IgngInfoBanner("提示", msg, IgngTone.ACCENT) } }
 
-                item { IgngSectionHeader("我管理的专栏（${columns.size}）") }
-                if (columns.isEmpty()) {
-                    item { IgngEmptyTile("还没有专栏", "创建一个主题专栏来组织和汇聚系列文章。") }
-                } else {
-                    items(columns, key = { it.id }) { col ->
-                        IgngTile {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(col.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                                IgngTagChip(text = col.myRole ?: "member", tone = IgngTone.ACCENT)
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text("${col.postCount} 篇 · ${col.memberCount} 成员 · ${col.subscriberCount} 订阅", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                            Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IgngTagChip("查看专栏", onClick = { onOpenColumn(col.id) })
-                                if (col.myRole == "creator" || col.myRole == "manager") {
-                                    IgngTagChip("管理审批", tone = IgngTone.ACCENT, onClick = {
+                    val pendingEvents = events.filter { it.canRespond }
+                    if (pendingEvents.isNotEmpty()) {
+                        item { IgngSectionHeader("待回应专栏申请与邀请（${pendingEvents.size}）") }
+                        items(pendingEvents, key = { it.id }) { ev ->
+                            IgngTile(soft = true) {
+                                Text("${ev.column?.name ?: "专栏"} · ${ev.type}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
+                                ev.message?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary) }
+                                Spacer(Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    IgngTagChip("同意", tone = IgngTone.SUCCESS, onClick = {
                                         scope.launch {
-                                            when (val r = container.creatorRepository.getColumnDetail(col.id)) {
-                                                is ApiResult.Success -> manageDetail = r.data
+                                            when (val r = container.creatorRepository.respondColumnEvent(ev.id, "accept")) {
+                                                is ApiResult.Success -> { notice = r.data.message ?: "已同意"; reloadSilently() }
+                                                is ApiResult.Failure -> notice = r.error.message
+                                            }
+                                        }
+                                    })
+                                    IgngTagChip("拒绝", tone = IgngTone.DANGER, onClick = {
+                                        scope.launch {
+                                            when (val r = container.creatorRepository.respondColumnEvent(ev.id, "reject")) {
+                                                is ApiResult.Success -> { notice = r.data.message ?: "已拒绝"; reloadSilently() }
                                                 is ApiResult.Failure -> notice = r.error.message
                                             }
                                         }
                                     })
                                 }
-                                if (col.myRole == "creator") {
-                                    IgngTagChip("删除", tone = IgngTone.DANGER, onClick = {
-                                        scope.launch {
-                                            when (val r = container.creatorRepository.deleteColumn(col.id)) {
-                                                is ApiResult.Success -> { notice = "专栏已删除"; load() }
-                                                is ApiResult.Failure -> notice = r.error.message
+                            }
+                        }
+                    }
+
+                    item { IgngSectionHeader("我管理的专栏（${columns.size}）") }
+                    if (columns.isEmpty()) {
+                        item { IgngEmptyTile("还没有专栏", "创建一个主题专栏来组织和汇聚系列文章。") }
+                    } else {
+                        items(columns, key = { it.id }) { col ->
+                            IgngTile {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(col.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                    IgngTagChip(text = col.myRole ?: "member", tone = IgngTone.ACCENT)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text("${col.postCount} 篇 · ${col.memberCount} 成员 · ${col.subscriberCount} 订阅", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                Spacer(Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    IgngTagChip("查看专栏", onClick = { onOpenColumn(col.id) })
+                                    if (col.myRole == "creator" || col.myRole == "manager") {
+                                        IgngTagChip("管理审批", tone = IgngTone.ACCENT, onClick = {
+                                            scope.launch {
+                                                when (val r = container.creatorRepository.getColumnDetail(col.id)) {
+                                                    is ApiResult.Success -> manageDetail = r.data
+                                                    is ApiResult.Failure -> notice = r.error.message
+                                                }
                                             }
-                                        }
-                                    })
+                                        })
+                                    }
+                                    if (col.myRole == "creator") {
+                                        IgngTagChip("删除", tone = IgngTone.DANGER, onClick = {
+                                            scope.launch {
+                                                when (val r = container.creatorRepository.deleteColumn(col.id)) {
+                                                    is ApiResult.Success -> { notice = "专栏已删除"; reloadSilently() }
+                                                    is ApiResult.Failure -> notice = r.error.message
+                                                }
+                                            }
+                                        })
+                                    }
                                 }
                             }
                         }
@@ -494,13 +538,13 @@ fun CreatorColumnsScreen(
                                 IgngTagChip("批准", tone = IgngTone.SUCCESS, onClick = {
                                     scope.launch {
                                         container.creatorRepository.performColumnAction(detail.id, CreatorColumnActionRequest("review_subscription", subscriptionId = sub.id, approved = true))
-                                        manageDetail = null; load()
+                                        manageDetail = null; reloadSilently()
                                     }
                                 })
                                 IgngTagChip("拒绝", tone = IgngTone.DANGER, onClick = {
                                     scope.launch {
                                         container.creatorRepository.performColumnAction(detail.id, CreatorColumnActionRequest("review_subscription", subscriptionId = sub.id, approved = false))
-                                        manageDetail = null; load()
+                                        manageDetail = null; reloadSilently()
                                     }
                                 })
                             }
@@ -515,7 +559,7 @@ fun CreatorColumnsScreen(
                             IgngTagChip("移出黑名单", onClick = {
                                 scope.launch {
                                     container.creatorRepository.performColumnAction(detail.id, CreatorColumnActionRequest("unblacklist", targetUserId = b.user.id))
-                                    manageDetail = null; load()
+                                    manageDetail = null; reloadSilently()
                                 }
                             })
                         }
@@ -543,7 +587,7 @@ fun CreatorColumnsScreen(
                     showCreate = false
                     scope.launch {
                         when (val r = container.creatorRepository.createColumn(CreateCreatorColumnRequest(newName.trim(), newSlug.trim(), newDesc.trim().ifBlank { null }))) {
-                            is ApiResult.Success -> { notice = "专栏已创建"; newName = ""; newSlug = ""; newDesc = ""; load() }
+                            is ApiResult.Success -> { notice = "专栏已创建"; newName = ""; newSlug = ""; newDesc = ""; reloadSilently() }
                             is ApiResult.Failure -> notice = r.error.message
                         }
                     }
@@ -562,24 +606,24 @@ fun CreatorSeriesScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var seriesList by remember { mutableStateOf<List<SeriesSummaryDto>>(emptyList()) }
+
+    val (seriesState, seriesHandle) = rememberSwrResource<ListWrapperDto<SeriesSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_SERIES,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR),
+        slotKey = "bbs_creator_series_slot",
+    ) {
+        container.creatorRepository.listSeries().toKotlinResult()
+    }
+
+    val seriesList = seriesState.data?.data.orEmpty()
     var activeSeries by remember { mutableStateOf<CreatorSeriesDetailDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
     var notice by remember { mutableStateOf<String?>(null) }
     var showCreate by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var slug by remember { mutableStateOf("") }
-
-    suspend fun load() {
-        loading = true
-        when (val r = container.creatorRepository.listSeries()) {
-            is ApiResult.Success -> seriesList = r.data.data
-            is ApiResult.Failure -> notice = r.error.message
-        }
-        loading = false
-    }
-
-    LaunchedEffect(Unit) { load() }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
@@ -587,36 +631,44 @@ fun CreatorSeriesScreen(
             onBack = onBack,
             actions = { IgngTagChip("+ 新建系列", tone = IgngTone.ACCENT, onClick = { showCreate = true }) },
         )
-        if (loading && seriesList.isEmpty()) {
-            IgngLoadingCenter(loading = true)
-        } else {
-            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                if (seriesList.isEmpty()) {
-                    item { IgngEmptyTile("还没有系列合集", "把多篇连载或教程文章编排为一个系列，方便读者连续阅读。") }
-                } else {
-                    items(seriesList, key = { it.id }) { ser ->
-                        IgngTile {
-                            Text(ser.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                            Text("${ser.postCount} 篇章节 · ${ser.views} 次浏览", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                            Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IgngTagChip("章节排序与趋势", tone = IgngTone.ACCENT, onClick = {
-                                    scope.launch {
-                                        when (val d = container.creatorRepository.getSeriesDetail(ser.id)) {
-                                            is ApiResult.Success -> activeSeries = d.data
-                                            is ApiResult.Failure -> notice = d.error.message
+        IgngPullToRefreshBox(
+            isRefreshing = seriesState.isUserRefreshing,
+            onRefresh = { seriesHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                seriesState.isInitialLoading && seriesList.isEmpty() -> IgngLoadingCenter(loading = true)
+                seriesState.error != null && seriesList.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = seriesState.error!!, onRetry = { seriesHandle.refresh() })
+                }
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                    if (seriesList.isEmpty()) {
+                        item { IgngEmptyTile("还没有系列合集", "把多篇连载或教程文章编排为一个系列，方便读者连续阅读。") }
+                    } else {
+                        items(seriesList, key = { it.id }) { ser ->
+                            IgngTile {
+                                Text(ser.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                Text("${ser.postCount} 篇章节 · ${ser.views} 次浏览", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                Spacer(Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    IgngTagChip("章节排序与趋势", tone = IgngTone.ACCENT, onClick = {
+                                        scope.launch {
+                                            when (val d = container.creatorRepository.getSeriesDetail(ser.id)) {
+                                                is ApiResult.Success -> activeSeries = d.data
+                                                is ApiResult.Failure -> notice = d.error.message
+                                            }
                                         }
-                                    }
-                                })
-                                IgngTagChip("删除系列", tone = IgngTone.DANGER, onClick = {
-                                    scope.launch {
-                                        when (val d = container.creatorRepository.deleteSeries(ser.id)) {
-                                            is ApiResult.Success -> { notice = "系列已删除"; load() }
-                                            is ApiResult.Failure -> notice = d.error.message
+                                    })
+                                    IgngTagChip("删除系列", tone = IgngTone.DANGER, onClick = {
+                                        scope.launch {
+                                            when (val d = container.creatorRepository.deleteSeries(ser.id)) {
+                                                is ApiResult.Success -> { notice = "系列已删除"; seriesHandle.silentRefresh() }
+                                                is ApiResult.Failure -> notice = d.error.message
+                                            }
                                         }
-                                    }
-                                })
+                                    })
+                                }
                             }
                         }
                     }
@@ -684,7 +736,7 @@ fun CreatorSeriesScreen(
                     showCreate = false
                     scope.launch {
                         when (val r = container.creatorRepository.createSeries(CreateSeriesRequest(name.trim(), slug.trim()))) {
-                            is ApiResult.Success -> { notice = "系列已创建"; name = ""; slug = ""; load() }
+                            is ApiResult.Success -> { notice = "系列已创建"; name = ""; slug = ""; seriesHandle.silentRefresh() }
                             is ApiResult.Failure -> notice = r.error.message
                         }
                     }
@@ -703,55 +755,72 @@ fun CreatorCommentsScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var comments by remember { mutableStateOf<List<CreatorCommentDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var notice by remember { mutableStateOf<String?>(null) }
 
-    suspend fun load() {
-        loading = true
-        when (val r = container.creatorRepository.listComments(pageSize = 40)) {
-            is ApiResult.Success -> comments = r.data.data
-            is ApiResult.Failure -> notice = r.error.message
-        }
-        loading = false
+    val (commentsState, commentsHandle) = rememberSwrResource<PaginatedResponseDto<CreatorCommentDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_COMMENTS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR, BbsCacheTags.COMMENTS),
+        slotKey = "bbs_creator_comments_slot",
+    ) {
+        container.creatorRepository.listComments(pageSize = 40).toKotlinResult()
     }
-    LaunchedEffect(Unit) { load() }
+
+    val comments = commentsState.data?.data.orEmpty()
+    var notice by remember { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(title = "收到的评论管理", onBack = onBack)
-        if (loading && comments.isEmpty()) {
-            IgngLoadingCenter(loading = true)
-        } else {
-            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                if (comments.isEmpty()) {
-                    item { IgngEmptyTile("暂无评论", "你的文章收到新评论后会集中展示在这里。") }
-                } else {
-                    items(comments, key = { it.id }) { c ->
-                        IgngTile(onClick = { c.postId?.let(onOpenPost) }) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("${c.author?.displayName ?: "用户"} 评论了《${c.postTitle}》", style = MaterialTheme.typography.labelLarge, color = colors.accent, modifier = Modifier.weight(1f))
-                                IconButton(onClick = {
-                                    scope.launch {
-                                        when (val r = container.postRepository.deleteComment(c.id)) {
-                                            is ApiResult.Success -> { notice = "已删除该评论"; load() }
-                                            is ApiResult.Failure -> notice = r.error.message
+        IgngPullToRefreshBox(
+            isRefreshing = commentsState.isUserRefreshing,
+            onRefresh = { commentsHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                commentsState.isInitialLoading && comments.isEmpty() -> IgngLoadingCenter(loading = true)
+                commentsState.error != null && comments.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = commentsState.error!!, onRetry = { commentsHandle.refresh() })
+                }
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                    if (comments.isEmpty()) {
+                        item { IgngEmptyTile("暂无评论", "你的文章收到新评论后会集中展示在这里。") }
+                    } else {
+                        items(comments, key = { it.id }) { c ->
+                            IgngTile(onClick = { c.postId?.let(onOpenPost) }) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("${c.author?.displayName ?: "用户"} 评论了《${c.postTitle}》", style = MaterialTheme.typography.labelLarge, color = colors.accent, modifier = Modifier.weight(1f))
+                                    IconButton(onClick = {
+                                        scope.launch {
+                                            when (val r = container.postRepository.deleteComment(c.id)) {
+                                                is ApiResult.Success -> {
+                                                    notice = "已删除该评论"
+                                                    c.postId?.let { container.postRepository.adjustCachedCommentCount(it, -1) }
+                                                    commentsHandle.silentRefresh()
+                                                }
+                                                is ApiResult.Failure -> notice = r.error.message
+                                            }
                                         }
+                                    }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "删除", tint = colors.danger, modifier = Modifier.size(18.dp))
                                     }
-                                }, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "删除", tint = colors.danger, modifier = Modifier.size(18.dp))
                                 }
+                                Spacer(Modifier.height(4.dp))
+                                Text(c.content, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                                Spacer(Modifier.height(4.dp))
+                                Text(BbsFormatters.relativeTime(c.createdAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
                             }
-                            Spacer(Modifier.height(4.dp))
-                            Text(c.content, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                            Spacer(Modifier.height(4.dp))
-                            Text(BbsFormatters.relativeTime(c.createdAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
                         }
                     }
                 }
             }
         }
     }
+}
+
+private class CreatorReviewsUiHolder {
+    val includePassedState = mutableStateOf(false)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -763,23 +832,25 @@ fun CreatorReviewsScreen(
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val bootstrap by container.bootstrap.collectAsState()
-    var data by remember { mutableStateOf<CreatorReviewsResponseDto?>(null) }
-    var includePassed by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(true) }
+    val holder = rememberScreenHolder("bbs_creator_reviews_ui") { CreatorReviewsUiHolder() }
+    var includePassed by holder.includePassedState
+
+    val (reviewsState, reviewsHandle) = rememberSwrResource<CreatorReviewsResponseDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.creatorReviews(includePassed),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR),
+        slotKey = "bbs_creator_reviews_slot",
+    ) {
+        container.creatorRepository.listReviews(includePassed = includePassed).toKotlinResult()
+    }
+
+    val data = reviewsState.data
     var notice by remember { mutableStateOf<String?>(null) }
     var appealTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var appealGround by remember { mutableStateOf("CONTEXT_MISREAD") }
     var appealReason by remember { mutableStateOf("") }
-
-    suspend fun load() {
-        loading = true
-        when (val r = container.creatorRepository.listReviews(includePassed = includePassed)) {
-            is ApiResult.Success -> data = r.data
-            is ApiResult.Failure -> notice = r.error.message
-        }
-        loading = false
-    }
-    LaunchedEffect(includePassed) { load() }
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
@@ -789,56 +860,66 @@ fun CreatorReviewsScreen(
                 IgngTagChip(text = if (includePassed) "含已通过" else "仅待处理/驳回", selected = includePassed, onClick = { includePassed = !includePassed })
             },
         )
-        if (loading && data == null) {
-            IgngLoadingCenter(loading = true)
-        } else if (data != null) {
-            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                item { BbsRiskMeterCard(risk = data!!.risk) }
-                item { IgngSectionHeader("审核记录（${data!!.reviews.size}）") }
-                if (data!!.reviews.isEmpty()) {
-                    item { IgngEmptyTile("暂无异常审核记录", "你近期提交的内容均正常通过或尚未提交。") }
-                } else {
-                    items(data!!.reviews, key = { it.id }) { rev ->
-                        IgngTile {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(rev.targetTitle, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, modifier = Modifier.weight(1f))
-                                IgngTagChip(
-                                    text = rev.outcome ?: rev.status,
-                                    tone = if (rev.outcome == "rejected") IgngTone.DANGER else if (rev.outcome == "approved") IgngTone.SUCCESS else IgngTone.WARNING,
-                                )
-                            }
-                            rev.rejectionReason?.takeIf { it.isNotBlank() }?.let {
-                                Spacer(Modifier.height(4.dp))
-                                Text("原因：$it", style = MaterialTheme.typography.bodySmall, color = colors.danger)
-                            }
-                            rev.suggestion?.takeIf { it.isNotBlank() }?.let {
-                                Spacer(Modifier.height(2.dp))
-                                Text("修改建议：$it", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                            }
-                            if (rev.outcome == "rejected" && !rev.hasPendingAppeal) {
-                                Spacer(Modifier.height(8.dp))
-                                IgngTagChip("发起申诉", tone = IgngTone.ACCENT, onClick = { appealTarget = rev.targetType to rev.targetId })
+        IgngPullToRefreshBox(
+            isRefreshing = reviewsState.isUserRefreshing,
+            onRefresh = { reviewsHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                reviewsState.isInitialLoading && data == null -> IgngLoadingCenter(loading = true)
+                reviewsState.error != null && data == null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = reviewsState.error!!, onRetry = { reviewsHandle.refresh() })
+                }
+                data != null -> {
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                        item { BbsRiskMeterCard(risk = data.risk) }
+                        item { IgngSectionHeader("审核记录（${data.reviews.size}）") }
+                        if (data.reviews.isEmpty()) {
+                            item { IgngEmptyTile("暂无异常审核记录", "你近期提交的内容均正常通过或尚未提交。") }
+                        } else {
+                            items(data.reviews, key = { it.id }) { rev ->
+                                IgngTile {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(rev.targetTitle, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                        IgngTagChip(
+                                            text = rev.outcome ?: rev.status,
+                                            tone = if (rev.outcome == "rejected") IgngTone.DANGER else if (rev.outcome == "approved") IgngTone.SUCCESS else IgngTone.WARNING,
+                                        )
+                                    }
+                                    rev.rejectionReason?.takeIf { it.isNotBlank() }?.let {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("原因：$it", style = MaterialTheme.typography.bodySmall, color = colors.danger)
+                                    }
+                                    rev.suggestion?.takeIf { it.isNotBlank() }?.let {
+                                        Spacer(Modifier.height(2.dp))
+                                        Text("修改建议：$it", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                    }
+                                    if (rev.outcome == "rejected" && !rev.hasPendingAppeal) {
+                                        Spacer(Modifier.height(8.dp))
+                                        IgngTagChip("发起申诉", tone = IgngTone.ACCENT, onClick = { appealTarget = rev.targetType to rev.targetId })
+                                    }
+                                }
                             }
                         }
-                    }
-                }
-                if (data!!.appeals.isNotEmpty()) {
-                    item { IgngSectionHeader("我的申诉记录（${data!!.appeals.size}）") }
-                    items(data!!.appeals, key = { it.id }) { apl ->
-                        IgngTile(soft = true) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("第 ${apl.round}/${apl.maxRounds} 轮申诉 · ${apl.targetId}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                IgngTagChip(text = apl.status, tone = if (apl.status == "approved") IgngTone.SUCCESS else if (apl.status == "rejected") IgngTone.DANGER else IgngTone.WARNING)
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text("申诉陈述：${apl.reason}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                            apl.reply?.takeIf { it.isNotBlank() }?.let {
-                                Spacer(Modifier.height(4.dp))
-                                Text("复核答复：$it", style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
-                            }
-                            apl.arguments.forEach { arg ->
-                                Text("· [${if (arg.accepted) "采纳" else "未采纳"}] ${arg.point}：${arg.reply}", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                        if (data.appeals.isNotEmpty()) {
+                            item { IgngSectionHeader("我的申诉记录（${data.appeals.size}）") }
+                            items(data.appeals, key = { it.id }) { apl ->
+                                IgngTile(soft = true) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("第 ${apl.round}/${apl.maxRounds} 轮申诉 · ${apl.targetId}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
+                                        IgngTagChip(text = apl.status, tone = if (apl.status == "approved") IgngTone.SUCCESS else if (apl.status == "rejected") IgngTone.DANGER else IgngTone.WARNING)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("申诉陈述：${apl.reason}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                    apl.reply?.takeIf { it.isNotBlank() }?.let {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("复核答复：$it", style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
+                                    }
+                                    apl.arguments.forEach { arg ->
+                                        Text("· [${if (arg.accepted) "采纳" else "未采纳"}] ${arg.point}：${arg.reply}", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                    }
+                                }
                             }
                         }
                     }
@@ -873,7 +954,7 @@ fun CreatorReviewsScreen(
                     appealTarget = null
                     scope.launch {
                         when (val r = container.creatorRepository.submitAppeal(CreateAppealRequest(tType, tId, appealReason.trim(), appealGround))) {
-                            is ApiResult.Success -> { notice = "申诉已提交（第 ${r.data.round}/${r.data.maxRounds} 轮）"; appealReason = ""; load() }
+                            is ApiResult.Success -> { notice = "申诉已提交（第 ${r.data.round}/${r.data.maxRounds} 轮）"; appealReason = ""; reviewsHandle.silentRefresh() }
                             is ApiResult.Failure -> notice = r.error.message
                         }
                     }
@@ -892,22 +973,23 @@ fun CreatorMediaScreen(
     val context = LocalContext.current
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var mediaList by remember { mutableStateOf<CreatorMediaListDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
+
+    val (mediaState, mediaHandle) = rememberSwrResource<CreatorMediaListDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.CREATOR_MEDIA,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.CREATOR),
+        slotKey = "bbs_creator_media_slot",
+    ) {
+        container.creatorRepository.listMedia(pageSize = 40).toKotlinResult()
+    }
+
+    val mediaList = mediaState.data
     var uploading by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var appealMediaId by remember { mutableStateOf<String?>(null) }
     var appealReason by remember { mutableStateOf("") }
-
-    suspend fun load() {
-        loading = true
-        when (val r = container.creatorRepository.listMedia(pageSize = 40)) {
-            is ApiResult.Success -> mediaList = r.data
-            is ApiResult.Failure -> notice = r.error.message
-        }
-        loading = false
-    }
-    LaunchedEffect(Unit) { load() }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -922,7 +1004,7 @@ fun CreatorMediaScreen(
             }
             if (data != null) {
                 when (val r = container.creatorRepository.uploadMedia(data.third, data.second, data.first)) {
-                    is ApiResult.Success -> { notice = "图片上传成功"; load() }
+                    is ApiResult.Success -> { notice = "图片上传成功"; mediaHandle.silentRefresh() }
                     is ApiResult.Failure -> notice = r.error.message
                 }
             }
@@ -943,50 +1025,60 @@ fun CreatorMediaScreen(
                 )
             },
         )
-        if (loading && mediaList == null) {
-            IgngLoadingCenter(loading = true)
-        } else if (mediaList != null) {
-            val quota = mediaList!!.quota
-            val ratio = if (quota.limitBytes > 0L) (quota.usedBytes.toFloat() / quota.limitBytes.toFloat()).coerceIn(0f, 1f) else 0f
-            LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                item {
-                    IgngTile(padding = PaddingValues(14.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("媒体空间配额", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                            Text("${BbsFormatters.formatBytes(quota.usedBytes)} / ${BbsFormatters.formatBytes(quota.limitBytes)}", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(progress = { ratio }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(IgngRadius.pill)), color = colors.accent, trackColor = colors.line)
-                    }
+        IgngPullToRefreshBox(
+            isRefreshing = mediaState.isUserRefreshing,
+            onRefresh = { mediaHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                mediaState.isInitialLoading && mediaList == null -> IgngLoadingCenter(loading = true)
+                mediaState.error != null && mediaList == null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = mediaState.error!!, onRetry = { mediaHandle.refresh() })
                 }
-                if (mediaList!!.data.isEmpty()) {
-                    item { IgngEmptyTile("还没有上传图片", "点击右上角上传图片，即可一键复制 Markdown 引用链接。") }
-                } else {
-                    items(mediaList!!.data, key = { it.id }) { file ->
-                        IgngTile(padding = PaddingValues(12.dp)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                AsyncImage(
-                                    model = container.endpoints.resolveMediaUrl(file.url),
-                                    contentDescription = file.originalName,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(IgngRadius.control)).background(colors.tileSoft),
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(file.originalName ?: file.id, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, maxLines = 1)
-                                    Text("${BbsFormatters.formatBytes(file.sizeBytes)} · ${file.width}×${file.height}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                                    Spacer(Modifier.height(6.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        IgngTagChip(
-                                            text = "复制 Markdown",
-                                            tone = IgngTone.ACCENT,
-                                            onClick = {
-                                                net.igng.core.designsystem.copyTextToClipboard(context, "md", "![](${file.markdownUrl})")
-                                                notice = "已复制图片 Markdown 引用"
-                                            },
+                mediaList != null -> {
+                    val quota = mediaList.quota
+                    val ratio = if (quota.limitBytes > 0L) (quota.usedBytes.toFloat() / quota.limitBytes.toFloat()).coerceIn(0f, 1f) else 0f
+                    LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                        item {
+                            IgngTile(padding = PaddingValues(14.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("媒体空间配额", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
+                                    Text("${BbsFormatters.formatBytes(quota.usedBytes)} / ${BbsFormatters.formatBytes(quota.limitBytes)}", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                LinearProgressIndicator(progress = { ratio }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(IgngRadius.pill)), color = colors.accent, trackColor = colors.line)
+                            }
+                        }
+                        if (mediaList.data.isEmpty()) {
+                            item { IgngEmptyTile("还没有上传图片", "点击右上角上传图片，即可一键复制 Markdown 引用链接。") }
+                        } else {
+                            items(mediaList.data, key = { it.id }) { file ->
+                                IgngTile(padding = PaddingValues(12.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        AsyncImage(
+                                            model = container.endpoints.resolveMediaUrl(file.url),
+                                            contentDescription = file.originalName,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(IgngRadius.control)).background(colors.tileSoft),
                                         )
-                                        if (file.auditStatus == "rejected" || file.auditStatus == "flagged") {
-                                            IgngTagChip(text = "申诉图片", tone = IgngTone.WARNING, onClick = { appealMediaId = file.id })
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(file.originalName ?: file.id, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, maxLines = 1)
+                                            Text("${BbsFormatters.formatBytes(file.sizeBytes)} · ${file.width}×${file.height}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                            Spacer(Modifier.height(6.dp))
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                IgngTagChip(
+                                                    text = "复制 Markdown",
+                                                    tone = IgngTone.ACCENT,
+                                                    onClick = {
+                                                        net.igng.core.designsystem.copyTextToClipboard(context, "md", "![](${file.markdownUrl})")
+                                                        notice = "已复制图片 Markdown 引用"
+                                                    },
+                                                )
+                                                if (file.auditStatus == "rejected" || file.auditStatus == "flagged") {
+                                                    IgngTagChip(text = "申诉图片", tone = IgngTone.WARNING, onClick = { appealMediaId = file.id })
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1011,7 +1103,7 @@ fun CreatorMediaScreen(
                     appealMediaId = null
                     scope.launch {
                         when (val r = container.creatorRepository.appealMedia(mid, appealReason.trim())) {
-                            is ApiResult.Success -> { notice = "图片申诉已提交"; appealReason = ""; load() }
+                            is ApiResult.Success -> { notice = "图片申诉已提交"; appealReason = ""; mediaHandle.silentRefresh() }
                             is ApiResult.Failure -> notice = r.error.message
                         }
                     }

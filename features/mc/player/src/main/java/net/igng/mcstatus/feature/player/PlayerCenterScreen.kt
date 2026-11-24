@@ -52,7 +52,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
+import net.igng.mcstatus.core.data.BoundMcAccountDto
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.data.PlayerRepository
+import net.igng.mcstatus.core.data.TicketListResponse
 import net.igng.mcstatus.core.data.TicketRepository
 import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngAvatar
@@ -62,6 +70,7 @@ import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngFamilySsoBanner
 import net.igng.core.designsystem.IgngInteractiveTile
+import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
@@ -104,21 +113,36 @@ fun PlayerCenterScreen(
     onNavigate: (PlayerDestination) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    var openTicketCount by remember(activeAccount?.userId) { mutableIntStateOf(0) }
-    var boundCount by remember(activeAccount?.userId) { mutableStateOf<Int?>(null) }
     val sessionExpired = activeAccount != null && sessionAuthStatus.requiresReauth
+    val isActiveSession = activeAccount != null && sessionAuthStatus == SessionAuthStatus.ACTIVE
 
-    LaunchedEffect(activeAccount?.userId, sessionEpoch, sessionAuthStatus) {
-        if (activeAccount == null || sessionAuthStatus != SessionAuthStatus.ACTIVE) {
-            openTicketCount = 0
-            boundCount = null
-            return@LaunchedEffect
-        }
-        runCatching { ticketRepository.fetchList(relation = "all", includeClosed = false, page = 1) }
-            .onSuccess { openTicketCount = it.total.coerceAtLeast(it.resolvedTickets.size) }
-        runCatching { playerRepository.fetchBoundAccounts() }
-            .onSuccess { boundCount = it.size }
+    val (ticketsState, ticketsHandle) = rememberSwrResource<TicketListResponse>(
+        cache = ticketRepository.swrCache,
+        cacheKey = McCacheKeys.ticketsList(relation = "all", includeClosed = false, query = ""),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.TICKETS),
+        enabled = isActiveSession,
+        slotKey = "player_center_tickets",
+    ) {
+        runSuspendCatching { ticketRepository.fetchList(relation = "all", includeClosed = false, page = 1) }
     }
+
+    val (accountsState, accountsHandle) = rememberSwrResource<List<BoundMcAccountDto>>(
+        cache = playerRepository.swrCache,
+        cacheKey = McCacheKeys.PLAYER_ACCOUNTS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.PLAYER_ACCOUNTS),
+        enabled = isActiveSession,
+        slotKey = "player_center_accounts",
+    ) {
+        runSuspendCatching { playerRepository.fetchBoundAccounts() }
+    }
+
+    val openTicketCount = ticketsState.data?.let { it.total.coerceAtLeast(it.resolvedTickets.size) } ?: 0
+    val boundCount = accountsState.data?.size
+    val refreshing = ticketsState.isUserRefreshing || accountsState.isUserRefreshing
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
@@ -140,7 +164,17 @@ fun PlayerCenterScreen(
                 },
             )
 
-            LazyColumn(
+            IgngPullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = {
+                    if (isActiveSession) {
+                        ticketsHandle.refresh()
+                        accountsHandle.refresh()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -469,6 +503,7 @@ fun PlayerCenterScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

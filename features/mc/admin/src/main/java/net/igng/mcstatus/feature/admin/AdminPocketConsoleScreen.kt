@@ -34,8 +34,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.markdown.IgngMarkdownDocumentView
 import net.igng.core.markdown.MarkdownParser
 import net.igng.mcstatus.core.data.AdminCurrentNodesResponse
@@ -44,6 +50,9 @@ import net.igng.mcstatus.core.data.AdminPunishmentsResponse
 import net.igng.mcstatus.core.data.AdminRepository
 import net.igng.mcstatus.core.data.HistorianDetailResponse
 import net.igng.mcstatus.core.data.HistorianListResponse
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.data.TicketDetailDto
 import net.igng.mcstatus.core.data.TicketSummaryDto
 import net.igng.mcstatus.core.data.TrafficAdminResponse
@@ -79,6 +88,19 @@ private enum class AdminSection(val label: String, val elevatedOnly: Boolean = f
     OPS("运维流量", elevatedOnly = true),
 }
 
+private data class AdminOpsBundle(
+    val nodes: AdminCurrentNodesResponse?,
+    val traffic: TrafficAdminResponse?,
+)
+
+private class AdminPocketUiHolder {
+    var section by mutableStateOf(AdminSection.TICKETS)
+    var playerQuery by mutableStateOf("")
+    var submittedPlayerQuery by mutableStateOf("")
+    var playerResults by mutableStateOf<List<AdminPlayerResultDto>>(emptyList())
+    var trafficRangeHours by mutableStateOf(24L)
+}
+
 @Composable
 fun AdminPocketConsoleScreen(
     role: McAdminRole,
@@ -89,57 +111,98 @@ fun AdminPocketConsoleScreen(
     val colors = IgngTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val uiHolder = rememberScreenHolder("mc_admin_pocket_ui") { AdminPocketUiHolder() }
 
     val availableSections = remember(role) {
         AdminSection.entries.filter { !it.elevatedOnly || role.isElevated() }
     }
-    var section by remember { mutableStateOf(AdminSection.TICKETS) }
-
-    var adminTickets by remember { mutableStateOf<List<TicketSummaryDto>>(emptyList()) }
     var inspectedTicket by remember { mutableStateOf<TicketDetailDto?>(null) }
     var adminReplyDraft by remember { mutableStateOf("") }
-
-    var playerQuery by remember { mutableStateOf("") }
-    var playerResults by remember { mutableStateOf<List<AdminPlayerResultDto>>(emptyList()) }
-    var punishments by remember { mutableStateOf<AdminPunishmentsResponse?>(null) }
-
-    var historianList by remember { mutableStateOf<HistorianListResponse?>(null) }
     var historianDetail by remember { mutableStateOf<HistorianDetailResponse?>(null) }
     var loadingHistorianDetail by remember { mutableStateOf(false) }
 
-    var nodesData by remember { mutableStateOf<AdminCurrentNodesResponse?>(null) }
-    var trafficData by remember { mutableStateOf<TrafficAdminResponse?>(null) }
-    var trafficRangeHours by remember { mutableStateOf(24L) }
+    val (ticketsState, ticketsHandle) = rememberSwrResource<List<TicketSummaryDto>>(
+        cache = adminRepository.swrCache,
+        cacheKey = McCacheKeys.ADMIN_TICKETS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.ADMIN),
+        enabled = uiHolder.section == AdminSection.TICKETS,
+        slotKey = "mc_admin_tickets",
+    ) { runSuspendCatching { adminRepository.fetchAdminTickets(includeClosed = false).resolvedTickets } }
 
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val (punishState, punishHandle) = rememberSwrResource<AdminPunishmentsResponse>(
+        cache = adminRepository.swrCache,
+        cacheKey = McCacheKeys.adminPunishments(uiHolder.submittedPlayerQuery),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.ADMIN),
+        enabled = uiHolder.section == AdminSection.AUDIT,
+        slotKey = "mc_admin_punishments",
+    ) { runSuspendCatching { adminRepository.fetchRecentPunishments(search = uiHolder.submittedPlayerQuery) } }
 
-    suspend fun loadSection() {
-        loading = true
-        error = null
-        runCatching {
-            when (section) {
-                AdminSection.TICKETS -> {
-                    adminTickets = adminRepository.fetchAdminTickets(includeClosed = false).resolvedTickets
-                }
-                AdminSection.AUDIT -> {
-                    punishments = adminRepository.fetchRecentPunishments(search = playerQuery)
-                }
-                AdminSection.HISTORIAN -> {
-                    historianList = adminRepository.fetchHistorianReports()
-                }
-                AdminSection.OPS -> {
-                    val nDef = scope.async { runCatching { adminRepository.fetchAdminCurrentNodes() }.getOrNull() }
-                    val tDef = scope.async { runCatching { adminRepository.fetchAdminTraffic(rangeHours = trafficRangeHours) }.getOrNull() }
-                    nodesData = nDef.await()
-                    trafficData = tDef.await()
-                }
+    val (historianState, historianHandle) = rememberSwrResource<HistorianListResponse>(
+        cache = adminRepository.swrCache,
+        cacheKey = McCacheKeys.ADMIN_HISTORIAN,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Detail,
+        tags = setOf(McCacheTags.ADMIN),
+        enabled = uiHolder.section == AdminSection.HISTORIAN,
+        slotKey = "mc_admin_historian",
+    ) { runSuspendCatching { adminRepository.fetchHistorianReports() } }
+
+    val (opsState, opsHandle) = rememberSwrResource<AdminOpsBundle>(
+        cache = adminRepository.swrCache,
+        cacheKey = McCacheKeys.adminOps(uiHolder.trafficRangeHours),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Realtime,
+        tags = setOf(McCacheTags.ADMIN),
+        enabled = uiHolder.section == AdminSection.OPS,
+        pollIntervalMs = 30_000L,
+        slotKey = "mc_admin_ops",
+    ) {
+        runSuspendCatching {
+            coroutineScope {
+                val nDef = async { runSuspendCatching { adminRepository.fetchAdminCurrentNodes() }.getOrNull() }
+                val tDef = async { runSuspendCatching { adminRepository.fetchAdminTraffic(rangeHours = uiHolder.trafficRangeHours) }.getOrNull() }
+                AdminOpsBundle(nodes = nDef.await(), traffic = tDef.await())
             }
-        }.onFailure { error = it.message ?: "管理台数据暂时不可用" }
-        loading = false
+        }
     }
 
-    LaunchedEffect(section, trafficRangeHours) { loadSection() }
+    val adminTickets = ticketsState.data.orEmpty()
+    val punishments = punishState.data
+    val historianList = historianState.data
+    val nodesData = opsState.data?.nodes
+    val trafficData = opsState.data?.traffic
+
+    val loading = when (uiHolder.section) {
+        AdminSection.TICKETS -> ticketsState.isInitialLoading
+        AdminSection.AUDIT -> punishState.isInitialLoading
+        AdminSection.HISTORIAN -> historianState.isInitialLoading
+        AdminSection.OPS -> opsState.isInitialLoading
+    }
+    val refreshing = when (uiHolder.section) {
+        AdminSection.TICKETS -> ticketsState.isUserRefreshing
+        AdminSection.AUDIT -> punishState.isUserRefreshing
+        AdminSection.HISTORIAN -> historianState.isUserRefreshing
+        AdminSection.OPS -> opsState.isUserRefreshing
+    }
+    val error = when (uiHolder.section) {
+        AdminSection.TICKETS -> ticketsState.error
+        AdminSection.AUDIT -> punishState.error
+        AdminSection.HISTORIAN -> historianState.error
+        AdminSection.OPS -> opsState.error
+    }
+
+    fun loadSection(userInitiated: Boolean = false) {
+        when (uiHolder.section) {
+            AdminSection.TICKETS -> if (userInitiated) ticketsHandle.refresh() else ticketsHandle.silentRefresh()
+            AdminSection.AUDIT -> if (userInitiated) punishHandle.refresh() else punishHandle.silentRefresh()
+            AdminSection.HISTORIAN -> if (userInitiated) historianHandle.refresh() else historianHandle.silentRefresh()
+            AdminSection.OPS -> if (userInitiated) opsHandle.refresh() else opsHandle.silentRefresh()
+        }
+    }
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -159,207 +222,220 @@ fun AdminPocketConsoleScreen(
             )
 
             Box(Modifier.padding(horizontal = 16.dp)) {
-                IgngSegmentedTabs(availableSections, section, { it.label }, { section = it })
+                IgngSegmentedTabs(availableSections, uiHolder.section, { it.label }, { uiHolder.section = it })
             }
             Spacer(Modifier.height(10.dp))
 
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { loadSection() } })
-                }
-                section == AdminSection.TICKETS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (adminTickets.isEmpty()) {
-                        item { IgngStateBlock(title = "一切正常", description = "当前没有待处理的全站工单。") }
-                    } else {
-                        itemsIndexed(adminTickets, key = { _, t -> t.id }) { idx, t ->
-                            IgngInteractiveTile(
-                                onClick = {
-                                    scope.launch {
-                                        adminReplyDraft = ""
-                                        inspectedTicket = runCatching { adminRepository.fetchAdminTicketDetail(t.id) }.getOrNull()
+            IgngPullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = { loadSection(userInitiated = true) },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { loadSection(userInitiated = true) })
+                    }
+                    uiHolder.section == AdminSection.TICKETS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (adminTickets.isEmpty()) {
+                            item { IgngStateBlock(title = "一切正常", description = "当前没有待处理的全站工单。") }
+                        } else {
+                            itemsIndexed(adminTickets, key = { _, t -> t.id }) { idx, t ->
+                                IgngInteractiveTile(
+                                    onClick = {
+                                        scope.launch {
+                                            adminReplyDraft = ""
+                                            inspectedTicket = runCatching { adminRepository.fetchAdminTicketDetail(t.id) }.getOrNull()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                ) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("#${t.id} ${t.title}", style = IgngTheme.type.cardTitle, color = colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Spacer(Modifier.width(8.dp))
+                                        IgngBadge(t.typeLabel.ifBlank { t.type }, tone = IgngBadgeTone.Accent)
                                     }
-                                },
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
-                            ) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("#${t.id} ${t.title}", style = IgngTheme.type.cardTitle, color = colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Spacer(Modifier.width(8.dp))
-                                    IgngBadge(t.typeLabel.ifBlank { t.type }, tone = IgngBadgeTone.Accent)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                Text("${t.creatorName} · ${t.serverName ?: "全服"} · ${IgngFormatters.formatRelativeTime(t.updatedAt)}", style = IgngTheme.type.caption, color = colors.textSecondary)
-                            }
-                        }
-                    }
-                }
-                section == AdminSection.AUDIT -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item {
-                        IgngSearchField(
-                            value = playerQuery,
-                            onValueChange = { playerQuery = it },
-                            placeholder = "输入玩家名或账号搜索审计记录，回车查询",
-                            onSubmit = {
-                                scope.launch {
-                                    if (playerQuery.trim().length >= 2) {
-                                        playerResults = runCatching { adminRepository.searchAdminPlayers(playerQuery) }.getOrDefault(emptyList())
-                                    }
-                                    punishments = runCatching { adminRepository.fetchRecentPunishments(search = playerQuery) }.getOrNull()
-                                }
-                            },
-                        )
-                    }
-                    if (playerResults.isNotEmpty()) {
-                        item { IgngSectionHeader(title = "匹配玩家") }
-                        items(playerResults, key = { "${it.kind}:${it.igngId}:${it.mcUsername}:${it.displayName}" }) { p ->
-                            IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(p.mcUsername ?: p.displayName ?: "玩家", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                    IgngBadge(
-                                        text = if (p.hasBoundMc) "已绑定" else if (p.kind == "igng") "IGNG 账户" else "MC 角色",
-                                        tone = if (p.hasBoundMc) IgngBadgeTone.Success else IgngBadgeTone.Neutral,
-                                    )
-                                }
-                                val detailLine = buildList {
-                                    p.displayName?.takeIf { it != p.mcUsername }?.let { add("昵称：$it") }
-                                    if (p.playTimeFormatted.isNotBlank()) add("游玩 ${p.playTimeFormatted}")
-                                    if (p.medalCount > 0) add("勋章 ${p.medalCount}")
-                                }.joinToString(" · ")
-                                if (detailLine.isNotBlank()) {
-                                    Text(detailLine, style = IgngTheme.type.caption, color = colors.textSecondary)
-                                }
-                            }
-                        }
-                    }
-                    item { IgngSectionHeader(title = "近期处罚记录", subtitle = punishments?.let { "共 ${it.total} 条" }) }
-                    val recs = punishments?.records.orEmpty()
-                    if (recs.isEmpty()) {
-                        item { IgngStateBlock(title = "没有匹配的处罚记录") }
-                    } else {
-                        itemsIndexed(recs, key = { i, r -> "${r.id}:$i" }) { idx, r ->
-                            IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(r.player_name ?: "未知玩家", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                    IgngBadge(r.type ?: "处罚", tone = IgngBadgeTone.Warning)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                Text(r.reason ?: "无理由说明", style = IgngTheme.type.body, color = colors.textSecondary)
-                                Text("执行人：${r.admin_name ?: "系统"} · ${IgngFormatters.formatIsoDateTime(r.started_at, short = true)}", style = IgngTheme.type.badge, color = colors.textMuted)
-                            }
-                        }
-                    }
-                }
-                section == AdminSection.HISTORIAN -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val serverNames = historianList?.servers.orEmpty().associate { it.serverId to it.serverName }
-                    val reports = historianList?.items.orEmpty()
-                    if (reports.isEmpty()) {
-                        item { IgngStateBlock(title = "还没有服务器观察周报") }
-                    } else {
-                        itemsIndexed(reports, key = { _, r -> r.id }) { idx, report ->
-                            IgngInteractiveTile(
-                                onClick = {
-                                    scope.launch {
-                                        loadingHistorianDetail = true
-                                        historianDetail = runCatching { adminRepository.fetchHistorianDetail(report.id) }.getOrNull()
-                                        loadingHistorianDetail = false
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
-                            ) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(
-                                        text = "${serverNames[report.serverId] ?: report.serverId} · ${report.periodStart}",
-                                        style = IgngTheme.type.cardTitle,
-                                        color = colors.textPrimary,
-                                    )
-                                    IgngBadge(report.status ?: report.periodKind, tone = if (report.status == "succeeded" || report.status == "completed") IgngBadgeTone.Success else IgngBadgeTone.Neutral)
-                                }
-                                report.title?.takeIf { it.isNotBlank() }?.let { titleText ->
                                     Spacer(Modifier.height(4.dp))
-                                    Text(titleText, style = IgngTheme.type.body, color = colors.textSecondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                    Text("${t.creatorName} · ${t.serverName ?: "全服"} · ${IgngFormatters.formatRelativeTime(t.updatedAt)}", style = IgngTheme.type.caption, color = colors.textSecondary)
                                 }
                             }
                         }
                     }
-                }
-                section == AdminSection.OPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item {
-                        IgngSegmentedTabs(
-                            items = listOf(1L, 0L, 24L, 168L),
-                            selected = trafficRangeHours,
-                            labelOf = {
-                                when (it) {
-                                    1L -> "1小时"
-                                    0L -> "今天"
-                                    24L -> "24小时"
-                                    else -> "近7天"
-                                }
-                            },
-                            onSelect = { trafficRangeHours = it },
-                        )
-                    }
-                    trafficData?.let { tf ->
+                    uiHolder.section == AdminSection.AUDIT -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         item {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IgngTile(Modifier.weight(1f), contentPadding = PaddingValues(12.dp)) {
-                                    Text("总流量", style = IgngTheme.type.badge, color = colors.textSecondary)
-                                    Text(IgngFormatters.formatBytes(tf.totals.total), style = IgngTheme.type.metricMedium, color = colors.accent)
-                                }
-                                IgngTile(Modifier.weight(1f), contentPadding = PaddingValues(12.dp)) {
-                                    Text("出站 TX", style = IgngTheme.type.badge, color = colors.textSecondary)
-                                    Text(IgngFormatters.formatBytes(tf.totals.tx), style = IgngTheme.type.metricMedium, color = colors.textPrimary)
-                                }
-                                IgngTile(Modifier.weight(1f), contentPadding = PaddingValues(12.dp)) {
-                                    Text("入站 RX", style = IgngTheme.type.badge, color = colors.textSecondary)
-                                    Text(IgngFormatters.formatBytes(tf.totals.rx), style = IgngTheme.type.metricMedium, color = colors.textPrimary)
-                                }
-                            }
-                        }
-                        if (tf.topIps.isNotEmpty()) {
-                            item {
-                                IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                    IgngSectionHeader(title = "Top 来源 IP 流量", subtitle = tf.sourceLabel ?: "后端流量")
-                                    Spacer(Modifier.height(10.dp))
-                                    val maxTotal = tf.topIps.maxOf { it.total }.coerceAtLeast(1L).toFloat()
-                                    IgngHorizontalBarList(
-                                        items = tf.topIps.take(10).map {
-                                            IgngBarMetric(
-                                                label = it.ip,
-                                                formattedValue = IgngFormatters.formatBytes(it.total),
-                                                ratio = it.total / maxTotal,
-                                            )
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    nodesData?.let { nd ->
-                        item {
-                            IgngSectionHeader(
-                                title = "探针与服务器实时健康",
-                                subtitle = nd.collector?.label ?: "${nd.servers.size} 台启用服务器",
+                            IgngSearchField(
+                                value = uiHolder.playerQuery,
+                                onValueChange = {
+                                    uiHolder.playerQuery = it
+                                    if (it.isBlank()) {
+                                        uiHolder.submittedPlayerQuery = ""
+                                        uiHolder.playerResults = emptyList()
+                                    }
+                                },
+                                placeholder = "输入玩家名或账号搜索审计记录，回车查询",
+                                onSubmit = {
+                                    val next = uiHolder.playerQuery.trim()
+                                    if (next == uiHolder.submittedPlayerQuery) punishHandle.refresh() else uiHolder.submittedPlayerQuery = next
+                                    scope.launch {
+                                        if (next.length >= 2) {
+                                            uiHolder.playerResults = runCatching { adminRepository.searchAdminPlayers(next) }.getOrDefault(emptyList())
+                                        }
+                                    }
+                                },
                             )
                         }
-                        items(nd.servers, key = { it.serverId.ifBlank { it.hashCode().toString() } }) { srv ->
-                            IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(srv.serverName.ifBlank { srv.serverId }, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                    val overall = srv.status.overall
-                                    IgngBadge(
-                                        overall,
-                                        tone = when (overall) {
-                                            "healthy" -> IgngBadgeTone.Success
-                                            "degraded" -> IgngBadgeTone.Warning
-                                            else -> IgngBadgeTone.Danger
-                                        },
+                        if (uiHolder.playerResults.isNotEmpty()) {
+                            item { IgngSectionHeader(title = "匹配玩家") }
+                            items(uiHolder.playerResults, key = { "${it.kind}:${it.igngId}:${it.mcUsername}:${it.displayName}" }) { p ->
+                                IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(p.mcUsername ?: p.displayName ?: "玩家", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                        IgngBadge(
+                                            text = if (p.hasBoundMc) "已绑定" else if (p.kind == "igng") "IGNG 账户" else "MC 角色",
+                                            tone = if (p.hasBoundMc) IgngBadgeTone.Success else IgngBadgeTone.Neutral,
+                                        )
+                                    }
+                                    val detailLine = buildList {
+                                        p.displayName?.takeIf { it != p.mcUsername }?.let { add("昵称：$it") }
+                                        if (p.playTimeFormatted.isNotBlank()) add("游玩 ${p.playTimeFormatted}")
+                                        if (p.medalCount > 0) add("勋章 ${p.medalCount}")
+                                    }.joinToString(" · ")
+                                    if (detailLine.isNotBlank()) {
+                                        Text(detailLine, style = IgngTheme.type.caption, color = colors.textSecondary)
+                                    }
+                                }
+                            }
+                        }
+                        item { IgngSectionHeader(title = "近期处罚记录", subtitle = punishments?.let { "共 ${it.total} 条" }) }
+                        val recs = punishments?.records.orEmpty()
+                        if (recs.isEmpty()) {
+                            item { IgngStateBlock(title = "没有匹配的处罚记录") }
+                        } else {
+                            itemsIndexed(recs, key = { i, r -> "${r.id}:$i" }) { idx, r ->
+                                IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(r.player_name ?: "未知玩家", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                        IgngBadge(r.type ?: "处罚", tone = IgngBadgeTone.Warning)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(r.reason ?: "无理由说明", style = IgngTheme.type.body, color = colors.textSecondary)
+                                    Text("执行人：${r.admin_name ?: "系统"} · ${IgngFormatters.formatIsoDateTime(r.started_at, short = true)}", style = IgngTheme.type.badge, color = colors.textMuted)
+                                }
+                            }
+                        }
+                    }
+                    uiHolder.section == AdminSection.HISTORIAN -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        val serverNames = historianList?.servers.orEmpty().associate { it.serverId to it.serverName }
+                        val reports = historianList?.items.orEmpty()
+                        if (reports.isEmpty()) {
+                            item { IgngStateBlock(title = "还没有服务器观察周报") }
+                        } else {
+                            itemsIndexed(reports, key = { _, r -> r.id }) { idx, report ->
+                                IgngInteractiveTile(
+                                    onClick = {
+                                        scope.launch {
+                                            loadingHistorianDetail = true
+                                            historianDetail = runCatching { adminRepository.fetchHistorianDetail(report.id) }.getOrNull()
+                                            loadingHistorianDetail = false
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                ) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(
+                                            text = "${serverNames[report.serverId] ?: report.serverId} · ${report.periodStart}",
+                                            style = IgngTheme.type.cardTitle,
+                                            color = colors.textPrimary,
+                                        )
+                                        IgngBadge(report.status ?: report.periodKind, tone = if (report.status == "succeeded" || report.status == "completed") IgngBadgeTone.Success else IgngBadgeTone.Neutral)
+                                    }
+                                    report.title?.takeIf { it.isNotBlank() }?.let { titleText ->
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(titleText, style = IgngTheme.type.body, color = colors.textSecondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    uiHolder.section == AdminSection.OPS -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            IgngSegmentedTabs(
+                                items = listOf(1L, 0L, 24L, 168L),
+                                selected = uiHolder.trafficRangeHours,
+                                labelOf = {
+                                    when (it) {
+                                        1L -> "1小时"
+                                        0L -> "今天"
+                                        24L -> "24小时"
+                                        else -> "近7天"
+                                    }
+                                },
+                                onSelect = { uiHolder.trafficRangeHours = it },
+                            )
+                        }
+                        trafficData?.let { tf ->
+                            item {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    IgngTile(Modifier.weight(1f), contentPadding = PaddingValues(12.dp)) {
+                                        Text("总流量", style = IgngTheme.type.badge, color = colors.textSecondary)
+                                        Text(IgngFormatters.formatBytes(tf.totals.total), style = IgngTheme.type.metricMedium, color = colors.accent)
+                                    }
+                                    IgngTile(Modifier.weight(1f), contentPadding = PaddingValues(12.dp)) {
+                                        Text("出站 TX", style = IgngTheme.type.badge, color = colors.textSecondary)
+                                        Text(IgngFormatters.formatBytes(tf.totals.tx), style = IgngTheme.type.metricMedium, color = colors.textPrimary)
+                                    }
+                                    IgngTile(Modifier.weight(1f), contentPadding = PaddingValues(12.dp)) {
+                                        Text("入站 RX", style = IgngTheme.type.badge, color = colors.textSecondary)
+                                        Text(IgngFormatters.formatBytes(tf.totals.rx), style = IgngTheme.type.metricMedium, color = colors.textPrimary)
+                                    }
+                                }
+                            }
+                            if (tf.topIps.isNotEmpty()) {
+                                item {
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                        IgngSectionHeader(title = "Top 来源 IP 流量", subtitle = tf.sourceLabel ?: "后端流量")
+                                        Spacer(Modifier.height(10.dp))
+                                        val maxTotal = tf.topIps.maxOf { it.total }.coerceAtLeast(1L).toFloat()
+                                        IgngHorizontalBarList(
+                                            items = tf.topIps.take(10).map {
+                                                IgngBarMetric(
+                                                    label = it.ip,
+                                                    formattedValue = IgngFormatters.formatBytes(it.total),
+                                                    ratio = it.total / maxTotal,
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        nodesData?.let { nd ->
+                            item {
+                                IgngSectionHeader(
+                                    title = "探针与服务器实时健康",
+                                    subtitle = nd.collector?.label ?: "${nd.servers.size} 台启用服务器",
+                                )
+                            }
+                            items(nd.servers, key = { it.serverId.ifBlank { it.hashCode().toString() } }) { srv ->
+                                IgngTile(modifier = Modifier.fillMaxWidth()) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(srv.serverName.ifBlank { srv.serverId }, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                        val overall = srv.status.overall
+                                        IgngBadge(
+                                            overall,
+                                            tone = when (overall) {
+                                                "healthy" -> IgngBadgeTone.Success
+                                                "degraded" -> IgngBadgeTone.Warning
+                                                else -> IgngBadgeTone.Danger
+                                            },
+                                        )
+                                    }
+                                    Text(
+                                        "TPS ${IgngFormatters.formatDecimal(srv.performance?.tps, 1)} · 玩家 ${IgngFormatters.formatNumber(srv.performance?.onlinePlayers)} · 网络 ${srv.status.network}",
+                                        style = IgngTheme.type.caption,
+                                        color = colors.textSecondary,
                                     )
                                 }
-                                Text(
-                                    "TPS ${IgngFormatters.formatDecimal(srv.performance?.tps, 1)} · 玩家 ${IgngFormatters.formatNumber(srv.performance?.onlinePlayers)} · 网络 ${srv.status.network}",
-                                    style = IgngTheme.type.caption,
-                                    color = colors.textSecondary,
-                                )
                             }
                         }
                     }

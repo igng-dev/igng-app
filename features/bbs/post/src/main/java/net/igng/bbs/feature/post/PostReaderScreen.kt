@@ -1,9 +1,7 @@
 package net.igng.bbs.feature.post
 
 import android.content.Intent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,21 +11,17 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Edit
@@ -40,10 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,28 +50,39 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import net.igng.bbs.core.data.BbsAppContainer
-import net.igng.bbs.core.data.CreateReportRequest
 import net.igng.bbs.common.BbsFloatingArticleBar
+import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.data.CreateReportRequest
+import net.igng.bbs.core.model.AppPreferences
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.LocalReadingHistoryEntry
+import net.igng.bbs.core.model.PostDetailDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
+import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngImageGalleryLightbox
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
-import net.igng.core.designsystem.IgngRadius
+import net.igng.core.designsystem.IgngPullToRefreshBox
+import net.igng.core.designsystem.IgngReaderTypographySheet
 import net.igng.core.designsystem.IgngSecondaryButton
-import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
-import net.igng.core.designsystem.IgngDetailSheet
-import net.igng.core.designsystem.IgngReaderTypographySheet
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.ProvideIgngReaderSurface
@@ -88,12 +90,12 @@ import net.igng.core.designsystem.readerSurfaceColors
 import net.igng.core.designsystem.rememberIgngScrollBarVisibility
 import net.igng.core.markdown.IgngMarkdownBlockView
 import net.igng.core.markdown.MarkdownParser
-import net.igng.bbs.core.model.AppPreferences
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.LocalReadingHistoryEntry
-import net.igng.bbs.core.model.PostDetailDto
-import net.igng.core.model.ReaderCanvasTone
 import net.igng.core.network.ApiResult
+
+private class PostReaderUiHolder {
+    val acknowledgedRestrictionState = mutableStateOf(false)
+    var viewRecorded by mutableStateOf(false)
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -116,18 +118,29 @@ fun PostReaderScreen(
     val bootstrap by container.bootstrap.collectAsState()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
 
-    val (readerBg, readerPrimary, readerSecondary) = colors.readerSurfaceColors(prefs.reader.canvasTone)
+    val (_, readerPrimary, readerSecondary) = colors.readerSurfaceColors(prefs.reader.canvasTone)
 
-    var detail by remember { mutableStateOf<PostDetailDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var acknowledgedRestriction by remember(postId) { mutableStateOf(false) }
+    val holder = rememberScreenHolder("bbs_post_reader_$postId") { PostReaderUiHolder() }
+    var acknowledgedRestriction by holder.acknowledgedRestrictionState
 
-    var liked by remember { mutableStateOf(false) }
-    var likeCount by remember { mutableIntStateOf(0) }
-    var favorited by remember { mutableStateOf(false) }
-    var followingAuthor by remember { mutableStateOf(false) }
+    val (detailState, detailHandle) = rememberSwrResource<PostDetailDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.postDetail(postId),
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Detail,
+        tags = setOf(BbsCacheTags.POSTS),
+        slotKey = "bbs_post_detail_$postId",
+    ) {
+        container.postRepository.getPostDetail(postId).toKotlinResult()
+    }
 
+    val detail = detailState.data
+    val liked = detail?.viewerState?.isLiked ?: false
+    val likeCount = detail?.likeCount ?: 0
+    val favorited = detail?.viewerState?.isFavorited ?: false
+    val followingAuthor = detail?.viewerState?.isFollowingAuthor ?: false
+
+    var commentsRefreshSignal by remember { mutableIntStateOf(0) }
     var showTocSheet by remember { mutableStateOf(false) }
     var showTypoSheet by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
@@ -135,30 +148,12 @@ fun PostReaderScreen(
     var lightboxIndex by remember { mutableStateOf<Int?>(null) }
     var feedbackBanner by remember { mutableStateOf<String?>(null) }
 
-    suspend fun loadPost() {
-        loading = true
-        error = null
-        when (val res = container.postRepository.getPostDetail(postId)) {
-            is ApiResult.Success -> {
-                detail = res.data
-                liked = res.data.viewerState.isLiked
-                likeCount = res.data.likeCount
-                favorited = res.data.viewerState.isFavorited
-                followingAuthor = res.data.viewerState.isFollowingAuthor
-            }
-            is ApiResult.Failure -> error = res.error.message
-        }
-        loading = false
-    }
-
-    LaunchedEffect(postId, activeAccount?.userId) {
-        loadPost()
-    }
-
-    // Record view after brief dwell
+    // Record view once per reader visit after brief dwell (never re-fires on predictive back)
     LaunchedEffect(detail?.id) {
         val current = detail ?: return@LaunchedEffect
+        if (holder.viewRecorded) return@LaunchedEffect
         delay(1200L)
+        holder.viewRecorded = true
         container.postRepository.recordView(current.id)
     }
 
@@ -213,338 +208,379 @@ fun PostReaderScreen(
     val navBottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     ProvideIgngReaderSurface(tone = prefs.reader.canvasTone) {
-    val surfaceColors = IgngTheme.colors
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(surfaceColors.canvas)
-            .statusBarsPadding(),
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            IgngTopBar(
-                title = detail?.category?.name ?: "文章阅读",
-                onBack = onBack,
-                actions = {
-                    if (document?.toc?.isNotEmpty() == true) {
-                        IconButton(onClick = { showTocSheet = true }) {
-                            Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = "文章目录", tint = readerPrimary)
-                        }
-                    }
-                    IconButton(onClick = { showTypoSheet = true }) {
-                        Icon(Icons.Rounded.TextFields, contentDescription = "阅读排版", tint = readerPrimary)
-                    }
-                    if (detail?.viewerState?.canEdit == true) {
-                        IconButton(onClick = { onEditPost(detail!!.id) }) {
-                            Icon(Icons.Rounded.Edit, contentDescription = "编辑文章", tint = colors.accent)
-                        }
-                    }
-                    if (detail != null) {
-                        IconButton(onClick = {
-                            if (activeAccount == null) {
-                                onRequireLogin()
-                            } else {
-                                reportTarget = "post" to detail!!.id
-                                showReportDialog = true
+        val surfaceColors = IgngTheme.colors
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(surfaceColors.canvas)
+                .statusBarsPadding(),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                IgngTopBar(
+                    title = detail?.category?.name ?: "文章阅读",
+                    onBack = onBack,
+                    actions = {
+                        if (document?.toc?.isNotEmpty() == true) {
+                            IconButton(onClick = { showTocSheet = true }) {
+                                Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, contentDescription = "文章目录", tint = readerPrimary)
                             }
-                        }) {
-                            Icon(Icons.Rounded.Flag, contentDescription = "举报", tint = readerSecondary)
                         }
+                        IconButton(onClick = { showTypoSheet = true }) {
+                            Icon(Icons.Rounded.TextFields, contentDescription = "阅读排版", tint = readerPrimary)
+                        }
+                        if (detail?.viewerState?.canEdit == true) {
+                            IconButton(onClick = { onEditPost(detail.id) }) {
+                                Icon(Icons.Rounded.Edit, contentDescription = "编辑文章", tint = colors.accent)
+                            }
+                        }
+                        if (detail != null) {
+                            IconButton(onClick = {
+                                if (activeAccount == null) {
+                                    onRequireLogin()
+                                } else {
+                                    reportTarget = "post" to detail.id
+                                    showReportDialog = true
+                                }
+                            }) {
+                                Icon(Icons.Rounded.Flag, contentDescription = "举报", tint = readerSecondary)
+                            }
+                        }
+                    },
+                )
+
+                // Hairline reading progress indicator
+                LinearProgressIndicator(
+                    progress = { readingProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = colors.accent,
+                    trackColor = colors.line,
+                )
+
+                when {
+                    detailState.isInitialLoading && detail == null -> IgngLoadingCenter(loading = true)
+                    detailState.error != null && detail == null -> Box(Modifier.padding(16.dp)) {
+                        IgngErrorTile(message = detailState.error!!, onRetry = { detailHandle.refresh() })
                     }
-                },
-            )
-
-            // Hairline reading progress indicator
-            LinearProgressIndicator(
-                progress = { readingProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-                color = colors.accent,
-                trackColor = colors.line,
-            )
-
-            when {
-                loading && detail == null -> IgngLoadingCenter(loading = true)
-                error != null && detail == null -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { loadPost() } })
-                }
-                detail != null -> {
-                    val d = detail!!
-                    // Restricted warning gate (ban_status = 4)
-                    if (d.restrictedWarning && !acknowledgedRestriction) {
-                        Box(modifier = Modifier.padding(16.dp)) {
-                            IgngTile {
-                                Text("内容受限提示", style = MaterialTheme.typography.titleLarge, color = colors.warning)
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = d.restrictedReason?.ifBlank { null }
-                                        ?: "本文被标记为受限制内容，仅限通过链接访问并确认后浏览。",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = colors.textSecondary,
-                                )
-                                Spacer(Modifier.height(16.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    IgngSecondaryButton(text = "返回", onClick = onBack, modifier = Modifier.weight(1f))
-                                    IgngPrimaryButton(
-                                        text = "确认继续阅读",
-                                        onClick = { acknowledgedRestriction = true },
-                                        modifier = Modifier.weight(1f),
+                    detail != null -> {
+                        val d = detail
+                        // Restricted warning gate (ban_status = 4)
+                        if (d.restrictedWarning && !acknowledgedRestriction) {
+                            Box(modifier = Modifier.padding(16.dp)) {
+                                IgngTile {
+                                    Text("内容受限提示", style = MaterialTheme.typography.titleLarge, color = colors.warning)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = d.restrictedReason?.ifBlank { null }
+                                            ?: "本文被标记为受限制内容，仅限通过链接访问并确认后浏览。",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.textSecondary,
                                     )
+                                    Spacer(Modifier.height(16.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        IgngSecondaryButton(text = "返回", onClick = onBack, modifier = Modifier.weight(1f))
+                                        IgngPrimaryButton(
+                                            text = "确认继续阅读",
+                                            onClick = { acknowledgedRestriction = true },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
                                 }
                             }
-                        }
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .weight(1f)
-                                .nestedScroll(barVisibility.nestedScrollConnection),
-                            contentPadding = PaddingValues(
-                                start = 18.dp,
-                                end = 18.dp,
-                                top = 12.dp,
-                                bottom = navBottomPadding + 96.dp,
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            // Item 0: Title, Author, Collaborators, Meta
-                            item(key = "post_header") {
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    feedbackBanner?.let { msg ->
-                                        IgngInfoBanner(title = "提示", message = msg, tone = IgngTone.ACCENT)
-                                    }
-                                    if (d.moderationStatus == "pending" || d.moderationStatus == "rejected") {
-                                        IgngInfoBanner(
-                                            title = if (d.moderationStatus == "pending") "审核处理中" else "审核未通过",
-                                            message = d.rejectionReason?.ifBlank { null }
-                                                ?: "当前版本状态为：${BbsFormatters.postStatusLabel(d.status, d.banStatus, d.moderationStatus)}",
-                                            tone = if (d.moderationStatus == "rejected") IgngTone.DANGER else IgngTone.WARNING,
-                                        )
-                                    }
-                                    Text(
-                                        text = d.title,
-                                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = readerPrimary,
-                                    )
-                                    // Author row
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        IgngAvatar(
-                                            avatarUrl = d.author?.avatarUrl,
-                                            displayName = d.author?.displayName ?: "作者",
-                                            size = 38.dp,
-                                            onClick = d.author?.id?.let { uid -> { onOpenUser(uid) } },
-                                        )
-                                        Column(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable { d.author?.id?.let(onOpenUser) },
-                                        ) {
+                        } else {
+                            IgngPullToRefreshBox(
+                                isRefreshing = detailState.isUserRefreshing,
+                                onRefresh = {
+                                    detailHandle.refresh()
+                                    commentsRefreshSignal++
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .nestedScroll(barVisibility.nestedScrollConnection),
+                                    contentPadding = PaddingValues(
+                                        start = 18.dp,
+                                        end = 18.dp,
+                                        top = 12.dp,
+                                        bottom = navBottomPadding + 96.dp,
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    // Item 0: Title, Author, Collaborators, Meta
+                                    item(key = "post_header") {
+                                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            feedbackBanner?.let { msg ->
+                                                IgngInfoBanner(title = "提示", message = msg, tone = IgngTone.ACCENT)
+                                            }
+                                            if (d.moderationStatus == "pending" || d.moderationStatus == "rejected") {
+                                                IgngInfoBanner(
+                                                    title = if (d.moderationStatus == "pending") "审核处理中" else "审核未通过",
+                                                    message = d.rejectionReason?.ifBlank { null }
+                                                        ?: "当前版本状态为：${BbsFormatters.postStatusLabel(d.status, d.banStatus, d.moderationStatus)}",
+                                                    tone = if (d.moderationStatus == "rejected") IgngTone.DANGER else IgngTone.WARNING,
+                                                )
+                                            }
                                             Text(
-                                                text = d.author?.displayName ?: "匿名用户",
-                                                style = MaterialTheme.typography.titleSmall,
+                                                text = d.title,
+                                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                                                 color = readerPrimary,
                                             )
-                                            Text(
-                                                text = "${BbsFormatters.relativeTime(d.createdAt)} · ${BbsFormatters.readingMinutesLabel(d.readingMinutes)} · ${BbsFormatters.compactCount(d.views)} 阅读",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = readerSecondary,
-                                            )
-                                        }
-                                        if (!d.viewerState.isOwner && d.author != null) {
-                                            IgngTagChip(
-                                                text = if (followingAuthor) "已关注" else "+ 关注",
-                                                selected = followingAuthor,
-                                                tone = IgngTone.ACCENT,
-                                                onClick = {
-                                                    if (activeAccount == null) { onRequireLogin(); return@IgngTagChip }
-                                                    scope.launch {
-                                                        when (val r = container.profileRepository.toggleFollow(d.author!!.id)) {
-                                                            is ApiResult.Success -> followingAuthor = r.data.following
-                                                            is ApiResult.Failure -> feedbackBanner = r.error.message
-                                                        }
+                                            // Author row
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            ) {
+                                                IgngAvatar(
+                                                    avatarUrl = d.author?.avatarUrl,
+                                                    displayName = d.author?.displayName ?: "作者",
+                                                    size = 38.dp,
+                                                    onClick = d.author?.id?.let { uid -> { onOpenUser(uid) } },
+                                                )
+                                                Column(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clickable { d.author?.id?.let(onOpenUser) },
+                                                ) {
+                                                    Text(
+                                                        text = d.author?.displayName ?: "匿名用户",
+                                                        style = MaterialTheme.typography.titleSmall,
+                                                        color = readerPrimary,
+                                                    )
+                                                    Text(
+                                                        text = "${BbsFormatters.relativeTime(d.createdAt)} · ${BbsFormatters.readingMinutesLabel(d.readingMinutes)} · ${BbsFormatters.compactCount(d.views)} 阅读",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = readerSecondary,
+                                                    )
+                                                }
+                                                val author = d.author
+                                                if (!d.viewerState.isOwner && author != null) {
+                                                    IgngTagChip(
+                                                        text = if (followingAuthor) "已关注" else "+ 关注",
+                                                        selected = followingAuthor,
+                                                        tone = IgngTone.ACCENT,
+                                                        onClick = {
+                                                            if (activeAccount == null) { onRequireLogin(); return@IgngTagChip }
+                                                            val prevFollowing = followingAuthor
+                                                            detailHandle.mutateLocal { cur ->
+                                                                cur.copy(viewerState = cur.viewerState.copy(isFollowingAuthor = !prevFollowing))
+                                                            }
+                                                            scope.launch {
+                                                                when (val r = container.profileRepository.toggleFollow(author.id)) {
+                                                                    is ApiResult.Success -> Unit
+                                                                    is ApiResult.Failure -> {
+                                                                        detailHandle.mutateLocal { cur ->
+                                                                            cur.copy(viewerState = cur.viewerState.copy(isFollowingAuthor = prevFollowing))
+                                                                        }
+                                                                        feedbackBanner = r.error.message
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                            // Collaborators bylines
+                                            if (d.collaborators.isNotEmpty()) {
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                ) {
+                                                    d.collaborators.forEach { c ->
+                                                        IgngTagChip(
+                                                            text = "${c.roleTitle}：${c.user?.displayName ?: "协作者"}",
+                                                            tone = IgngTone.NEUTRAL,
+                                                            onClick = c.user?.id?.let { uid -> { onOpenUser(uid) } },
+                                                        )
                                                     }
-                                                },
-                                            )
-                                        }
-                                    }
-                                    // Collaborators bylines
-                                    if (d.collaborators.isNotEmpty()) {
-                                        FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            d.collaborators.forEach { c ->
-                                                IgngTagChip(
-                                                    text = "${c.roleTitle}：${c.user?.displayName ?: "协作者"}",
-                                                    tone = IgngTone.NEUTRAL,
-                                                    onClick = c.user?.id?.let { uid -> { onOpenUser(uid) } },
-                                                )
+                                                }
+                                            }
+                                            // Tags
+                                            if (d.tags.isNotEmpty()) {
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                ) {
+                                                    d.tags.forEach { tag ->
+                                                        IgngTagChip(text = "#$tag", onClick = { onOpenTag(tag) })
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-                                    // Tags
-                                    if (d.tags.isNotEmpty()) {
-                                        FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            d.tags.forEach { tag ->
-                                                IgngTagChip(text = "#$tag", onClick = { onOpenTag(tag) })
+
+                                    // Item 1: Summary + Column card
+                                    item(key = "post_context_cards") {
+                                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            d.summary?.takeIf { it.isNotBlank() }?.let { summary ->
+                                                IgngTile(soft = true, padding = PaddingValues(14.dp)) {
+                                                    Text("摘要", style = MaterialTheme.typography.labelLarge, color = colors.accent)
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Text(summary, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                                                }
                                             }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Item 1: Summary + Column card
-                            item(key = "post_context_cards") {
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    d.summary?.takeIf { it.isNotBlank() }?.let { summary ->
-                                        IgngTile(soft = true, padding = PaddingValues(14.dp)) {
-                                            Text("摘要", style = MaterialTheme.typography.labelLarge, color = colors.accent)
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(summary, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                                        }
-                                    }
-                                    d.column?.let { col ->
-                                        IgngTile(
-                                            soft = true,
-                                            padding = PaddingValues(14.dp),
-                                            onClick = { onOpenColumn(col.id) },
-                                        ) {
-                                            Text("收录于专栏 · ${col.name}", style = MaterialTheme.typography.titleSmall, color = colors.accent)
-                                            col.description?.takeIf { it.isNotBlank() }?.let {
-                                                Spacer(Modifier.height(2.dp))
-                                                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+                                            d.column?.let { col ->
+                                                IgngTile(
+                                                    soft = true,
+                                                    padding = PaddingValues(14.dp),
+                                                    onClick = { onOpenColumn(col.id) },
+                                                ) {
+                                                    Text("收录于专栏 · ${col.name}", style = MaterialTheme.typography.titleSmall, color = colors.accent)
+                                                    col.description?.takeIf { it.isNotBlank() }?.let {
+                                                        Spacer(Modifier.height(2.dp))
+                                                        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+                                                    }
+                                                }
                                             }
+                                            HorizontalDivider(color = colors.line)
                                         }
                                     }
-                                    HorizontalDivider(color = colors.line)
-                                }
-                            }
 
-                            // Native Markdown / HTML AST Blocks
-                            val blocks = document?.blocks.orEmpty()
-                            itemsIndexed(blocks, key = { idx, _ -> "blk_$idx" }) { _, block ->
-                                IgngMarkdownBlockView(
-                                    block = block,
-                                    typography = prefs.reader,
-                                    onImageClick = { url ->
-                                        val idx = document?.imageUrls?.indexOf(url) ?: -1
-                                        if (idx >= 0) lightboxIndex = idx
-                                    },
-                                    onLinkClick = onOpenLink,
-                                    onMentionClick = onOpenUser,
-                                )
-                            }
-
-                            // Series Navigation Card
-                            item(key = "series_nav") {
-                                d.series?.let { ser ->
-                                    IgngTile(soft = true) {
-                                        Text(
-                                            text = "系列合集 · ${ser.name}（第 ${ser.currentIndex + 1} / ${ser.totalChapters} 篇）",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = colors.accent,
+                                    // Native Markdown / HTML AST Blocks
+                                    val blocks = document?.blocks.orEmpty()
+                                    itemsIndexed(blocks, key = { idx, _ -> "blk_$idx" }) { _, block ->
+                                        IgngMarkdownBlockView(
+                                            block = block,
+                                            typography = prefs.reader,
+                                            onImageClick = { url ->
+                                                val idx = document?.imageUrls?.indexOf(url) ?: -1
+                                                if (idx >= 0) lightboxIndex = idx
+                                            },
+                                            onLinkClick = onOpenLink,
+                                            onMentionClick = onOpenUser,
                                         )
-                                        Spacer(Modifier.height(10.dp))
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                            ser.prevPost?.let { prev ->
-                                                IgngSecondaryButton(
-                                                    text = "上一篇",
-                                                    onClick = { onOpenPost(prev.id) },
-                                                    modifier = Modifier.weight(1f),
+                                    }
+
+                                    // Series Navigation Card
+                                    item(key = "series_nav") {
+                                        d.series?.let { ser ->
+                                            IgngTile(soft = true) {
+                                                Text(
+                                                    text = "系列合集 · ${ser.name}（第 ${ser.currentIndex + 1} / ${ser.totalChapters} 篇）",
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    color = colors.accent,
                                                 )
-                                            }
-                                            ser.nextPost?.let { next ->
-                                                IgngPrimaryButton(
-                                                    text = "下一篇",
-                                                    onClick = { onOpenPost(next.id) },
-                                                    modifier = Modifier.weight(1f),
-                                                )
+                                                Spacer(Modifier.height(10.dp))
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                                    ser.prevPost?.let { prev ->
+                                                        IgngSecondaryButton(
+                                                            text = "上一篇",
+                                                            onClick = { onOpenPost(prev.id) },
+                                                            modifier = Modifier.weight(1f),
+                                                        )
+                                                    }
+                                                    ser.nextPost?.let { next ->
+                                                        IgngPrimaryButton(
+                                                            text = "下一篇",
+                                                            onClick = { onOpenPost(next.id) },
+                                                            modifier = Modifier.weight(1f),
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-                                }
-                            }
 
-                            // Threaded Comments Section
-                            item(key = "comments_section") {
-                                PostCommentsSection(
-                                    container = container,
-                                    postId = d.id,
-                                    onOpenUser = onOpenUser,
-                                    onReportComment = { cmtId ->
-                                        if (activeAccount == null) {
-                                            onRequireLogin()
-                                        } else {
-                                            reportTarget = "comment" to cmtId
-                                            showReportDialog = true
-                                        }
-                                    },
-                                    onRequireLogin = onRequireLogin,
-                                )
+                                    // Threaded Comments Section
+                                    item(key = "comments_section") {
+                                        PostCommentsSection(
+                                            container = container,
+                                            postId = d.id,
+                                            refreshSignal = commentsRefreshSignal,
+                                            onOpenUser = onOpenUser,
+                                            onReportComment = { cmtId ->
+                                                if (activeAccount == null) {
+                                                    onRequireLogin()
+                                                } else {
+                                                    reportTarget = "comment" to cmtId
+                                                    showReportDialog = true
+                                                }
+                                            },
+                                            onRequireLogin = onRequireLogin,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // Auto-hiding Floating Article Action Bar
-        if (detail != null && (!detail!!.restrictedWarning || acknowledgedRestriction)) {
-            BbsFloatingArticleBar(
-                visible = barVisibility.visible,
-                liked = liked,
-                likeCount = likeCount,
-                favorited = favorited,
-                commentCount = detail!!.commentCount,
-                onLike = {
-                    if (activeAccount == null) { onRequireLogin(); return@BbsFloatingArticleBar }
-                    val prevLiked = liked
-                    val prevCount = likeCount
-                    liked = !prevLiked
-                    likeCount = (prevCount + if (liked) 1 else -1).coerceAtLeast(0)
-                    scope.launch {
-                        when (val r = container.postRepository.toggleLike(detail!!.id)) {
-                            is ApiResult.Success -> { liked = r.data.liked; likeCount = r.data.likeCount }
-                            is ApiResult.Failure -> { liked = prevLiked; likeCount = prevCount; feedbackBanner = r.error.message }
+            // Auto-hiding Floating Article Action Bar
+            if (detail != null && (!detail.restrictedWarning || acknowledgedRestriction)) {
+                BbsFloatingArticleBar(
+                    visible = barVisibility.visible,
+                    liked = liked,
+                    likeCount = likeCount,
+                    favorited = favorited,
+                    commentCount = detail.commentCount,
+                    onLike = {
+                        if (activeAccount == null) { onRequireLogin(); return@BbsFloatingArticleBar }
+                        val prevLiked = liked
+                        val prevCount = likeCount
+                        val nextLiked = !prevLiked
+                        val nextCount = (prevCount + if (nextLiked) 1 else -1).coerceAtLeast(0)
+                        detailHandle.mutateLocal { cur ->
+                            cur.copy(
+                                likeCount = nextCount,
+                                viewerState = cur.viewerState.copy(isLiked = nextLiked),
+                            )
                         }
-                    }
-                },
-                onFavorite = {
-                    if (activeAccount == null) { onRequireLogin(); return@BbsFloatingArticleBar }
-                    val prevFav = favorited
-                    favorited = !prevFav
-                    scope.launch {
-                        when (val r = container.postRepository.toggleFavorite(detail!!.id)) {
-                            is ApiResult.Success -> favorited = r.data.favorited
-                            is ApiResult.Failure -> { favorited = prevFav; feedbackBanner = r.error.message }
+                        scope.launch {
+                            when (val r = container.postRepository.toggleLike(detail.id)) {
+                                is ApiResult.Success -> Unit
+                                is ApiResult.Failure -> {
+                                    detailHandle.mutateLocal { cur ->
+                                        cur.copy(
+                                            likeCount = prevCount,
+                                            viewerState = cur.viewerState.copy(isLiked = prevLiked),
+                                        )
+                                    }
+                                    feedbackBanner = r.error.message
+                                }
+                            }
                         }
-                    }
-                },
-                onComment = {
-                    scope.launch {
-                        listState.animateScrollToItem(commentsAnchorIndex.coerceAtMost(listState.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1))
-                    }
-                },
-                onShare = {
-                    val url = detail!!.webUrl ?: container.endpoints.postWebUrl(detail!!.numericId)
-                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, detail!!.title)
-                        putExtra(Intent.EXTRA_TEXT, "${detail!!.title}\n$url")
-                    }
-                    context.startActivity(Intent.createChooser(sendIntent, "分享文章"))
-                },
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
+                    },
+                    onFavorite = {
+                        if (activeAccount == null) { onRequireLogin(); return@BbsFloatingArticleBar }
+                        val prevFav = favorited
+                        detailHandle.mutateLocal { cur ->
+                            cur.copy(viewerState = cur.viewerState.copy(isFavorited = !prevFav))
+                        }
+                        scope.launch {
+                            when (val r = container.postRepository.toggleFavorite(detail.id)) {
+                                is ApiResult.Success -> Unit
+                                is ApiResult.Failure -> {
+                                    detailHandle.mutateLocal { cur ->
+                                        cur.copy(viewerState = cur.viewerState.copy(isFavorited = prevFav))
+                                    }
+                                    feedbackBanner = r.error.message
+                                }
+                            }
+                        }
+                    },
+                    onComment = {
+                        scope.launch {
+                            listState.animateScrollToItem(commentsAnchorIndex.coerceAtMost(listState.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1))
+                        }
+                    },
+                    onShare = {
+                        val url = detail.webUrl ?: container.endpoints.postWebUrl(detail.numericId)
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, detail.title)
+                            putExtra(Intent.EXTRA_TEXT, "${detail.title}\n$url")
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "分享文章"))
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
-    }
     }
 
     // Image Lightbox
@@ -600,7 +636,7 @@ fun PostReaderScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        (reasons.takeIf { it.isNotEmpty() } ?: listOf()).forEach { r ->
+                        reasons.forEach { r ->
                             IgngTagChip(
                                 text = r.title,
                                 selected = selectedCode == r.code,
@@ -621,14 +657,16 @@ fun PostReaderScreen(
                     val (tType, tId) = reportTarget!!
                     showReportDialog = false
                     scope.launch {
-                        when (val r = container.postRepository.submitReport(
-                            CreateReportRequest(
-                                targetType = tType,
-                                targetId = tId,
-                                reasonCode = selectedCode,
-                                reason = reasonText.trim().ifBlank { null },
-                            ),
-                        )) {
+                        when (
+                            val r = container.postRepository.submitReport(
+                                CreateReportRequest(
+                                    targetType = tType,
+                                    targetId = tId,
+                                    reasonCode = selectedCode,
+                                    reason = reasonText.trim().ifBlank { null },
+                                ),
+                            )
+                        ) {
                             is ApiResult.Success -> feedbackBanner = "举报已受理，感谢你协助维护社区秩序。"
                             is ApiResult.Failure -> feedbackBanner = r.error.message
                         }

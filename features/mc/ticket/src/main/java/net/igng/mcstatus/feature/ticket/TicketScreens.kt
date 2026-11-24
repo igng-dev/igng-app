@@ -62,10 +62,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.mcstatus.core.data.CreateTicketPayload
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.data.TicketAccessPolicy
 import net.igng.mcstatus.core.data.TicketDetailDto
 import net.igng.mcstatus.core.data.TicketDraft
+import net.igng.mcstatus.core.data.TicketListResponse
 import net.igng.mcstatus.core.data.TicketOptionsResponse
 import net.igng.mcstatus.core.data.TicketPlayerOption
 import net.igng.mcstatus.core.data.TicketRepository
@@ -104,6 +112,13 @@ private enum class TicketRelationFilter(val wire: String, val label: String) {
     PARTICIPATED("participated", "我参与的"),
 }
 
+private class TicketsListUiHolder {
+    var relation by mutableStateOf(TicketRelationFilter.ALL)
+    var includeClosed by mutableStateOf(false)
+    var query by mutableStateOf("")
+    var submittedQuery by mutableStateOf("")
+}
+
 @Composable
 fun TicketsScreen(
     ticketRepository: TicketRepository,
@@ -112,32 +127,34 @@ fun TicketsScreen(
     onCreateTicket: () -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
-    var relation by remember { mutableStateOf(TicketRelationFilter.ALL) }
-    var includeClosed by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    var tickets by remember { mutableStateOf<List<TicketSummaryDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val uiHolder = rememberScreenHolder("tickets_list_ui") { TicketsListUiHolder() }
 
-    suspend fun load(isRefresh: Boolean = false) {
-        if (isRefresh) refreshing = true else loading = true
-        error = null
-        runCatching {
+    val (listState, listHandle) = rememberSwrResource<TicketListResponse>(
+        cache = ticketRepository.swrCache,
+        cacheKey = McCacheKeys.ticketsList(
+            relation = uiHolder.relation.wire,
+            includeClosed = uiHolder.includeClosed,
+            query = uiHolder.submittedQuery,
+        ),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.TICKETS),
+        slotKey = "tickets_list",
+    ) {
+        runSuspendCatching {
             ticketRepository.fetchList(
-                relation = relation.wire,
-                includeClosed = includeClosed,
-                query = query,
+                relation = uiHolder.relation.wire,
+                includeClosed = uiHolder.includeClosed,
+                query = uiHolder.submittedQuery,
                 page = 1,
             )
-        }.onSuccess { tickets = it.resolvedTickets }
-            .onFailure { error = it.message ?: "工单列表没有读到" }
-        loading = false
-        refreshing = false
+        }
     }
 
-    LaunchedEffect(relation, includeClosed) { load() }
+    val tickets = listState.data?.resolvedTickets.orEmpty()
+    val loading = listState.isInitialLoading
+    val refreshing = listState.isUserRefreshing
+    val error = listState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -157,23 +174,33 @@ fun TicketsScreen(
             )
 
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                IgngSegmentedTabs(TicketRelationFilter.entries, relation, { it.label }, { relation = it })
+                IgngSegmentedTabs(TicketRelationFilter.entries, uiHolder.relation, { it.label }, { uiHolder.relation = it })
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     IgngSearchField(
-                        value = query,
-                        onValueChange = { query = it },
+                        value = uiHolder.query,
+                        onValueChange = {
+                            uiHolder.query = it
+                            if (it.isBlank()) uiHolder.submittedQuery = ""
+                        },
                         placeholder = "搜索工单标题或编号…",
-                        onSubmit = { scope.launch { load() } },
+                        onSubmit = {
+                            val next = uiHolder.query.trim()
+                            if (next == uiHolder.submittedQuery) {
+                                listHandle.refresh()
+                            } else {
+                                uiHolder.submittedQuery = next
+                            }
+                        },
                         modifier = Modifier.weight(1f),
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("含已结单", style = IgngTheme.type.caption, color = colors.textSecondary)
                         Spacer(Modifier.width(4.dp))
-                        IgngSwitch(checked = includeClosed, onCheckedChange = { includeClosed = it })
+                        IgngSwitch(checked = uiHolder.includeClosed, onCheckedChange = { uiHolder.includeClosed = it })
                     }
                 }
             }
@@ -181,13 +208,13 @@ fun TicketsScreen(
             Spacer(Modifier.height(10.dp))
             IgngPullToRefreshBox(
                 isRefreshing = refreshing,
-                onRefresh = { scope.launch { load(isRefresh = true) } },
+                onRefresh = { listHandle.refresh() },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
                     loading && tickets.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
                     error != null && tickets.isEmpty() -> Box(Modifier.padding(16.dp)) {
-                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { load() } })
+                        IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { listHandle.refresh() })
                     }
                     tickets.isEmpty() -> Box(Modifier.padding(16.dp)) {
                         IgngStateBlock(
@@ -229,6 +256,10 @@ fun TicketsScreen(
     }
 }
 
+private class TicketDetailDraftHolder {
+    val replyTextState = mutableStateOf("")
+}
+
 @Composable
 fun TicketDetailScreen(
     ticketId: Int,
@@ -239,11 +270,23 @@ fun TicketDetailScreen(
     val colors = IgngTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val draftHolder = rememberScreenHolder("ticket_detail_draft_$ticketId") { TicketDetailDraftHolder() }
 
-    var detail by remember(ticketId) { mutableStateOf<TicketDetailDto?>(null) }
-    var loading by remember(ticketId) { mutableStateOf(true) }
-    var error by remember(ticketId) { mutableStateOf<String?>(null) }
-    var replyText by remember { mutableStateOf("") }
+    val (detailState, detailHandle) = rememberSwrResource<TicketDetailDto>(
+        cache = ticketRepository.swrCache,
+        cacheKey = McCacheKeys.ticketDetail(ticketId),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.TICKETS),
+        slotKey = "ticket_detail_$ticketId",
+    ) {
+        runSuspendCatching { ticketRepository.fetchDetail(ticketId) }
+    }
+
+    val detail = detailState.data
+    val loading = detailState.isInitialLoading
+    val error = detailState.error
+    var replyText by draftHolder.replyTextState
     var sending by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
     val pendingUploads = remember { mutableStateListOf<UploadedMediaDto>() }
@@ -253,16 +296,9 @@ fun TicketDetailScreen(
     var editTitle by remember { mutableStateOf("") }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
 
-    suspend fun reload() {
-        loading = detail == null
-        error = null
-        runCatching { ticketRepository.fetchDetail(ticketId) }
-            .onSuccess { detail = it }
-            .onFailure { error = it.message ?: "工单详情没有读到" }
-        loading = false
+    fun reload() {
+        detailHandle.silentRefresh()
     }
-
-    LaunchedEffect(ticketId) { reload() }
 
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -332,15 +368,20 @@ fun TicketDetailScreen(
             when {
                 loading -> IgngLoadingBlock(fill = true)
                 error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { scope.launch { reload() } })
+                    IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { detailHandle.refresh() })
                 }
                 detail != null -> {
                     val ticket = detail!!
-                    LazyColumn(
+                    IgngPullToRefreshBox(
+                        isRefreshing = detailState.isUserRefreshing,
+                        onRefresh = { detailHandle.refresh() },
                         modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
                         item(key = "meta") {
                             IgngTile(modifier = Modifier.fillMaxWidth()) {
                                 Text(ticket.title, style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
@@ -397,6 +438,7 @@ fun TicketDetailScreen(
                                 }
                             }
                         }
+                    }
                     }
 
                     // Reply composer bar
@@ -529,7 +571,12 @@ fun TicketDetailScreen(
                                 ),
                             )
                         }.onSuccess {
-                            detail = it
+                            ticketRepository.swrCache.put(
+                                key = McCacheKeys.ticketDetail(ticketId),
+                                data = it,
+                                scope = IgngCacheScope.USER_ONLY,
+                                tags = setOf(McCacheTags.TICKETS),
+                            )
                             showEditSheet = false
                         }.onFailure { actionFeedback = it.message }
                     }

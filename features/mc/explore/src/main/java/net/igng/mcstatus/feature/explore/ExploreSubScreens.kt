@@ -40,13 +40,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.core.designsystem.IgngBrowserLauncher
+import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.mcstatus.core.data.ExploreRepository
 import net.igng.mcstatus.core.data.HallFakePlayerDto
 import net.igng.mcstatus.core.data.HallLandDto
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.data.McCharacterProfileResponse
+import net.igng.mcstatus.core.data.McDiskCodecs
 import net.igng.mcstatus.core.data.MedalProfileDto
 import net.igng.mcstatus.core.data.PublicPerfectRosterResponse
 import net.igng.mcstatus.core.data.PublicPlayerProfileResponse
@@ -83,6 +93,62 @@ import net.igng.core.model.asBooleanFlag
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ServerFamilyDetailScreen(
+    familySlug: String,
+    exploreRepository: ExploreRepository,
+    onBack: () -> Unit,
+    onOpenMap: (familySlug: String, seasonSlug: String) -> Unit,
+) {
+    val (familiesState, familiesHandle) = rememberSwrResource<List<ServerFamilyDto>>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.SERVERS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Static,
+        tags = setOf(McCacheTags.SERVERS),
+        diskCodec = McDiskCodecs.servers,
+        legacyRawProvider = {
+            val legacy = exploreRepository.readCachedFamilies()
+            if (legacy.isNotEmpty()) McDiskCodecs.servers.encode(legacy) else null
+        },
+        slotKey = "family_detail_$familySlug",
+    ) {
+        runSuspendCatching { exploreRepository.fetchHomeFamilies() }
+    }
+
+    val family = remember(familiesState.data, familySlug) {
+        familiesState.data.orEmpty().firstOrNull { it.slug == familySlug }
+    }
+
+    if (family == null) {
+        IgngAmbientCanvas {
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+                IgngTopBar(title = "周目档案", onBack = onBack)
+                when {
+                    familiesState.isInitialLoading -> IgngLoadingBlock(fill = true)
+                    else -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = "没有找到该服务器家族",
+                            description = familiesState.error ?: "请返回重试或刷新服务器目录。",
+                            isError = familiesState.error != null,
+                            actionLabel = "重试",
+                            onAction = { familiesHandle.refresh() },
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    ServerFamilyDetailContent(
+        family = family,
+        onBack = onBack,
+        onOpenMap = onOpenMap,
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ServerFamilyDetailContent(
     family: ServerFamilyDto,
     onBack: () -> Unit,
     onOpenMap: (familySlug: String, seasonSlug: String) -> Unit,
@@ -252,6 +318,15 @@ fun ServerFamilyDetailScreen(
     }
 }
 
+private class GlobalSearchUiHolder {
+    var query by mutableStateOf("")
+    var lastExecutedQuery by mutableStateOf("")
+    var loading by mutableStateOf(false)
+    var error by mutableStateOf<String?>(null)
+    var results by mutableStateOf<List<SearchResultItem>>(emptyList())
+    var hasSearched by mutableStateOf(false)
+}
+
 @Composable
 fun GlobalSearchScreen(
     exploreRepository: ExploreRepository,
@@ -260,61 +335,63 @@ fun GlobalSearchScreen(
     onOpenMcCharacter: (String) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    var query by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var results by remember { mutableStateOf<List<SearchResultItem>>(emptyList()) }
-    var hasSearched by remember { mutableStateOf(false) }
+    val holder = rememberScreenHolder("global_search_ui") { GlobalSearchUiHolder() }
 
-    LaunchedEffect(query) {
-        val trimmed = query.trim()
+    LaunchedEffect(holder.query) {
+        val trimmed = holder.query.trim()
         if (trimmed.length < 2) {
-            results = emptyList()
-            error = null
-            hasSearched = false
+            holder.results = emptyList()
+            holder.error = null
+            holder.hasSearched = false
+            holder.lastExecutedQuery = ""
+            holder.loading = false
+            return@LaunchedEffect
+        }
+        if (trimmed == holder.lastExecutedQuery && holder.hasSearched) {
             return@LaunchedEffect
         }
         delay(320L)
-        loading = true
-        error = null
-        runCatching { exploreRepository.search(trimmed) }
+        holder.loading = true
+        holder.error = null
+        runSuspendCatching { exploreRepository.search(trimmed) }
             .onSuccess {
-                results = it
-                hasSearched = true
+                holder.results = it
+                holder.hasSearched = true
+                holder.lastExecutedQuery = trimmed
             }
-            .onFailure { error = it.message ?: "搜索服务暂时不可用" }
-        loading = false
+            .onFailure { holder.error = it.message ?: "搜索服务暂时不可用" }
+        holder.loading = false
     }
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "全站玩家搜索", onBack = onBack)
             IgngSearchField(
-                value = query,
-                onValueChange = { query = it },
+                value = holder.query,
+                onValueChange = { holder.query = it },
                 placeholder = "输入至少 2 个字符，搜 IGNG 昵称或 MC 角色名",
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             Spacer(Modifier.height(12.dp))
             when {
-                loading -> IgngLoadingBlock()
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "搜索失败", description = error, isError = true)
+                holder.loading -> IgngLoadingBlock()
+                holder.error != null -> Box(Modifier.padding(16.dp)) {
+                    IgngStateBlock(title = "搜索失败", description = holder.error, isError = true)
                 }
-                !hasSearched -> Box(Modifier.padding(16.dp)) {
+                !holder.hasSearched -> Box(Modifier.padding(16.dp)) {
                     IgngStateBlock(
                         title = "检索玩家与角色档案",
                         description = "支持查询公开绑定的 IGNG 通行证与独立 Minecraft 角色统计。",
                     )
                 }
-                results.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                holder.results.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngStateBlock(title = "没有找到匹配的玩家", description = "试试更短的关键词或角色原名。")
                 }
                 else -> LazyColumn(
                     contentPadding = rememberIgngPageContentPadding(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    itemsIndexed(results, key = { i, r -> "${r.kind}:${r.igngId}:${r.mcUsername}:$i" }) { idx, item ->
+                    itemsIndexed(holder.results, key = { i, r -> "${r.kind}:${r.igngId}:${r.mcUsername}:$i" }) { idx, item ->
                         IgngInteractiveTile(
                             onClick = {
                                 val targetIgngId = item.igngId
@@ -372,6 +449,12 @@ fun GlobalSearchScreen(
     }
 }
 
+private data class PlayerPassportBundle(
+    val profile: PublicPlayerProfileResponse,
+    val stats: VanillaStatsResponse?,
+    val medals: MedalProfileDto?,
+)
+
 @Composable
 fun PlayerPassportScreen(
     igngId: Int,
@@ -380,24 +463,32 @@ fun PlayerPassportScreen(
     onOpenMcCharacter: (String) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
-    var profile by remember { mutableStateOf<PublicPlayerProfileResponse?>(null) }
-    var stats by remember { mutableStateOf<VanillaStatsResponse?>(null) }
-    var medals by remember { mutableStateOf<MedalProfileDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(igngId) {
-        loading = true
-        error = null
-        val pDef = scope.async { runCatching { exploreRepository.fetchPlayerProfile(igngId) } }
-        val sDef = scope.async { runCatching { exploreRepository.fetchPlayerProfileStats(igngId) } }
-        val mDef = scope.async { runCatching { exploreRepository.fetchPlayerProfileMedals(igngId) } }
-        pDef.await().onSuccess { profile = it }.onFailure { error = it.message ?: "玩家主页没有读到" }
-        sDef.await().onSuccess { stats = it }
-        mDef.await().onSuccess { medals = it }
-        loading = false
+    val (bundleState, bundleHandle) = rememberSwrResource<PlayerPassportBundle>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.playerPassport(igngId),
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Detail,
+        slotKey = "passport_$igngId",
+    ) {
+        runSuspendCatching {
+            coroutineScope {
+                val pDef = async { exploreRepository.fetchPlayerProfile(igngId) }
+                val sDef = async { runSuspendCatching { exploreRepository.fetchPlayerProfileStats(igngId) }.getOrNull() }
+                val mDef = async { runSuspendCatching { exploreRepository.fetchPlayerProfileMedals(igngId) }.getOrNull() }
+                PlayerPassportBundle(
+                    profile = pDef.await(),
+                    stats = sDef.await(),
+                    medals = mDef.await(),
+                )
+            }
+        }
     }
+
+    val profile = bundleState.data?.profile
+    val stats = bundleState.data?.stats
+    val medals = bundleState.data?.medals
+    val loading = bundleState.isInitialLoading
+    val error = bundleState.error
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
@@ -406,12 +497,23 @@ fun PlayerPassportScreen(
                 subtitle = "账户编号 #$igngId",
                 onBack = onBack,
             )
-            when {
-                loading -> IgngLoadingBlock(fill = true)
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "无法读取玩家主页", description = error, isError = true)
-                }
-                profile != null -> {
+            IgngPullToRefreshBox(
+                isRefreshing = bundleState.isUserRefreshing,
+                onRefresh = { bundleHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> IgngLoadingBlock(fill = true)
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = "无法读取玩家主页",
+                            description = error,
+                            isError = true,
+                            actionLabel = "重试",
+                            onAction = { bundleHandle.refresh() },
+                        )
+                    }
+                    profile != null -> {
                     val data = profile!!
                     LazyColumn(
                         contentPadding = rememberIgngPageContentPadding(),
@@ -526,6 +628,7 @@ fun PlayerPassportScreen(
                         }
                     }
                 }
+                }
             }
         }
     }
@@ -539,27 +642,39 @@ fun McCharacterPublicScreen(
     onOpenPassport: (Int) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    var profile by remember { mutableStateOf<McCharacterProfileResponse?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(username) {
-        loading = true
-        runCatching { exploreRepository.fetchMcCharacter(username) }
-            .onSuccess { profile = it }
-            .onFailure { error = it.message ?: "角色档案没有读到" }
-        loading = false
+    val (profileState, profileHandle) = rememberSwrResource<McCharacterProfileResponse>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.mcCharacter(username),
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Detail,
+        slotKey = "mc_char_$username",
+    ) {
+        runSuspendCatching { exploreRepository.fetchMcCharacter(username) }
     }
+    val profile = profileState.data
+    val loading = profileState.isInitialLoading
+    val error = profileState.error
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = username, subtitle = "Minecraft 角色公开档案", onBack = onBack)
-            when {
-                loading -> IgngLoadingBlock(fill = true)
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "读取失败", description = error, isError = true)
-                }
-                profile != null -> {
+            IgngPullToRefreshBox(
+                isRefreshing = profileState.isUserRefreshing,
+                onRefresh = { profileHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> IgngLoadingBlock(fill = true)
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = "读取失败",
+                            description = error,
+                            isError = true,
+                            actionLabel = "重试",
+                            onAction = { profileHandle.refresh() },
+                        )
+                    }
+                    profile != null -> {
                     val data = profile!!
                     LazyColumn(
                         contentPadding = rememberIgngPageContentPadding(),
@@ -600,6 +715,7 @@ fun McCharacterPublicScreen(
                         }
                     }
                 }
+                }
             }
         }
     }
@@ -611,6 +727,11 @@ private enum class HallTab(val label: String) {
     TICKETS("公开工单"),
 }
 
+private class CommunityHallUiHolder {
+    var tab by mutableStateOf(HallTab.LANDS)
+    var search by mutableStateOf("")
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CommunityHallScreen(
@@ -619,28 +740,65 @@ fun CommunityHallScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf(HallTab.LANDS) }
-    var search by remember { mutableStateOf("") }
-    var lands by remember { mutableStateOf<List<HallLandDto>>(emptyList()) }
-    var fakes by remember { mutableStateOf<List<HallFakePlayerDto>>(emptyList()) }
-    var tickets by remember { mutableStateOf<List<TicketSummaryDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val uiHolder = rememberScreenHolder("community_hall_ui") { CommunityHallUiHolder() }
     var selectedLand by remember { mutableStateOf<HallLandDto?>(null) }
     var selectedTicketDetail by remember { mutableStateOf<TicketDetailDto?>(null) }
     var loadingTicketDetail by remember { mutableStateOf(false) }
 
-    LaunchedEffect(tab) {
-        loading = true
-        error = null
-        runCatching {
-            when (tab) {
-                HallTab.LANDS -> lands = exploreRepository.fetchPublicLands()
-                HallTab.FAKES -> fakes = exploreRepository.fetchPublicFakePlayers()
-                HallTab.TICKETS -> tickets = exploreRepository.fetchPublicTickets().resolvedTickets
-            }
-        }.onFailure { error = it.message ?: "社区大厅数据没有读到" }
-        loading = false
+    val (landsState, landsHandle) = rememberSwrResource<List<HallLandDto>>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.HALL_LANDS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.HALL),
+        enabled = uiHolder.tab == HallTab.LANDS,
+        slotKey = "hall_lands",
+    ) { runSuspendCatching { exploreRepository.fetchPublicLands() } }
+
+    val (fakesState, fakesHandle) = rememberSwrResource<List<HallFakePlayerDto>>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.HALL_FAKES,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Realtime,
+        tags = setOf(McCacheTags.HALL),
+        enabled = uiHolder.tab == HallTab.FAKES,
+        slotKey = "hall_fakes",
+    ) { runSuspendCatching { exploreRepository.fetchPublicFakePlayers() } }
+
+    val (ticketsState, ticketsHandle) = rememberSwrResource<List<TicketSummaryDto>>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.HALL_TICKETS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.HALL),
+        enabled = uiHolder.tab == HallTab.TICKETS,
+        slotKey = "hall_tickets",
+    ) { runSuspendCatching { exploreRepository.fetchPublicTickets().resolvedTickets } }
+
+    val lands = landsState.data.orEmpty()
+    val fakes = fakesState.data.orEmpty()
+    val tickets = ticketsState.data.orEmpty()
+    val loading = when (uiHolder.tab) {
+        HallTab.LANDS -> landsState.isInitialLoading
+        HallTab.FAKES -> fakesState.isInitialLoading
+        HallTab.TICKETS -> ticketsState.isInitialLoading
+    }
+    val refreshing = when (uiHolder.tab) {
+        HallTab.LANDS -> landsState.isUserRefreshing
+        HallTab.FAKES -> fakesState.isUserRefreshing
+        HallTab.TICKETS -> ticketsState.isUserRefreshing
+    }
+    val error = when (uiHolder.tab) {
+        HallTab.LANDS -> landsState.error
+        HallTab.FAKES -> fakesState.error
+        HallTab.TICKETS -> ticketsState.error
+    }
+    fun refreshActiveTab() {
+        when (uiHolder.tab) {
+            HallTab.LANDS -> landsHandle.refresh()
+            HallTab.FAKES -> fakesHandle.refresh()
+            HallTab.TICKETS -> ticketsHandle.refresh()
+        }
     }
 
     IgngAmbientCanvas {
@@ -649,47 +807,39 @@ fun CommunityHallScreen(
             Column(modifier = Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 IgngSegmentedTabs(
                     items = HallTab.entries,
-                    selected = tab,
+                    selected = uiHolder.tab,
                     labelOf = { it.label },
-                    onSelect = { tab = it; search = "" },
+                    onSelect = { uiHolder.tab = it; uiHolder.search = "" },
                 )
                 IgngSearchField(
-                    value = search,
-                    onValueChange = { search = it },
+                    value = uiHolder.search,
+                    onValueChange = { uiHolder.search = it },
                     placeholder = "筛选名称、玩家或服务器…",
                 )
             }
             Spacer(Modifier.height(10.dp))
-            when {
-                loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(
-                        title = "读取失败",
-                        description = error,
-                        isError = true,
-                        actionLabel = "重试",
-                        onAction = {
-                            scope.launch {
-                                loading = true
-                                error = null
-                                runCatching {
-                                    when (tab) {
-                                        HallTab.LANDS -> lands = exploreRepository.fetchPublicLands()
-                                        HallTab.FAKES -> fakes = exploreRepository.fetchPublicFakePlayers()
-                                        HallTab.TICKETS -> tickets = exploreRepository.fetchPublicTickets().resolvedTickets
-                                    }
-                                }.onFailure { error = it.message }
-                                loading = false
-                            }
-                        },
-                    )
-                }
-                else -> LazyColumn(
-                    contentPadding = rememberIgngPageContentPadding(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    val q = search.trim().lowercase()
-                    when (tab) {
+            IgngPullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = { refreshActiveTab() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> Box(Modifier.padding(16.dp)) { IgngSkeletonRows(4) }
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = "读取失败",
+                            description = error,
+                            isError = true,
+                            actionLabel = "重试",
+                            onAction = { refreshActiveTab() },
+                        )
+                    }
+                    else -> LazyColumn(
+                        contentPadding = rememberIgngPageContentPadding(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        val q = uiHolder.search.trim().lowercase()
+                        when (uiHolder.tab) {
                         HallTab.LANDS -> {
                             val filtered = lands.filter {
                                 q.isEmpty() || it.name.lowercase().contains(q) || it.ownerName.lowercase().contains(q) || it.serverName.lowercase().contains(q)
@@ -775,6 +925,7 @@ fun CommunityHallScreen(
                         }
                     }
                 }
+                }
             }
         }
     }
@@ -836,17 +987,18 @@ fun PerfectRosterScreen(
     onOpenPassport: (Int) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    var roster by remember { mutableStateOf<PublicPerfectRosterResponse?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        loading = true
-        runCatching { exploreRepository.fetchPublicPerfectRoster() }
-            .onSuccess { roster = it }
-            .onFailure { error = it.message ?: "完美之人名录暂时不可用" }
-        loading = false
+    val (rosterState, rosterHandle) = rememberSwrResource<PublicPerfectRosterResponse>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.PERFECT_ROSTER,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Detail,
+        slotKey = "perfect_roster",
+    ) {
+        runSuspendCatching { exploreRepository.fetchPublicPerfectRoster() }
     }
+    val roster = rosterState.data
+    val loading = rosterState.isInitialLoading
+    val error = rosterState.error
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
@@ -855,12 +1007,23 @@ fun PerfectRosterScreen(
                 subtitle = roster?.let { "共 ${it.resolvedTotal} 位认证成员" },
                 onBack = onBack,
             )
-            when {
-                loading -> IgngLoadingBlock(fill = true)
-                error != null -> Box(Modifier.padding(16.dp)) {
-                    IgngStateBlock(title = "读取失败", description = error, isError = true)
-                }
-                roster != null -> {
+            IgngPullToRefreshBox(
+                isRefreshing = rosterState.isUserRefreshing,
+                onRefresh = { rosterHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    loading -> IgngLoadingBlock(fill = true)
+                    error != null -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = "读取失败",
+                            description = error,
+                            isError = true,
+                            actionLabel = "重试",
+                            onAction = { rosterHandle.refresh() },
+                        )
+                    }
+                    roster != null -> {
                     val data = roster!!
                     LazyColumn(
                         contentPadding = rememberIgngPageContentPadding(),
@@ -966,6 +1129,7 @@ fun PerfectRosterScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }

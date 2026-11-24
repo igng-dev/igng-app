@@ -21,7 +21,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,7 +37,24 @@ import net.igng.bbs.core.data.AdminManageRiskRequest
 import net.igng.bbs.core.data.AdminUpdateColumnRequest
 import net.igng.bbs.core.data.AdminUpdatePostRequest
 import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.model.AdminReviewItemDto
+import net.igng.bbs.core.model.AdminRiskEntryDto
+import net.igng.bbs.core.model.AdminUserRowDto
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.ColumnSummaryDto
+import net.igng.bbs.core.model.ListWrapperDto
+import net.igng.bbs.core.model.PaginatedResponseDto
+import net.igng.bbs.core.model.PostSummaryDto
+import net.igng.bbs.core.model.SeriesSummaryDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngEmptyTile
+import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
@@ -50,13 +66,6 @@ import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.rememberIgngPageContentPadding
-import net.igng.bbs.core.model.AdminReviewItemDto
-import net.igng.bbs.core.model.AdminRiskEntryDto
-import net.igng.bbs.core.model.AdminUserRowDto
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.ColumnSummaryDto
-import net.igng.bbs.core.model.PostSummaryDto
-import net.igng.bbs.core.model.SeriesSummaryDto
 import net.igng.core.network.ApiResult
 
 private enum class AdminTab(val label: String) {
@@ -66,6 +75,17 @@ private enum class AdminTab(val label: String) {
     RISK("双域风控"),
     USERS("用户检索"),
     COLLECTIONS("专栏与系列"),
+}
+
+private data class AdminCollectionsSnapshot(
+    val columns: List<ColumnSummaryDto>,
+    val series: List<SeriesSummaryDto>,
+)
+
+private class AdminConsoleUiHolder {
+    val selectedTabState = mutableStateOf(AdminTab.REVIEWS)
+    val searchState = mutableStateOf("")
+    val submittedSearchState = mutableStateOf("")
 }
 
 @Composable
@@ -79,20 +99,143 @@ fun AdminConsoleScreen(
     val scope = rememberCoroutineScope()
     val bootstrap by container.bootstrap.collectAsState()
     val adminAccess = bootstrap?.viewer?.admin
+    val isBbsAdmin = adminAccess?.isBbsAdmin == true
 
-    var selectedTab by remember { mutableStateOf(AdminTab.REVIEWS) }
-    var search by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
+    val holder = rememberScreenHolder("bbs_admin_console_ui") { AdminConsoleUiHolder() }
+    var selectedTab by holder.selectedTabState
+    var search by holder.searchState
+    var submittedSearch by holder.submittedSearchState
+
+    val queryParam = submittedSearch.ifBlank { null }
+
+    // 6 independent memory-only (USER_ONLY, no diskCodec) SWR slots so switching tabs never re-blanks loaded tabs
+    val (postsState, postsHandle) = rememberSwrResource<PaginatedResponseDto<PostSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.adminPosts(submittedSearch),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.ADMIN),
+        enabled = isBbsAdmin && selectedTab == AdminTab.POSTS,
+        slotKey = "bbs_admin_posts",
+    ) {
+        container.adminRepository.listPosts(query = queryParam).toKotlinResult()
+    }
+
+    val (reviewsState, reviewsHandle) = rememberSwrResource<PaginatedResponseDto<AdminReviewItemDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.ADMIN_REVIEWS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.ADMIN),
+        enabled = isBbsAdmin && selectedTab == AdminTab.REVIEWS,
+        slotKey = "bbs_admin_reviews",
+    ) {
+        container.adminRepository.listReviews().toKotlinResult()
+    }
+
+    val (reportsState, reportsHandle) = rememberSwrResource<PaginatedResponseDto<AdminReviewItemDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.ADMIN_REPORTS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.ADMIN),
+        enabled = isBbsAdmin && selectedTab == AdminTab.REPORTS,
+        slotKey = "bbs_admin_reports",
+    ) {
+        container.adminRepository.listReports().toKotlinResult()
+    }
+
+    val (riskState, riskHandle) = rememberSwrResource<ListWrapperDto<AdminRiskEntryDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.ADMIN_RISK,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.ADMIN),
+        enabled = isBbsAdmin && selectedTab == AdminTab.RISK,
+        slotKey = "bbs_admin_risk",
+    ) {
+        container.adminRepository.listRiskStates().toKotlinResult()
+    }
+
+    val (usersState, usersHandle) = rememberSwrResource<PaginatedResponseDto<AdminUserRowDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.adminUsers(submittedSearch),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.ADMIN),
+        enabled = isBbsAdmin && adminAccess?.canManageUsers == true && selectedTab == AdminTab.USERS,
+        slotKey = "bbs_admin_users",
+    ) {
+        container.adminRepository.listUsers(query = queryParam).toKotlinResult()
+    }
+
+    val (collectionsState, collectionsHandle) = rememberSwrResource<AdminCollectionsSnapshot>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.adminCollections(submittedSearch),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.ADMIN),
+        enabled = isBbsAdmin && selectedTab == AdminTab.COLLECTIONS,
+        slotKey = "bbs_admin_collections",
+    ) {
+        val colsRes = container.adminRepository.listColumns(query = queryParam)
+        val serRes = container.adminRepository.listSeries(query = queryParam)
+        when (colsRes) {
+            is ApiResult.Success -> Result.success(
+                AdminCollectionsSnapshot(
+                    columns = colsRes.data.data,
+                    series = (serRes as? ApiResult.Success)?.data?.data.orEmpty(),
+                ),
+            )
+            is ApiResult.Failure -> Result.failure(colsRes.error)
+        }
+    }
+
+    fun refreshCurrent(userInitiated: Boolean) {
+        when (selectedTab) {
+            AdminTab.POSTS -> if (userInitiated) postsHandle.refresh() else postsHandle.silentRefresh()
+            AdminTab.REVIEWS -> if (userInitiated) reviewsHandle.refresh() else reviewsHandle.silentRefresh()
+            AdminTab.REPORTS -> if (userInitiated) reportsHandle.refresh() else reportsHandle.silentRefresh()
+            AdminTab.RISK -> if (userInitiated) riskHandle.refresh() else riskHandle.silentRefresh()
+            AdminTab.USERS -> if (userInitiated) usersHandle.refresh() else usersHandle.silentRefresh()
+            AdminTab.COLLECTIONS -> if (userInitiated) collectionsHandle.refresh() else collectionsHandle.silentRefresh()
+        }
+    }
+
+    val currentInitialLoading = when (selectedTab) {
+        AdminTab.POSTS -> postsState.isInitialLoading && postsState.data == null
+        AdminTab.REVIEWS -> reviewsState.isInitialLoading && reviewsState.data == null
+        AdminTab.REPORTS -> reportsState.isInitialLoading && reportsState.data == null
+        AdminTab.RISK -> riskState.isInitialLoading && riskState.data == null
+        AdminTab.USERS -> usersState.isInitialLoading && usersState.data == null
+        AdminTab.COLLECTIONS -> collectionsState.isInitialLoading && collectionsState.data == null
+    }
+    val currentRefreshing = when (selectedTab) {
+        AdminTab.POSTS -> postsState.isUserRefreshing
+        AdminTab.REVIEWS -> reviewsState.isUserRefreshing
+        AdminTab.REPORTS -> reportsState.isUserRefreshing
+        AdminTab.RISK -> riskState.isUserRefreshing
+        AdminTab.USERS -> usersState.isUserRefreshing
+        AdminTab.COLLECTIONS -> collectionsState.isUserRefreshing
+    }
+    val currentError = when (selectedTab) {
+        AdminTab.POSTS -> if (postsState.data == null) postsState.error else null
+        AdminTab.REVIEWS -> if (reviewsState.data == null) reviewsState.error else null
+        AdminTab.REPORTS -> if (reportsState.data == null) reportsState.error else null
+        AdminTab.RISK -> if (riskState.data == null) riskState.error else null
+        AdminTab.USERS -> if (usersState.data == null) usersState.error else null
+        AdminTab.COLLECTIONS -> if (collectionsState.data == null) collectionsState.error else null
+    }
+
+    val posts = postsState.data?.data.orEmpty()
+    val reviews = reviewsState.data?.data.orEmpty()
+    val reports = reportsState.data?.data.orEmpty()
+    val riskEntries = riskState.data?.data.orEmpty()
+    val users = usersState.data?.data.orEmpty()
+    val columns = collectionsState.data?.columns.orEmpty()
+    val series = collectionsState.data?.series.orEmpty()
+
     var notice by remember { mutableStateOf<String?>(null) }
-
-    var posts by remember { mutableStateOf<List<PostSummaryDto>>(emptyList()) }
-    var reviews by remember { mutableStateOf<List<AdminReviewItemDto>>(emptyList()) }
-    var reports by remember { mutableStateOf<List<AdminReviewItemDto>>(emptyList()) }
-    var riskEntries by remember { mutableStateOf<List<AdminRiskEntryDto>>(emptyList()) }
-    var users by remember { mutableStateOf<List<AdminUserRowDto>>(emptyList()) }
-    var columns by remember { mutableStateOf<List<ColumnSummaryDto>>(emptyList()) }
-    var series by remember { mutableStateOf<List<SeriesSummaryDto>>(emptyList()) }
 
     // Manual risk dialog
     var showRiskDialog by remember { mutableStateOf(false) }
@@ -105,51 +248,6 @@ fun AdminConsoleScreen(
     var decideDialogTarget by remember { mutableStateOf<Triple<String, Boolean, Boolean>?>(null) } // (id, isReport, approveOrDismiss)
     var decideReason by remember { mutableStateOf("") }
 
-    suspend fun loadCurrent(isRefresh: Boolean) {
-        if (adminAccess?.isBbsAdmin != true) {
-            loading = false
-            return
-        }
-        if (isRefresh) refreshing = true else loading = true
-        val q = search.trim().ifBlank { null }
-        when (selectedTab) {
-            AdminTab.POSTS -> when (val r = container.adminRepository.listPosts(query = q)) {
-                is ApiResult.Success -> posts = r.data.data
-                is ApiResult.Failure -> notice = r.error.message
-            }
-            AdminTab.REVIEWS -> when (val r = container.adminRepository.listReviews()) {
-                is ApiResult.Success -> reviews = r.data.data
-                is ApiResult.Failure -> notice = r.error.message
-            }
-            AdminTab.REPORTS -> when (val r = container.adminRepository.listReports()) {
-                is ApiResult.Success -> reports = r.data.data
-                is ApiResult.Failure -> notice = r.error.message
-            }
-            AdminTab.RISK -> when (val r = container.adminRepository.listRiskStates()) {
-                is ApiResult.Success -> riskEntries = r.data.data
-                is ApiResult.Failure -> notice = r.error.message
-            }
-            AdminTab.USERS -> when (val r = container.adminRepository.listUsers(query = q)) {
-                is ApiResult.Success -> users = r.data.data
-                is ApiResult.Failure -> notice = r.error.message
-            }
-            AdminTab.COLLECTIONS -> {
-                when (val r = container.adminRepository.listColumns(query = q)) {
-                    is ApiResult.Success -> columns = r.data.data
-                    is ApiResult.Failure -> notice = r.error.message
-                }
-                when (val s = container.adminRepository.listSeries(query = q)) {
-                    is ApiResult.Success -> series = s.data.data
-                    is ApiResult.Failure -> Unit
-                }
-            }
-        }
-        loading = false
-        refreshing = false
-    }
-
-    LaunchedEffect(selectedTab, adminAccess?.isBbsAdmin) { loadCurrent(false) }
-
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
             title = "BBS 社区治理控制台",
@@ -157,7 +255,7 @@ fun AdminConsoleScreen(
             onBack = onBack,
         )
 
-        if (adminAccess?.isBbsAdmin != true) {
+        if (!isBbsAdmin) {
             Box(Modifier.padding(16.dp)) {
                 IgngEmptyTile(
                     title = "当前账户无 BBS 管理权限",
@@ -167,7 +265,7 @@ fun AdminConsoleScreen(
             return
         }
 
-        val visibleTabs = AdminTab.entries.filter { it != AdminTab.USERS || adminAccess.canManageUsers }
+        val visibleTabs = AdminTab.entries.filter { it != AdminTab.USERS || adminAccess?.canManageUsers == true }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visibleTabs, key = { it.name }) { tab ->
                 IgngTagChip(text = tab.label, selected = selectedTab == tab, onClick = { selectedTab = tab })
@@ -188,20 +286,33 @@ fun AdminConsoleScreen(
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                IgngTagChip("查询", tone = IgngTone.ACCENT, onClick = { scope.launch { loadCurrent(true) } })
+                IgngTagChip(
+                    "查询",
+                    tone = IgngTone.ACCENT,
+                    onClick = {
+                        val trimmed = search.trim()
+                        if (trimmed == submittedSearch) {
+                            refreshCurrent(userInitiated = true)
+                        } else {
+                            submittedSearch = trimmed
+                        }
+                    },
+                )
             }
             Spacer(Modifier.height(8.dp))
         }
 
         IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { scope.launch { loadCurrent(true) } },
+            isRefreshing = currentRefreshing,
+            onRefresh = { refreshCurrent(userInitiated = true) },
             modifier = Modifier.weight(1f),
         ) {
-            if (loading) {
-                IgngLoadingCenter(loading = true)
-            } else {
-                LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            when {
+                currentInitialLoading -> IgngLoadingCenter(loading = true)
+                currentError != null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = currentError, onRetry = { refreshCurrent(userInitiated = true) })
+                }
+                else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     notice?.let { item { IgngInfoBanner("操作结果", it, IgngTone.ACCENT) } }
 
                     when (selectedTab) {
@@ -214,11 +325,11 @@ fun AdminConsoleScreen(
                                     Spacer(Modifier.height(8.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         item { IgngTagChip("查看", onClick = { onOpenPost(p.id) }) }
-                                        item { IgngTagChip("恢复正常", tone = IgngTone.SUCCESS, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 0)); notice = "已恢复正常"; loadCurrent(true) } }) }
-                                        item { IgngTagChip("仅作者可见", tone = IgngTone.WARNING, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 1)); notice = "已设为仅作者可见"; loadCurrent(true) } }) }
-                                        item { IgngTagChip("受限提示", tone = IgngTone.WARNING, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 4)); notice = "已设为受限提示"; loadCurrent(true) } }) }
-                                        item { IgngTagChip("禁止查看", tone = IgngTone.DANGER, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 2)); notice = "已禁止查看"; loadCurrent(true) } }) }
-                                        item { IgngTagChip("软删除", tone = IgngTone.DANGER, onClick = { scope.launch { container.adminRepository.deletePost(p.id); notice = "文章已软删除"; loadCurrent(true) } }) }
+                                        item { IgngTagChip("恢复正常", tone = IgngTone.SUCCESS, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 0)); notice = "已恢复正常"; refreshCurrent(false) } }) }
+                                        item { IgngTagChip("仅作者可见", tone = IgngTone.WARNING, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 1)); notice = "已设为仅作者可见"; refreshCurrent(false) } }) }
+                                        item { IgngTagChip("受限提示", tone = IgngTone.WARNING, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 4)); notice = "已设为受限提示"; refreshCurrent(false) } }) }
+                                        item { IgngTagChip("禁止查看", tone = IgngTone.DANGER, onClick = { scope.launch { container.adminRepository.updatePost(p.id, AdminUpdatePostRequest(banStatus = 2)); notice = "已禁止查看"; refreshCurrent(false) } }) }
+                                        item { IgngTagChip("软删除", tone = IgngTone.DANGER, onClick = { scope.launch { container.adminRepository.deletePost(p.id); notice = "文章已软删除"; refreshCurrent(false) } }) }
                                     }
                                 }
                             }
@@ -240,7 +351,7 @@ fun AdminConsoleScreen(
                                         IgngTagChip("通过", tone = IgngTone.SUCCESS, onClick = {
                                             scope.launch {
                                                 when (val r = container.adminRepository.decideReview(rev.id, AdminDecideReviewRequest("approve"))) {
-                                                    is ApiResult.Success -> { notice = "已批准 ${rev.id}"; loadCurrent(true) }
+                                                    is ApiResult.Success -> { notice = "已批准 ${rev.id}"; refreshCurrent(false) }
                                                     is ApiResult.Failure -> notice = r.error.message
                                                 }
                                             }
@@ -273,7 +384,7 @@ fun AdminConsoleScreen(
                                         IgngTagChip("驳回举报（正常）", tone = IgngTone.SUCCESS, onClick = {
                                             scope.launch {
                                                 when (val r = container.adminRepository.decideReport(rep.id, AdminDecideReportRequest("dismiss"))) {
-                                                    is ApiResult.Success -> { notice = "已驳回该举报"; loadCurrent(true) }
+                                                    is ApiResult.Success -> { notice = "已驳回该举报"; refreshCurrent(false) }
                                                     is ApiResult.Failure -> notice = r.error.message
                                                 }
                                             }
@@ -299,7 +410,7 @@ fun AdminConsoleScreen(
                                         IgngTagChip("解除", tone = IgngTone.SUCCESS, onClick = {
                                             scope.launch {
                                                 when (val r = container.adminRepository.manageRisk(AdminManageRiskRequest(entry.user.id, entry.scope, "clear"))) {
-                                                    is ApiResult.Success -> { notice = "已解除 ${entry.user.displayName} 的 ${entry.scope} 风控"; loadCurrent(true) }
+                                                    is ApiResult.Success -> { notice = "已解除 ${entry.user.displayName} 的 ${entry.scope} 风控"; refreshCurrent(false) }
                                                     is ApiResult.Failure -> notice = r.error.message
                                                 }
                                             }
@@ -333,10 +444,10 @@ fun AdminConsoleScreen(
                                     Spacer(Modifier.height(6.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         IgngTagChip("恢复简介状态", onClick = {
-                                            scope.launch { container.adminRepository.updateColumn(c.id, AdminUpdateColumnRequest(bioStatus = 0)); notice = "已更新专栏状态"; loadCurrent(true) }
+                                            scope.launch { container.adminRepository.updateColumn(c.id, AdminUpdateColumnRequest(bioStatus = 0)); notice = "已更新专栏状态"; refreshCurrent(false) }
                                         })
                                         IgngTagChip("设为仅受邀", tone = IgngTone.WARNING, onClick = {
-                                            scope.launch { container.adminRepository.updateColumn(c.id, AdminUpdateColumnRequest(joinMode = "invite_only")); notice = "已设为仅受邀"; loadCurrent(true) }
+                                            scope.launch { container.adminRepository.updateColumn(c.id, AdminUpdateColumnRequest(joinMode = "invite_only")); notice = "已设为仅受邀"; refreshCurrent(false) }
                                         })
                                     }
                                 }
@@ -350,7 +461,7 @@ fun AdminConsoleScreen(
                                             Text("${s.postCount} 篇 · 作者 ${s.creator?.displayName ?: "—"}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
                                         }
                                         IgngTagChip("删除", tone = IgngTone.DANGER, onClick = {
-                                            scope.launch { container.adminRepository.deleteSeries(s.id); notice = "已删除系列"; loadCurrent(true) }
+                                            scope.launch { container.adminRepository.deleteSeries(s.id); notice = "已删除系列"; refreshCurrent(false) }
                                         })
                                     }
                                 }
@@ -377,7 +488,7 @@ fun AdminConsoleScreen(
                             container.adminRepository.decideReview(id, AdminDecideReviewRequest("reject", reason = decideReason.trim().ifBlank { null }))
                         }
                         when (r) {
-                            is ApiResult.Success -> { notice = "处置已完成"; loadCurrent(true) }
+                            is ApiResult.Success -> { notice = "处置已完成"; refreshCurrent(false) }
                             is ApiResult.Failure -> notice = r.error.message
                         }
                     }
@@ -407,16 +518,18 @@ fun AdminConsoleScreen(
                     if (riskUserId.isBlank()) return@TextButton
                     showRiskDialog = false
                     scope.launch {
-                        when (val r = container.adminRepository.manageRisk(
-                            AdminManageRiskRequest(
-                                userId = riskUserId.trim(),
-                                scope = riskScope,
-                                action = "set",
-                                days = riskDays.toIntOrNull()?.coerceIn(1, 365) ?: 30,
-                                reason = riskReason.trim().ifBlank { null },
-                            ),
-                        )) {
-                            is ApiResult.Success -> { notice = "已设置 ${riskUserId} 的 $riskScope 风控"; riskUserId = ""; riskReason = ""; loadCurrent(true) }
+                        when (
+                            val r = container.adminRepository.manageRisk(
+                                AdminManageRiskRequest(
+                                    userId = riskUserId.trim(),
+                                    scope = riskScope,
+                                    action = "set",
+                                    days = riskDays.toIntOrNull()?.coerceIn(1, 365) ?: 30,
+                                    reason = riskReason.trim().ifBlank { null },
+                                ),
+                            )
+                        ) {
+                            is ApiResult.Success -> { notice = "已设置 $riskUserId 的 $riskScope 风控"; riskUserId = ""; riskReason = ""; refreshCurrent(false) }
                             is ApiResult.Failure -> notice = r.error.message
                         }
                     }

@@ -81,6 +81,8 @@ import net.igng.bbs.feature.profile.PrivacyPreferencesScreen
 import net.igng.bbs.feature.profile.ProfileCenterScreen
 import net.igng.bbs.feature.profile.ReadingHistoryScreen
 import net.igng.bbs.feature.profile.UserProfileScreen
+import net.igng.core.data.LaunchedAppForegroundResumeEffect
+import net.igng.core.data.LaunchedForegroundPollingEffect
 import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngButton
@@ -151,11 +153,33 @@ fun BbsAppRoot(
 
         // Initial hydration + bootstrap + daily login settlement
         LaunchedEffect(activeAccount?.userId, sessionEpoch) {
+            container.syncSessionStampNow()
             container.hydrateCachedBootstrap()
-            container.refreshBootstrap()
+            container.refreshBootstrap(force = true)
             if (activeAccount != null && sessionAuthStatus == SessionAuthStatus.ACTIVE) {
                 container.settleDailyLoginIfNeeded()
             }
+        }
+
+        // Silent foreground resume refresh after returning from >= 30s background
+        LaunchedAppForegroundResumeEffect(minBackgroundMs = 30_000L) {
+            container.refreshBootstrapIfStale()
+        }
+
+        // Keep unread inbox dot & viewer state silently up to date while app stays foregrounded
+        LaunchedForegroundPollingEffect(
+            intervalMs = 60_000L,
+            key1 = activeAccount?.userId,
+            key2 = sessionAuthStatus,
+            enabled = activeAccount != null && !sessionAuthStatus.requiresReauth,
+        ) {
+            container.refreshBootstrap(force = true)
+        }
+
+        // Cold-start idle prefetch for sibling top-level tabs after first frame settles
+        LaunchedEffect(activeAccount?.userId, sessionEpoch) {
+            delay(750L)
+            container.prefetchIdleTabs()
         }
 
         // Prompt once for legacy sessions requiring OAuth 2.1 re-auth

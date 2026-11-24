@@ -37,11 +37,9 @@ import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,10 +49,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.mcstatus.core.data.ExploreRepository
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
+import net.igng.mcstatus.core.data.McDiskCodecs
 import net.igng.mcstatus.core.data.PublicServerStatusDto
+import net.igng.mcstatus.core.data.PublicStatusResponse
 import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.mcstatus.core.data.ServerSeasonDto
 import net.igng.mcstatus.core.data.StatusRepository
@@ -82,6 +87,11 @@ import net.igng.core.model.SavedAccount
 import net.igng.mcstatus.core.model.ServerThemeKey
 import net.igng.core.model.SessionAuthStatus
 
+private class ExploreSelectionHolder {
+    var selectedFamilySlug by mutableStateOf<String?>(null)
+    var selectedSeasonSlug by mutableStateOf<String?>(null)
+}
+
 @Composable
 fun ExploreScreen(
     exploreRepository: ExploreRepository,
@@ -97,52 +107,51 @@ fun ExploreScreen(
     onOpenPerfectWall: () -> Unit,
     onOpenMyProfile: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     val colors = IgngTheme.colors
     val haptic = rememberIgngHaptics()
+    val selection = rememberScreenHolder("explore_selection") { ExploreSelectionHolder() }
 
-    var families by remember { mutableStateOf<List<ServerFamilyDto>>(emptyList()) }
-    var statuses by remember { mutableStateOf<List<PublicServerStatusDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var selectedFamilySlug by remember { mutableStateOf<String?>(null) }
-    var selectedSeasonSlug by remember { mutableStateOf<String?>(null) }
-
-    suspend fun loadData(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else if (families.isEmpty()) loading = true
-        error = null
-        try {
-            if (!isRefresh && families.isEmpty()) {
-                val cached = exploreRepository.readCachedFamilies()
-                if (cached.isNotEmpty()) {
-                    families = cached
-                    loading = false
-                }
-            }
-            val famDef = scope.async { runCatching { exploreRepository.fetchHomeFamilies() } }
-            val statusDef = scope.async { runCatching { statusRepository.fetchPublicStatus() } }
-            val famRes = famDef.await()
-            val statusRes = statusDef.await()
-            famRes.onSuccess { list -> if (list.isNotEmpty()) families = list }
-            statusRes.onSuccess { statuses = it.servers }
-            if (families.isEmpty() && famRes.isFailure) {
-                error = famRes.exceptionOrNull()?.message ?: "服务器目录暂时没有读到"
-            }
-        } finally {
-            loading = false
-            refreshing = false
-        }
+    val (familiesState, familiesHandle) = rememberSwrResource<List<ServerFamilyDto>>(
+        cache = exploreRepository.swrCache,
+        cacheKey = McCacheKeys.SERVERS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Static,
+        tags = setOf(McCacheTags.SERVERS),
+        diskCodec = McDiskCodecs.servers,
+        legacyRawProvider = {
+            val legacy = exploreRepository.readCachedFamilies()
+            if (legacy.isNotEmpty()) McDiskCodecs.servers.encode(legacy) else null
+        },
+        slotKey = "explore_families",
+    ) {
+        runSuspendCatching { exploreRepository.fetchHomeFamilies() }
     }
 
-    LaunchedEffect(Unit) { loadData(isRefresh = false) }
-
-    val selectedFamily = remember(families, selectedFamilySlug) {
-        families.firstOrNull { it.slug == selectedFamilySlug } ?: families.firstOrNull()
+    val (statusState, statusHandle) = rememberSwrResource<PublicStatusResponse>(
+        cache = statusRepository.swrCache,
+        cacheKey = McCacheKeys.STATUS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Status,
+        tags = setOf(McCacheTags.STATUS),
+        diskCodec = McDiskCodecs.status,
+        pollIntervalMs = 30_000L,
+        slotKey = "explore_status",
+    ) {
+        runSuspendCatching { statusRepository.fetchPublicStatus() }
     }
-    val selectedSeason = remember(selectedFamily, selectedSeasonSlug) {
+
+    val families = familiesState.data.orEmpty()
+    val statuses = statusState.data?.servers.orEmpty()
+    val loading = familiesState.isInitialLoading && families.isEmpty()
+    val refreshing = familiesState.isUserRefreshing || statusState.isUserRefreshing
+    val error = if (families.isEmpty()) familiesState.error else null
+
+    val selectedFamily = remember(families, selection.selectedFamilySlug) {
+        families.firstOrNull { it.slug == selection.selectedFamilySlug } ?: families.firstOrNull()
+    }
+    val selectedSeason = remember(selectedFamily, selection.selectedSeasonSlug) {
         val alive = selectedFamily?.aliveSeasons.orEmpty()
-        alive.firstOrNull { it.slug == selectedSeasonSlug }
+        alive.firstOrNull { it.slug == selection.selectedSeasonSlug }
             ?: selectedFamily?.primarySeason
             ?: alive.firstOrNull()
             ?: selectedFamily?.allKnownSeasons?.firstOrNull()
@@ -160,7 +169,10 @@ fun ExploreScreen(
     IgngAmbientCanvas(accentOverride = activeVisual.accent) {
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
-            onRefresh = { scope.launch { loadData(isRefresh = true) } },
+            onRefresh = {
+                familiesHandle.refresh()
+                statusHandle.refresh()
+            },
             modifier = Modifier.fillMaxSize(),
         ) {
             LazyColumn(
@@ -264,7 +276,10 @@ fun ExploreScreen(
                             description = error,
                             isError = true,
                             actionLabel = "重试",
-                            onAction = { scope.launch { loadData(isRefresh = false) } },
+                            onAction = {
+                                familiesHandle.refresh()
+                                statusHandle.refresh()
+                            },
                         )
                         selectedFamily != null -> {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -297,8 +312,8 @@ fun ExploreScreen(
                                                 .border(1.dp, pillBorder, IgngTheme.radii.pill)
                                                 .clickable {
                                                     haptic(IgngHapticKind.Tick)
-                                                    selectedFamilySlug = family.slug
-                                                    selectedSeasonSlug = null
+                                                    selection.selectedFamilySlug = family.slug
+                                                    selection.selectedSeasonSlug = null
                                                 }
                                                 .padding(horizontal = 13.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -327,7 +342,7 @@ fun ExploreScreen(
                                     season = selectedSeason,
                                     status = selectedServerStatus,
                                     themeKey = activeThemeKey,
-                                    onSelectSeason = { selectedSeasonSlug = it.slug },
+                                    onSelectSeason = { selection.selectedSeasonSlug = it.slug },
                                     onOpenMap = { onOpenMap(selectedFamily.slug, selectedSeason?.slug) },
                                     onOpenFamilyDetail = { onOpenFamilyDetail(selectedFamily) },
                                 )

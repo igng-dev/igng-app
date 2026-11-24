@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,11 +41,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.UpdateMySettingsRequest
 import net.igng.bbs.core.data.UpdateUserPreferencesPatch
 import net.igng.bbs.core.model.AppPreferences
 import net.igng.bbs.core.model.BbsUserSettingsDto
 import net.igng.bbs.core.model.BlockRuleDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAboutAppCard
 import net.igng.core.designsystem.IgngAccountVaultCard
 import net.igng.core.designsystem.IgngAmbientCanvas
@@ -51,10 +60,12 @@ import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
 import net.igng.core.designsystem.IgngCacheCard
 import net.igng.core.designsystem.IgngConfirmDialog
 import net.igng.core.designsystem.IgngDevicesSecurityCard
+import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngProfileIdentityCard
+import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngSwitchRow
 import net.igng.core.designsystem.IgngTagChip
@@ -82,9 +93,22 @@ fun AccountSecurityScreen(
     val familyAccounts by container.familyAccounts.collectAsState()
     val bootstrap by container.bootstrap.collectAsState()
 
-    var devices by remember { mutableStateOf<List<CoreDeviceSessionDto>>(emptyList()) }
-    var devicesLoading by remember { mutableStateOf(false) }
-    var devicesError by remember { mutableStateOf<String?>(null) }
+    val authed = activeAccount != null && !sessionAuthStatus.requiresReauth
+    val (devicesState, devicesHandle) = rememberSwrResource<List<CoreDeviceSessionDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.DEVICES,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.DEVICES),
+        enabled = authed,
+        slotKey = "bbs_devices_slot",
+    ) {
+        container.accountRepository.listDevices().toKotlinResult().map { it.data }
+    }
+
+    val devices = devicesState.data.orEmpty()
+    val devicesLoading = devicesState.isInitialLoading || devicesState.isUserRefreshing
+    val devicesError = if (devicesState.data == null) devicesState.error else null
 
     var usernameInput by remember(activeAccount?.username) { mutableStateOf(activeAccount?.username.orEmpty()) }
     var uploadingAvatar by remember { mutableStateOf(false) }
@@ -96,27 +120,8 @@ fun AccountSecurityScreen(
         onShowMessage(msg)
     }
 
-    suspend fun loadDevices() {
-        if (activeAccount == null || sessionAuthStatus.requiresReauth) {
-            devices = emptyList()
-            devicesError = null
-            return
-        }
-        devicesLoading = true
-        devicesError = null
-        when (val r = container.accountRepository.listDevices()) {
-            is ApiResult.Success -> devices = r.data.data
-            is ApiResult.Failure -> devicesError = r.error.message
-        }
-        devicesLoading = false
-    }
-
     LaunchedEffect(Unit) {
         container.refreshFamilyAccounts()
-    }
-
-    LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
-        loadDevices()
     }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
@@ -134,7 +139,7 @@ fun AccountSecurityScreen(
                 when (val r = container.accountRepository.uploadAvatar(payload.third, payload.second, payload.first)) {
                     is ApiResult.Success -> {
                         container.sessionManager.updateActiveProfile(avatarUrl = r.data.avatarUrl)
-                        container.refreshBootstrap()
+                        container.refreshBootstrap(force = true)
                         report("头像已更新并同步")
                     }
                     is ApiResult.Failure -> report(r.error.message)
@@ -189,7 +194,7 @@ fun AccountSecurityScreen(
                     )
                 }
 
-                if (activeAccount != null && !sessionAuthStatus.requiresReauth) {
+                if (authed) {
                     item(key = "profile_identity") {
                         IgngProfileIdentityCard(
                             activeAccount = activeAccount!!,
@@ -209,7 +214,7 @@ fun AccountSecurityScreen(
                                     when (val r = container.accountRepository.updateUsername(next)) {
                                         is ApiResult.Success -> {
                                             container.sessionManager.updateActiveProfile(username = r.data.username)
-                                            container.refreshBootstrap()
+                                            container.refreshBootstrap(force = true)
                                             report("用户名已保存")
                                         }
                                         is ApiResult.Failure -> report(r.error.message)
@@ -225,13 +230,13 @@ fun AccountSecurityScreen(
                             devices = devices,
                             loading = devicesLoading,
                             error = devicesError,
-                            onRefresh = { scope.launch { loadDevices() } },
+                            onRefresh = { devicesHandle.refresh() },
                             onRenameDevice = { deviceId, newName ->
                                 scope.launch {
                                     when (val r = container.accountRepository.renameDevice(deviceId, newName)) {
                                         is ApiResult.Success -> {
                                             report("设备名称已更新")
-                                            loadDevices()
+                                            devicesHandle.silentRefresh()
                                         }
                                         is ApiResult.Failure -> report(r.error.message)
                                     }
@@ -242,7 +247,7 @@ fun AccountSecurityScreen(
                                     when (val r = container.accountRepository.revokeDevice(deviceId)) {
                                         is ApiResult.Success -> {
                                             report("已吊销该设备登录状态")
-                                            loadDevices()
+                                            devicesHandle.silentRefresh()
                                         }
                                         is ApiResult.Failure -> report(r.error.message)
                                     }
@@ -256,6 +261,30 @@ fun AccountSecurityScreen(
     }
 }
 
+private class PrivacyFormUiHolder {
+    val bioState = mutableStateOf("")
+    val allowFollowersState = mutableStateOf(true)
+    val allowFavoritesState = mutableStateOf(true)
+    val hideAiState = mutableStateOf(false)
+    val excludedCatsState = mutableStateOf<Set<String>>(emptySet())
+    val excludedTagsTextState = mutableStateOf("")
+    var isDirty by mutableStateOf(false)
+    var lastSyncedSettings by mutableStateOf<BbsUserSettingsDto?>(null)
+
+    fun syncFromServer(dto: BbsUserSettingsDto, force: Boolean = false) {
+        if (!force && isDirty) return
+        if (!force && lastSyncedSettings == dto) return
+        bioState.value = dto.bio
+        allowFollowersState.value = dto.allowFollowersVisibility
+        allowFavoritesState.value = dto.allowFavoritesVisibility
+        hideAiState.value = dto.preferences.hideAi
+        excludedCatsState.value = dto.preferences.excludedCategoryIds.toSet()
+        excludedTagsTextState.value = dto.preferences.excludedTags.joinToString(", ")
+        lastSyncedSettings = dto
+        isDirty = false
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PrivacyPreferencesScreen(
@@ -265,159 +294,166 @@ fun PrivacyPreferencesScreen(
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val bootstrap by container.bootstrap.collectAsState()
+    val formHolder = rememberScreenHolder("bbs_privacy_form_ui") { PrivacyFormUiHolder() }
 
-    var settings by remember { mutableStateOf<BbsUserSettingsDto?>(null) }
-    var bio by remember { mutableStateOf("") }
-    var allowFollowers by remember { mutableStateOf(true) }
-    var allowFavorites by remember { mutableStateOf(true) }
-    var hideAi by remember { mutableStateOf(false) }
-    var excludedCats by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var excludedTagsText by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(true) }
+    val (settingsState, settingsHandle) = rememberSwrResource<BbsUserSettingsDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.MY_SETTINGS,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Settings,
+        tags = setOf(BbsCacheTags.SETTINGS),
+        slotKey = "bbs_my_settings_slot",
+    ) {
+        container.profileRepository.getMySettings().toKotlinResult()
+    }
+
+    val settings = settingsState.data
+    LaunchedEffect(settings) {
+        settings?.let { formHolder.syncFromServer(it) }
+    }
+
+    var bio by formHolder.bioState
+    var allowFollowers by formHolder.allowFollowersState
+    var allowFavorites by formHolder.allowFavoritesState
+    var hideAi by formHolder.hideAiState
+    var excludedCats by formHolder.excludedCatsState
+    var excludedTagsText by formHolder.excludedTagsTextState
+
     var saving by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var unblockTarget by remember { mutableStateOf<BlockRuleDto?>(null) }
-
-    suspend fun load() {
-        loading = true
-        when (val r = container.profileRepository.getMySettings()) {
-            is ApiResult.Success -> {
-                settings = r.data
-                bio = r.data.bio
-                allowFollowers = r.data.allowFollowersVisibility
-                allowFavorites = r.data.allowFavoritesVisibility
-                hideAi = r.data.preferences.hideAi
-                excludedCats = r.data.preferences.excludedCategoryIds.toSet()
-                excludedTagsText = r.data.preferences.excludedTags.joinToString(", ")
-            }
-            is ApiResult.Failure -> notice = r.error.message
-        }
-        loading = false
-    }
-    LaunchedEffect(Unit) { load() }
 
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "隐私与内容偏好", onBack = onBack)
-            if (loading && settings == null) {
-                IgngLoadingCenter(loading = true)
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 12.dp,
-                        bottom = 24.dp + navBottom,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                    item {
-                        IgngTile {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("个人简介", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                                settings?.bioStatus?.let { st ->
-                                    if (st == 1) IgngTagChip("简介审核中", tone = IgngTone.WARNING)
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            IgngTextField(
-                                value = bio,
-                                onValueChange = { bio = it },
-                                label = "向社区介绍你自己（修改后将进入审核）",
-                                singleLine = false,
-                                minLines = 2,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            IgngSwitchRow("公开我的粉丝与关注列表", allowFollowers, { allowFollowers = it })
-                            IgngSwitchRow("公开我的收藏夹", allowFavorites, { allowFavorites = it })
-                            IgngSwitchRow("在信息流隐藏 AI 辅助生成内容", hideAi, { hideAi = it })
-                        }
+            IgngPullToRefreshBox(
+                isRefreshing = settingsState.isUserRefreshing,
+                onRefresh = { settingsHandle.refresh() },
+                modifier = Modifier.weight(1f),
+            ) {
+                when {
+                    settingsState.isInitialLoading && settings == null -> IgngLoadingCenter(loading = true)
+                    settingsState.error != null && settings == null -> Box(Modifier.padding(16.dp)) {
+                        IgngErrorTile(message = settingsState.error!!, onRetry = { settingsHandle.refresh() })
                     }
-                    item {
-                        IgngTile {
-                            Text("排除的分区与标签", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                            Spacer(Modifier.height(8.dp))
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                bootstrap?.categories.orEmpty().forEach { cat ->
-                                    val selected = cat.id in excludedCats
-                                    IgngTagChip(
-                                        text = cat.name,
-                                        selected = selected,
-                                        tone = if (selected) IgngTone.DANGER else IgngTone.NEUTRAL,
-                                        onClick = {
-                                            excludedCats = if (selected) excludedCats - cat.id else excludedCats + cat.id
-                                        },
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            IgngTextField(
-                                value = excludedTagsText,
-                                onValueChange = { excludedTagsText = it },
-                                label = "屏蔽标签（逗号分隔）",
-                                placeholder = "例如：剧透, 水贴",
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            IgngPrimaryButton(
-                                text = "保存隐私与偏好设置",
-                                loading = saving,
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = {
-                                    val tags = excludedTagsText.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
-                                    scope.launch {
-                                        saving = true
-                                        when (
-                                            val r = container.profileRepository.updateMySettings(
-                                                UpdateMySettingsRequest(
-                                                    bio = bio,
-                                                    allowFollowersVisibility = allowFollowers,
-                                                    allowFavoritesVisibility = allowFavorites,
-                                                    preferences = UpdateUserPreferencesPatch(
-                                                        excludedCategoryIds = excludedCats.toList(),
-                                                        excludedTags = tags,
-                                                        hideAi = hideAi,
-                                                    ),
-                                                ),
-                                            )
-                                        ) {
-                                            is ApiResult.Success -> {
-                                                settings = r.data
-                                                notice = "隐私与偏好已同步到云端"
-                                            }
-                                            is ApiResult.Failure -> notice = r.error.message
-                                        }
-                                        saving = false
-                                    }
-                                },
-                            )
-                        }
-                    }
-                    val rules = settings?.blockRules.orEmpty()
-                    if (rules.isNotEmpty()) {
-                        item { IgngSectionHeader("已屏蔽用户（${rules.size}）") }
-                        items(rules, key = { it.id }) { rule ->
-                            IgngTile(padding = PaddingValues(12.dp)) {
+                    else -> LazyColumn(
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = 24.dp + navBottom,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
+                        item {
+                            IgngTile {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        "${rule.targetUser.displayName} (@${rule.targetUser.username})",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = colors.textPrimary,
-                                    )
-                                    IgngTagChip("解除屏蔽", tone = IgngTone.DANGER, onClick = { unblockTarget = rule })
+                                    Text("个人简介", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                    settings?.bioStatus?.let { st ->
+                                        if (st == 1) IgngTagChip("简介审核中", tone = IgngTone.WARNING)
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                IgngTextField(
+                                    value = bio,
+                                    onValueChange = { bio = it; formHolder.isDirty = true },
+                                    label = "向社区介绍你自己（修改后将进入审核）",
+                                    singleLine = false,
+                                    minLines = 2,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                IgngSwitchRow("公开我的粉丝与关注列表", allowFollowers, { allowFollowers = it; formHolder.isDirty = true })
+                                IgngSwitchRow("公开我的收藏夹", allowFavorites, { allowFavorites = it; formHolder.isDirty = true })
+                                IgngSwitchRow("在信息流隐藏 AI 辅助生成内容", hideAi, { hideAi = it; formHolder.isDirty = true })
+                            }
+                        }
+                        item {
+                            IgngTile {
+                                Text("排除的分区与标签", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                Spacer(Modifier.height(8.dp))
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    bootstrap?.categories.orEmpty().forEach { cat ->
+                                        val selected = cat.id in excludedCats
+                                        IgngTagChip(
+                                            text = cat.name,
+                                            selected = selected,
+                                            tone = if (selected) IgngTone.DANGER else IgngTone.NEUTRAL,
+                                            onClick = {
+                                                excludedCats = if (selected) excludedCats - cat.id else excludedCats + cat.id
+                                                formHolder.isDirty = true
+                                            },
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                IgngTextField(
+                                    value = excludedTagsText,
+                                    onValueChange = { excludedTagsText = it; formHolder.isDirty = true },
+                                    label = "屏蔽标签（逗号分隔）",
+                                    placeholder = "例如：剧透, 水贴",
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                IgngPrimaryButton(
+                                    text = "保存隐私与偏好设置",
+                                    loading = saving,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = {
+                                        val tags = excludedTagsText.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
+                                        scope.launch {
+                                            saving = true
+                                            when (
+                                                val r = container.profileRepository.updateMySettings(
+                                                    UpdateMySettingsRequest(
+                                                        bio = bio,
+                                                        allowFollowersVisibility = allowFollowers,
+                                                        allowFavoritesVisibility = allowFavorites,
+                                                        preferences = UpdateUserPreferencesPatch(
+                                                            excludedCategoryIds = excludedCats.toList(),
+                                                            excludedTags = tags,
+                                                            hideAi = hideAi,
+                                                        ),
+                                                    ),
+                                                )
+                                            ) {
+                                                is ApiResult.Success -> {
+                                                    formHolder.syncFromServer(r.data, force = true)
+                                                    notice = "隐私与偏好已同步到云端"
+                                                }
+                                                is ApiResult.Failure -> notice = r.error.message
+                                            }
+                                            saving = false
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                        val rules = settings?.blockRules.orEmpty()
+                        if (rules.isNotEmpty()) {
+                            item { IgngSectionHeader("已屏蔽用户（${rules.size}）") }
+                            items(rules, key = { it.id }) { rule ->
+                                IgngTile(padding = PaddingValues(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(
+                                            "${rule.targetUser.displayName} (@${rule.targetUser.username})",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = colors.textPrimary,
+                                        )
+                                        IgngTagChip("解除屏蔽", tone = IgngTone.DANGER, onClick = { unblockTarget = rule })
+                                    }
                                 }
                             }
                         }
@@ -439,7 +475,7 @@ fun PrivacyPreferencesScreen(
                 unblockTarget = null
                 scope.launch {
                     container.profileRepository.deleteBlockRule(targetId)
-                    load()
+                    settingsHandle.silentRefresh()
                 }
             },
         )

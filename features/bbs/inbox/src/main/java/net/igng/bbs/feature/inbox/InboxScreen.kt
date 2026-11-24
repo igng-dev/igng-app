@@ -30,7 +30,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +44,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.model.BbsFormatters
+import net.igng.bbs.core.model.InboxItemDto
+import net.igng.bbs.core.model.InboxResponseDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngLoadingCenter
@@ -56,9 +65,6 @@ import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.rememberIgngPageContentPadding
-import net.igng.bbs.core.model.BbsFormatters
-import net.igng.bbs.core.model.InboxItemDto
-import net.igng.core.network.ApiResult
 
 private val INBOX_TABS = listOf(
     "all" to "全部",
@@ -67,6 +73,13 @@ private val INBOX_TABS = listOf(
     "system" to "系统",
     "column" to "专栏",
 )
+
+private class InboxUiHolder {
+    val tabState = mutableStateOf("all")
+    val unreadOnlyState = mutableStateOf(false)
+    val queryState = mutableStateOf("")
+    val submittedQueryState = mutableStateOf("")
+}
 
 @Composable
 fun InboxScreen(
@@ -79,39 +92,32 @@ fun InboxScreen(
     val scope = rememberCoroutineScope()
     val activeAccount by container.sessionStore.activeAccount.collectAsState()
 
-    var tab by remember { mutableStateOf("all") }
-    var unreadOnly by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    var items by remember { mutableStateOf<List<InboxItemDto>>(emptyList()) }
-    var unreadTotal by remember { mutableStateOf(0) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var detailItem by remember { mutableStateOf<InboxItemDto?>(null) }
+    val holder = rememberScreenHolder("bbs_inbox_ui") { InboxUiHolder() }
+    var tab by holder.tabState
+    var unreadOnly by holder.unreadOnlyState
+    var query by holder.queryState
+    var submittedQuery by holder.submittedQueryState
 
-    suspend fun load(isRefresh: Boolean) {
-        if (activeAccount == null) {
-            loading = false
-            return
-        }
-        if (isRefresh) refreshing = true else if (items.isEmpty()) loading = true
-        error = null
-        when (val res = container.inboxRepository.listInbox(
+    val (inboxState, inboxHandle) = rememberSwrResource<InboxResponseDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.inbox(tab, unreadOnly, submittedQuery),
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Realtime,
+        tags = setOf(BbsCacheTags.INBOX),
+        enabled = activeAccount != null,
+        pollIntervalMs = 60_000L,
+        slotKey = "bbs_inbox_slot",
+    ) {
+        container.inboxRepository.listInbox(
             tab = tab,
-            query = query.trim().ifBlank { null },
+            query = submittedQuery.ifBlank { null },
             unreadOnly = unreadOnly,
-        )) {
-            is ApiResult.Success -> {
-                items = res.data.data
-                unreadTotal = res.data.unread.total
-            }
-            is ApiResult.Failure -> if (items.isEmpty()) error = res.error.message
-        }
-        loading = false
-        refreshing = false
+        ).toKotlinResult()
     }
 
-    LaunchedEffect(tab, unreadOnly, activeAccount?.userId) { load(false) }
+    val items = inboxState.data?.data.orEmpty()
+    val unreadTotal = inboxState.data?.unread?.total ?: 0
+    var detailItem by remember { mutableStateOf<InboxItemDto?>(null) }
 
     Column(
         modifier = Modifier
@@ -128,8 +134,8 @@ fun InboxScreen(
                     IconButton(onClick = {
                         scope.launch {
                             container.inboxRepository.markAllRead("all")
-                            container.refreshBootstrap()
-                            load(true)
+                            container.refreshBootstrap(force = true)
+                            inboxHandle.silentRefresh()
                         }
                     }) {
                         Icon(Icons.Rounded.DoneAll, contentDescription = "全部标为已读", tint = colors.accent)
@@ -172,7 +178,18 @@ fun InboxScreen(
                 ),
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.textMuted) },
             )
-            IgngTagChip(text = "查找", tone = IgngTone.ACCENT, onClick = { scope.launch { load(true) } })
+            IgngTagChip(
+                text = "查找",
+                tone = IgngTone.ACCENT,
+                onClick = {
+                    val trimmed = query.trim()
+                    if (trimmed == submittedQuery) {
+                        inboxHandle.refresh()
+                    } else {
+                        submittedQuery = trimmed
+                    }
+                },
+            )
         }
         Spacer(Modifier.height(10.dp))
 
@@ -195,14 +212,14 @@ fun InboxScreen(
         Spacer(Modifier.height(8.dp))
 
         IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { scope.launch { load(true) } },
+            isRefreshing = inboxState.isUserRefreshing,
+            onRefresh = { inboxHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
             when {
-                loading && items.isEmpty() -> IgngLoadingCenter(loading = true)
-                error != null && items.isEmpty() -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { load(false) } })
+                inboxState.isInitialLoading && items.isEmpty() -> IgngLoadingCenter(loading = true)
+                inboxState.error != null && items.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = inboxState.error!!, onRetry = { inboxHandle.refresh() })
                 }
                 items.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngEmptyTile(
@@ -220,14 +237,15 @@ fun InboxScreen(
                             padding = PaddingValues(14.dp),
                             onClick = {
                                 if (!item.isRead) {
-                                    items = items.map { if (it.id == item.id) it.copy(isRead = true) else it }
+                                    container.inboxRepository.patchItemReadLocally(item.id)
                                     scope.launch {
                                         container.inboxRepository.markItemRead(item.id)
-                                        container.refreshBootstrap()
+                                        container.refreshBootstrap(force = true)
                                     }
                                 }
-                                if (!item.postId.isNullOrBlank()) {
-                                    onOpenPost(item.postId!!)
+                                val targetPostId = item.postId
+                                if (!targetPostId.isNullOrBlank()) {
+                                    onOpenPost(targetPostId)
                                 } else {
                                     detailItem = item
                                 }

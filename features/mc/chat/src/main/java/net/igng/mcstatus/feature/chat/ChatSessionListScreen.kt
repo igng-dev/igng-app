@@ -49,10 +49,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.mcstatus.core.data.ChatRepository
 import net.igng.mcstatus.core.data.ChatSourcesResponse
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
+import net.igng.mcstatus.core.data.McDiskCodecs
 import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngHapticKind
 import net.igng.core.designsystem.IgngPullToRefreshBox
@@ -70,6 +76,11 @@ import net.igng.mcstatus.core.model.SiteEndpoints
  * Primary Chat Tab screen aligned with `chat.igng.net`'s unified sidebar (QQ / WeChat / MC / Private),
  * defaulting to the "全部" tab with WeChat-style session rows rendered in IGNG's design language.
  */
+private class ChatSessionListUiHolder {
+    var selectedTab by mutableStateOf(ChatSessionTab.ALL)
+    var searchQuery by mutableStateOf("")
+}
+
 @Composable
 fun ChatSessionListScreen(
     endpoints: SiteEndpoints,
@@ -84,41 +95,28 @@ fun ChatSessionListScreen(
 ) {
     val colors = IgngTheme.colors
     val semantic = chatSemanticColors(colors.isDark)
-    val scope = rememberCoroutineScope()
     val haptic = rememberIgngHaptics()
     val sessionExpired = activeAccount != null && sessionAuthStatus.requiresReauth
     val isAuthenticated = activeAccount != null && sessionAuthStatus == SessionAuthStatus.ACTIVE
+    val uiHolder = rememberScreenHolder("chat_session_list_ui") { ChatSessionListUiHolder() }
 
-    var sources by remember { mutableStateOf<ChatSourcesResponse?>(null) }
-    var selectedTab by remember { mutableStateOf(ChatSessionTab.ALL) }
-    var searchQuery by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    suspend fun loadSources(isRefresh: Boolean = false, silent: Boolean = false) {
-        if (isRefresh) refreshing = true else if (!silent && sources == null) loading = true
-        if (!silent) error = null
-        runCatching { chatRepository.fetchSources() }
-            .onSuccess { sources = it }
-            .onFailure { if (!silent) error = it.message ?: "会话列表暂时没有读到" }
-        loading = false
-        refreshing = false
-    }
-
-    // Initial load & reload when signed-in identity or re-auth epoch changes (unlocks private chats / WeChat groups)
-    LaunchedEffect(activeAccount?.userId, sessionEpoch, sessionAuthStatus) {
-        loadSources(isRefresh = false, silent = false)
-    }
-
-    // Lifecycle-aware foreground refresh every 60s matching chat.igng.net (pauses in background)
-    net.igng.core.data.LaunchedForegroundPollingEffect(
-        intervalMs = 60_000L,
-        key1 = activeAccount?.userId,
-        key2 = sessionEpoch,
+    val (sourcesState, sourcesHandle) = rememberSwrResource<ChatSourcesResponse>(
+        cache = chatRepository.swrCache,
+        cacheKey = McCacheKeys.CHAT_SOURCES,
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = McCachePolicies.Chat,
+        tags = setOf(McCacheTags.CHAT_SOURCES),
+        diskCodec = McDiskCodecs.chatSources,
+        pollIntervalMs = 60_000L,
+        slotKey = "chat_sources",
     ) {
-        loadSources(silent = true)
+        runSuspendCatching { chatRepository.fetchSources() }
     }
+
+    val sources = sourcesState.data
+    val loading = sourcesState.isInitialLoading
+    val refreshing = sourcesState.isUserRefreshing
+    val error = sourcesState.error
 
     val allSessions = remember(sources) { sources?.let(::buildUnifiedSessions).orEmpty() }
     val hasPrivateChats = remember(allSessions) { allSessions.any { it.isPrivate } }
@@ -130,11 +128,11 @@ fun ChatSessionListScreen(
         }
     }
     LaunchedEffect(visibleTabs) {
-        if (selectedTab !in visibleTabs) selectedTab = ChatSessionTab.ALL
+        if (uiHolder.selectedTab !in visibleTabs) uiHolder.selectedTab = ChatSessionTab.ALL
     }
 
-    val filteredSessions = remember(allSessions, selectedTab, searchQuery) {
-        filterSessions(allSessions, selectedTab, searchQuery)
+    val filteredSessions = remember(allSessions, uiHolder.selectedTab, uiHolder.searchQuery) {
+        filterSessions(allSessions, uiHolder.selectedTab, uiHolder.searchQuery)
     }
 
     IgngAmbientCanvas {
@@ -176,7 +174,7 @@ fun ChatSessionListScreen(
                     IconButton(
                         onClick = {
                             haptic(IgngHapticKind.Tick)
-                            scope.launch { loadSources(isRefresh = true) }
+                            sourcesHandle.refresh()
                         },
                         modifier = Modifier.size(34.dp),
                     ) {
@@ -195,8 +193,8 @@ fun ChatSessionListScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 IgngSearchField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    value = uiHolder.searchQuery,
+                    onValueChange = { uiHolder.searchQuery = it },
                     placeholder = "搜索会话、群名、群号或服务器…",
                 )
 
@@ -211,14 +209,14 @@ fun ChatSessionListScreen(
                         val count = remember(allSessions, tab) {
                             filterSessions(allSessions, tab, "").size
                         }
-                        val picked = selectedTab == tab
+                        val picked = uiHolder.selectedTab == tab
                         SessionTabPill(
                             label = tab.label,
                             count = if (allSessions.isNotEmpty() && count > 0) count else null,
                             selected = picked,
                             onClick = {
                                 haptic(IgngHapticKind.Tick)
-                                selectedTab = tab
+                                uiHolder.selectedTab = tab
                             },
                         )
                     }
@@ -229,7 +227,7 @@ fun ChatSessionListScreen(
 
             IgngPullToRefreshBox(
                 isRefreshing = refreshing,
-                onRefresh = { scope.launch { loadSources(isRefresh = true) } },
+                onRefresh = { sourcesHandle.refresh() },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
@@ -240,12 +238,12 @@ fun ChatSessionListScreen(
                             description = error,
                             isError = true,
                             actionLabel = "重试",
-                            onAction = { scope.launch { loadSources(isRefresh = false) } },
+                            onAction = { sourcesHandle.refresh() },
                         )
                     }
                     filteredSessions.isEmpty() -> Box(Modifier.padding(16.dp)) {
                         when {
-                            selectedTab == ChatSessionTab.WECHAT && searchQuery.isBlank() -> {
+                            uiHolder.selectedTab == ChatSessionTab.WECHAT && uiHolder.searchQuery.isBlank() -> {
                                 if (!isAuthenticated) {
                                     IgngStateBlock(
                                         title = if (sessionExpired) "重新授权后可查看微信会话" else "登录后可查看微信会话",
@@ -264,17 +262,17 @@ fun ChatSessionListScreen(
                                     )
                                 }
                             }
-                            searchQuery.isNotBlank() -> IgngStateBlock(
+                            uiHolder.searchQuery.isNotBlank() -> IgngStateBlock(
                                 title = "没有匹配的会话",
                                 description = "换个关键词或切换顶部分类标签再试试。",
                                 actionLabel = "清空搜索",
-                                onAction = { searchQuery = "" },
+                                onAction = { uiHolder.searchQuery = "" },
                             )
                             else -> IgngStateBlock(
                                 title = "该分类下暂无会话",
                                 description = "切换到「全部」查看其它平台频道。",
                                 actionLabel = "查看全部",
-                                onAction = { selectedTab = ChatSessionTab.ALL },
+                                onAction = { uiHolder.selectedTab = ChatSessionTab.ALL },
                             )
                         }
                     }

@@ -49,6 +49,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.runSuspendCatching
 import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngButton
@@ -71,6 +75,10 @@ import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.core.designsystem.rememberIgngHaptics
 import net.igng.core.markdown.IgngMarkdownBlockView
 import net.igng.core.markdown.MarkdownParser
+import net.igng.mcstatus.core.data.McCacheKeys
+import net.igng.mcstatus.core.data.McCachePolicies
+import net.igng.mcstatus.core.data.McCacheTags
+import net.igng.mcstatus.core.data.McDiskCodecs
 import net.igng.mcstatus.core.data.SettingsRepository
 import net.igng.mcstatus.core.data.WikiCatalogResponse
 import net.igng.mcstatus.core.data.WikiPageDetail
@@ -78,6 +86,10 @@ import net.igng.mcstatus.core.data.WikiPageSummary
 import net.igng.mcstatus.core.data.WikiRepository
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.mcstatus.core.model.IgngFormatters
+
+private class WikiCatalogUiHolder {
+    var search by mutableStateOf("")
+}
 
 @Composable
 fun WikiCatalogScreen(
@@ -87,39 +99,28 @@ fun WikiCatalogScreen(
     onOpenArticle: (Int) -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
     val recentIds by settingsRepository.recentWikiIds.collectAsState(initial = emptyList())
+    val uiHolder = rememberScreenHolder("wiki_catalog_ui") { WikiCatalogUiHolder() }
 
-    var catalog by remember { mutableStateOf<WikiCatalogResponse?>(null) }
-    var search by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var usingCache by remember { mutableStateOf(false) }
-
-    suspend fun load(isRefresh: Boolean) {
-        if (isRefresh) refreshing = true else loading = true
-        error = null
-        if (!isRefresh && catalog == null) {
-            wikiRepository.readCachedCatalog()?.let { cached ->
-                catalog = cached
-                usingCache = true
-                loading = false
-            }
-        }
-        runCatching { wikiRepository.fetchCatalog() }
-            .onSuccess {
-                catalog = it
-                usingCache = false
-            }
-            .onFailure {
-                if (catalog == null) error = it.message ?: "Wiki 目录没有读到"
-            }
-        loading = false
-        refreshing = false
+    val (catalogState, catalogHandle) = rememberSwrResource<WikiCatalogResponse>(
+        cache = wikiRepository.swrCache,
+        cacheKey = McCacheKeys.wikiCatalog(),
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.Static,
+        tags = setOf(McCacheTags.WIKI),
+        diskCodec = McDiskCodecs.wikiCatalog(),
+        legacyRawProvider = {
+            wikiRepository.readCachedCatalog()?.let { McDiskCodecs.wikiCatalog().encode(it) }
+        },
+        slotKey = "wiki_catalog",
+    ) {
+        runSuspendCatching { wikiRepository.fetchCatalog() }
     }
 
-    LaunchedEffect(Unit) { load(isRefresh = false) }
+    val catalog = catalogState.data
+    val loading = catalogState.isInitialLoading
+    val refreshing = catalogState.isUserRefreshing
+    val error = catalogState.error
 
     val allPages = remember(catalog) {
         val grouped = catalog?.groups.orEmpty().flatMap { g ->
@@ -136,11 +137,11 @@ fun WikiCatalogScreen(
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(
                 title = "IGNGmc 百科",
-                subtitle = if (usingCache) "离线缓存已就绪" else "官方 IGNGmc 知识库文档",
+                subtitle = "官方 IGNGmc 知识库文档",
             )
             IgngSearchField(
-                value = search,
-                onValueChange = { search = it },
+                value = uiHolder.search,
+                onValueChange = { uiHolder.search = it },
                 placeholder = "搜索教程、指令、领地规则或插件说明…",
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
@@ -148,7 +149,7 @@ fun WikiCatalogScreen(
 
             IgngPullToRefreshBox(
                 isRefreshing = refreshing,
-                onRefresh = { scope.launch { load(isRefresh = true) } },
+                onRefresh = { catalogHandle.refresh() },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
@@ -159,11 +160,11 @@ fun WikiCatalogScreen(
                             description = error,
                             isError = true,
                             actionLabel = "重试",
-                            onAction = { scope.launch { load(isRefresh = false) } },
+                            onAction = { catalogHandle.refresh() },
                         )
                     }
                     else -> {
-                        val q = search.trim().lowercase()
+                        val q = uiHolder.search.trim().lowercase()
                         LazyColumn(
                             contentPadding = PaddingValues(
                                 start = 16.dp,
@@ -276,25 +277,30 @@ fun WikiArticleScreen(
     val listState = rememberLazyListState()
     val prefs by settingsRepository.preferences.collectAsState(initial = AppPreferences())
 
-    var page by remember(pageId) { mutableStateOf<WikiPageDetail?>(null) }
-    var loading by remember(pageId) { mutableStateOf(true) }
-    var error by remember(pageId) { mutableStateOf<String?>(null) }
     var showToc by remember { mutableStateOf(false) }
     var showTypoSheet by remember { mutableStateOf(false) }
     var lightboxIndex by remember { mutableStateOf<Int?>(null) }
 
+    val (pageState, pageHandle) = rememberSwrResource<WikiPageDetail>(
+        cache = wikiRepository.swrCache,
+        cacheKey = McCacheKeys.wikiPage(pageId),
+        scope = IgngCacheScope.PUBLIC,
+        policy = McCachePolicies.WikiArticle,
+        tags = setOf(McCacheTags.WIKI),
+        diskCodec = McDiskCodecs.wikiPage(pageId),
+        legacyRawProvider = {
+            wikiRepository.readCachedPage(pageId)?.let { McDiskCodecs.wikiPage(pageId).encode(it) }
+        },
+        slotKey = "wiki_article_$pageId",
+    ) {
+        runSuspendCatching { wikiRepository.fetchPage(pageId) }
+    }
+    val page = pageState.data
+    val loading = pageState.isInitialLoading
+    val error = pageState.error
+
     LaunchedEffect(pageId) {
-        loading = true
-        error = null
         settingsRepository.recordRecentWiki(pageId)
-        wikiRepository.readCachedPage(pageId)?.let {
-            page = it
-            loading = false
-        }
-        runCatching { wikiRepository.fetchPage(pageId) }
-            .onSuccess { page = it }
-            .onFailure { if (page == null) error = it.message ?: "文档正文没有读到" }
-        loading = false
     }
 
     val document = remember(page?.content) {
@@ -332,12 +338,23 @@ fun WikiArticleScreen(
                         }
                     },
                 )
-                when {
-                    loading && page == null -> IgngLoadingBlock(fill = true)
-                    error != null && page == null -> Box(Modifier.padding(16.dp)) {
-                        IgngStateBlock(title = "读取失败", description = error, isError = true)
-                    }
-                    else -> LazyColumn(
+                IgngPullToRefreshBox(
+                    isRefreshing = pageState.isUserRefreshing,
+                    onRefresh = { pageHandle.refresh() },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    when {
+                        loading && page == null -> IgngLoadingBlock(fill = true)
+                        error != null && page == null -> Box(Modifier.padding(16.dp)) {
+                            IgngStateBlock(
+                                title = "读取失败",
+                                description = error,
+                                isError = true,
+                                actionLabel = "重试",
+                                onAction = { pageHandle.refresh() },
+                            )
+                        }
+                        else -> LazyColumn(
                         state = listState,
                         contentPadding = PaddingValues(
                             start = 18.dp,
@@ -360,6 +377,7 @@ fun WikiArticleScreen(
                                 },
                             )
                         }
+                    }
                     }
                 }
             }

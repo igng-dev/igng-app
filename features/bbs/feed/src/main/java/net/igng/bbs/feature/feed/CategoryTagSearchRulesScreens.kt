@@ -2,7 +2,6 @@ package net.igng.bbs.feature.feed
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,7 +33,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,8 +45,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.core.data.BbsAppContainer
+import net.igng.bbs.core.data.BbsCacheKeys
+import net.igng.bbs.core.data.BbsCachePolicies
+import net.igng.bbs.core.data.BbsCacheTags
+import net.igng.bbs.core.data.BbsDiskCodecs
+import net.igng.bbs.core.model.BbsRulesDto
+import net.igng.bbs.core.model.ListWrapperDto
+import net.igng.bbs.core.model.PaginatedResponseDto
+import net.igng.bbs.core.model.PostSummaryDto
+import net.igng.bbs.core.model.SearchResponseDto
+import net.igng.bbs.core.model.TagStatDto
+import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberScreenHolder
+import net.igng.core.data.rememberSwrResource
+import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
@@ -58,17 +69,12 @@ import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
-import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.igngBentoEnter
-import net.igng.bbs.core.model.BbsRulesDto
-import net.igng.bbs.core.model.PostSummaryDto
-import net.igng.bbs.core.model.SearchResponseDto
-import net.igng.bbs.core.model.TagStatDto
-import net.igng.core.model.V1Id
+import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.network.ApiResult
 
 @Composable
@@ -116,6 +122,23 @@ fun TagFeedScreen(
     )
 }
 
+private class FilteredFeedUiHolder {
+    val sortState = mutableStateOf("latest")
+    var extraKey by mutableStateOf("")
+    var extraPosts by mutableStateOf<List<PostSummaryDto>>(emptyList())
+    var loadedPage by mutableIntStateOf(1)
+    var extraTotalPages by mutableIntStateOf(1)
+    var loadingMore by mutableStateOf(false)
+
+    fun resetPagination(key: String) {
+        extraKey = key
+        extraPosts = emptyList()
+        loadedPage = 1
+        extraTotalPages = 1
+        loadingMore = false
+    }
+}
+
 @Composable
 private fun FilteredPostListScreen(
     container: BbsAppContainer,
@@ -130,41 +153,83 @@ private fun FilteredPostListScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var sort by remember { mutableStateOf("latest") }
-    var posts by remember { mutableStateOf<List<PostSummaryDto>>(emptyList()) }
-    var page by remember { mutableIntStateOf(1) }
-    var totalPages by remember { mutableIntStateOf(1) }
-    var loading by remember { mutableStateOf(true) }
-    var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val holderKey = "bbs_filtered_${categorySlug.orEmpty()}_${tag.orEmpty()}"
+    val holder = rememberScreenHolder(holderKey) { FilteredFeedUiHolder() }
+    var sort by holder.sortState
 
-    suspend fun load(reset: Boolean) {
-        if (reset) {
-            if (posts.isEmpty()) loading = true else refreshing = true
-        }
-        error = null
-        val targetPage = if (reset) 1 else page + 1
-        when (val res = container.feedRepository.listPosts(
-            page = targetPage,
+    val cacheKey = if (categorySlug != null) {
+        BbsCacheKeys.feed(categorySlug, sort)
+    } else {
+        BbsCacheKeys.tagFeed(tag.orEmpty(), sort)
+    }
+
+    val (feedState, feedHandle) = rememberSwrResource<PaginatedResponseDto<PostSummaryDto>>(
+        cache = container.swrCache,
+        cacheKey = cacheKey,
+        scope = IgngCacheScope.SESSION_AWARE,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.FEED, BbsCacheTags.POST_LISTS),
+        slotKey = holderKey,
+    ) {
+        container.feedRepository.listPosts(
+            page = 1,
             pageSize = 20,
             sort = sort,
             category = categorySlug,
             tag = tag,
-        )) {
-            is ApiResult.Success -> {
-                posts = if (reset) res.data.data else posts + res.data.data
-                page = res.data.pagination.page
-                totalPages = res.data.pagination.totalPages.coerceAtLeast(1)
-            }
-            is ApiResult.Failure -> {
-                if (posts.isEmpty()) error = res.error.message
-            }
-        }
-        loading = false
-        refreshing = false
+        ).toKotlinResult()
     }
 
-    LaunchedEffect(categorySlug, tag, sort) { load(reset = true) }
+    val page1Posts = feedState.data?.data.orEmpty()
+    val extraPosts = if (holder.extraKey == cacheKey) holder.extraPosts else emptyList()
+    val posts = remember(page1Posts, extraPosts) {
+        if (extraPosts.isEmpty()) {
+            page1Posts
+        } else {
+            val seen = page1Posts.mapTo(HashSet(page1Posts.size)) { it.id }
+            page1Posts + extraPosts.filterNot { it.id in seen }
+        }
+    }
+    val page = if (holder.extraKey == cacheKey && holder.loadedPage > 1) {
+        holder.loadedPage
+    } else {
+        feedState.data?.pagination?.page ?: 1
+    }
+    val totalPages = if (holder.extraKey == cacheKey && holder.loadedPage > 1) {
+        holder.extraTotalPages.coerceAtLeast(feedState.data?.pagination?.totalPages ?: 1)
+    } else {
+        (feedState.data?.pagination?.totalPages ?: 1).coerceAtLeast(1)
+    }
+
+    suspend fun loadMore() {
+        if (holder.loadingMore || page >= totalPages) return
+        val targetKey = cacheKey
+        holder.loadingMore = true
+        when (
+            val res = container.feedRepository.listPosts(
+                page = page + 1,
+                pageSize = 20,
+                sort = sort,
+                category = categorySlug,
+                tag = tag,
+            )
+        ) {
+            is ApiResult.Success -> {
+                if (cacheKey == targetKey) {
+                    val existing = if (holder.extraKey == targetKey) holder.extraPosts else emptyList()
+                    val seen = HashSet<String>(page1Posts.size + existing.size)
+                    page1Posts.forEach { seen.add(it.id) }
+                    existing.forEach { seen.add(it.id) }
+                    holder.extraKey = targetKey
+                    holder.extraPosts = existing + res.data.data.filterNot { it.id in seen }
+                    holder.loadedPage = res.data.pagination.page
+                    holder.extraTotalPages = res.data.pagination.totalPages.coerceAtLeast(1)
+                }
+            }
+            is ApiResult.Failure -> Unit
+        }
+        holder.loadingMore = false
+    }
 
     Column(
         modifier = Modifier
@@ -183,14 +248,17 @@ private fun FilteredPostListScreen(
             },
         )
         IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { scope.launch { load(reset = true) } },
+            isRefreshing = feedState.isUserRefreshing,
+            onRefresh = {
+                holder.resetPagination(cacheKey)
+                feedHandle.refresh()
+            },
             modifier = Modifier.weight(1f),
         ) {
             when {
-                loading && posts.isEmpty() -> IgngLoadingCenter(loading = true)
-                error != null && posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
-                    IgngErrorTile(message = error!!, onRetry = { scope.launch { load(reset = true) } })
+                feedState.isInitialLoading && posts.isEmpty() -> IgngLoadingCenter(loading = true)
+                feedState.error != null && posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = feedState.error!!, onRetry = { feedHandle.refresh() })
                 }
                 posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngEmptyTile(title = "暂无相关文章", subtitle = "这里暂时还没有符合条件的内容。")
@@ -217,9 +285,9 @@ private fun FilteredPostListScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 IgngTagChip(
-                                    text = "加载更多",
+                                    text = if (holder.loadingMore) "加载中…" else "加载更多",
                                     tone = IgngTone.ACCENT,
-                                    onClick = { scope.launch { load(reset = false) } },
+                                    onClick = { scope.launch { loadMore() } },
                                 )
                             }
                         }
@@ -228,6 +296,13 @@ private fun FilteredPostListScreen(
             }
         }
     }
+}
+
+private class SearchUiHolder {
+    val queryState = mutableStateOf("")
+    val resultState = mutableStateOf<SearchResponseDto?>(null)
+    val searchingState = mutableStateOf(false)
+    val errorState = mutableStateOf<String?>(null)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -242,18 +317,24 @@ fun SearchScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
-    var hotTags by remember { mutableStateOf<List<TagStatDto>>(emptyList()) }
-    var result by remember { mutableStateOf<SearchResponseDto?>(null) }
-    var searching by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val holder = rememberScreenHolder("bbs_search_ui") { SearchUiHolder() }
+    var query by holder.queryState
+    var result by holder.resultState
+    var searching by holder.searchingState
+    var error by holder.errorState
 
-    LaunchedEffect(Unit) {
-        when (val res = container.feedRepository.listTags(30)) {
-            is ApiResult.Success -> hotTags = res.data.data
-            is ApiResult.Failure -> Unit
-        }
+    val (tagsState, _) = rememberSwrResource<ListWrapperDto<TagStatDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.TAGS,
+        scope = IgngCacheScope.PUBLIC,
+        policy = BbsCachePolicies.Static,
+        tags = setOf(BbsCacheTags.TAGS),
+        diskCodec = BbsDiskCodecs.TAGS,
+        slotKey = "bbs_search_tags",
+    ) {
+        container.feedRepository.listTags(30).toKotlinResult()
     }
+    val hotTags = tagsState.data?.data.orEmpty()
 
     fun executeSearch(input: String) {
         val trimmed = input.trim()
@@ -406,29 +487,31 @@ fun SearchScreen(
     }
 }
 
+private class RulesUiHolder {
+    val expandedClauseState = mutableStateOf<String?>(null)
+}
+
 @Composable
 fun RulesScreen(
     container: BbsAppContainer,
     onBack: () -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val scope = rememberCoroutineScope()
-    var rules by remember { mutableStateOf<BbsRulesDto?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var expandedClause by remember { mutableStateOf<String?>(null) }
+    val holder = rememberScreenHolder("bbs_rules_ui") { RulesUiHolder() }
+    var expandedClause by holder.expandedClauseState
 
-    suspend fun load() {
-        loading = true
-        error = null
-        when (val res = container.feedRepository.fetchRules()) {
-            is ApiResult.Success -> rules = res.data
-            is ApiResult.Failure -> error = res.error.message
-        }
-        loading = false
+    val (rulesState, rulesHandle) = rememberSwrResource<BbsRulesDto>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.RULES,
+        scope = IgngCacheScope.PUBLIC,
+        policy = BbsCachePolicies.Rules,
+        tags = setOf(BbsCacheTags.RULES),
+        diskCodec = BbsDiskCodecs.RULES,
+        slotKey = "bbs_rules_slot",
+    ) {
+        container.feedRepository.fetchRules().toKotlinResult()
     }
-
-    LaunchedEffect(Unit) { load() }
+    val rules = rulesState.data
 
     Column(
         modifier = Modifier
@@ -441,98 +524,103 @@ fun RulesScreen(
             subtitle = rules?.let { "版本 ${it.version} · 更新于 ${it.updatedAt}" },
             onBack = onBack,
         )
-        when {
-            loading -> IgngLoadingCenter(loading = true)
-            error != null -> Box(Modifier.padding(16.dp)) {
-                IgngErrorTile(message = error!!, onRetry = { scope.launch { load() } })
-            }
-            rules != null -> {
-                val r = rules!!
-                LazyColumn(
-                    contentPadding = rememberIgngPageContentPadding(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    if (r.principles.isNotEmpty()) {
-                        item {
-                            IgngTile {
-                                Text("基本原则", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                                Spacer(Modifier.height(8.dp))
-                                r.principles.forEach { p ->
-                                    Text(p.title, style = MaterialTheme.typography.titleSmall, color = colors.accent)
-                                    Text(p.text, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        IgngPullToRefreshBox(
+            isRefreshing = rulesState.isUserRefreshing,
+            onRefresh = { rulesHandle.refresh() },
+            modifier = Modifier.weight(1f),
+        ) {
+            when {
+                rulesState.isInitialLoading && rules == null -> IgngLoadingCenter(loading = true)
+                rulesState.error != null && rules == null -> Box(Modifier.padding(16.dp)) {
+                    IgngErrorTile(message = rulesState.error!!, onRetry = { rulesHandle.refresh() })
+                }
+                rules != null -> {
+                    LazyColumn(
+                        contentPadding = rememberIgngPageContentPadding(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (rules.principles.isNotEmpty()) {
+                            item {
+                                IgngTile {
+                                    Text("基本原则", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
                                     Spacer(Modifier.height(8.dp))
-                                }
-                            }
-                        }
-                    }
-                    item { IgngSectionHeader(title = "细则条款（${r.clauses.size}）") }
-                    items(r.clauses, key = { it.code }) { clause ->
-                        val isOpen = expandedClause == clause.code
-                        IgngTile(onClick = { expandedClause = if (isOpen) null else clause.code }) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = "${clause.code} · ${clause.title}",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = colors.textPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                IgngTagChip(
-                                    text = "S${clause.severity}",
-                                    tone = if (clause.severity >= 3) IgngTone.DANGER else if (clause.severity == 2) IgngTone.WARNING else IgngTone.NEUTRAL,
-                                )
-                            }
-                            Spacer(Modifier.height(6.dp))
-                            Text(clause.description, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                            val ruleIntensity = IgngTheme.motionIntensity
-                            AnimatedVisibility(
-                                visible = isOpen,
-                                enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
-                                    androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
-                                exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
-                                    androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
-                            ) {
-                                Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    if (clause.elements.isNotEmpty()) {
-                                        Text("构成要件", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
-                                        clause.elements.forEach { e ->
-                                            Text("• $e", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                                        }
-                                    }
-                                    if (clause.excludes.isNotEmpty()) {
-                                        Text("例外情形", style = MaterialTheme.typography.labelLarge, color = colors.success)
-                                        clause.excludes.forEach { e ->
-                                            Text("• $e", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                                        }
-                                    }
-                                    if (clause.examples.violate.isNotEmpty()) {
-                                        Text("违规示例", style = MaterialTheme.typography.labelLarge, color = colors.danger)
-                                        clause.examples.violate.forEach { ex ->
-                                            Text("× $ex", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                                        }
-                                    }
-                                    if (clause.examples.allow.isNotEmpty()) {
-                                        Text("允许示例", style = MaterialTheme.typography.labelLarge, color = colors.success)
-                                        clause.examples.allow.forEach { ex ->
-                                            Text("✓ $ex", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                                        }
+                                    rules.principles.forEach { p ->
+                                        Text(p.title, style = MaterialTheme.typography.titleSmall, color = colors.accent)
+                                        Text(p.text, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                        Spacer(Modifier.height(8.dp))
                                     }
                                 }
                             }
                         }
-                    }
-                    if (r.appeal.isNotEmpty()) {
-                        item {
-                            IgngTile(soft = true) {
-                                Text("申诉与复核机制", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                                Spacer(Modifier.height(8.dp))
-                                r.appeal.forEach { item ->
-                                    Text(item.title, style = MaterialTheme.typography.titleSmall, color = colors.accent)
-                                    Text(item.text, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                                    Spacer(Modifier.height(6.dp))
+                        item { IgngSectionHeader(title = "细则条款（${rules.clauses.size}）") }
+                        items(rules.clauses, key = { it.code }) { clause ->
+                            val isOpen = expandedClause == clause.code
+                            IgngTile(onClick = { expandedClause = if (isOpen) null else clause.code }) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = "${clause.code} · ${clause.title}",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = colors.textPrimary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IgngTagChip(
+                                        text = "S${clause.severity}",
+                                        tone = if (clause.severity >= 3) IgngTone.DANGER else if (clause.severity == 2) IgngTone.WARNING else IgngTone.NEUTRAL,
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(clause.description, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                val ruleIntensity = IgngTheme.motionIntensity
+                                AnimatedVisibility(
+                                    visible = isOpen,
+                                    enter = androidx.compose.animation.expandVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
+                                        androidx.compose.animation.fadeIn(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
+                                    exit = androidx.compose.animation.shrinkVertically(net.igng.core.designsystem.IgngMotion.standardSpring(ruleIntensity)) +
+                                        androidx.compose.animation.fadeOut(net.igng.core.designsystem.IgngMotion.microTween(ruleIntensity)),
+                                ) {
+                                    Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (clause.elements.isNotEmpty()) {
+                                            Text("构成要件", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
+                                            clause.elements.forEach { e ->
+                                                Text("• $e", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                            }
+                                        }
+                                        if (clause.excludes.isNotEmpty()) {
+                                            Text("例外情形", style = MaterialTheme.typography.labelLarge, color = colors.success)
+                                            clause.excludes.forEach { e ->
+                                                Text("• $e", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                            }
+                                        }
+                                        if (clause.examples.violate.isNotEmpty()) {
+                                            Text("违规示例", style = MaterialTheme.typography.labelLarge, color = colors.danger)
+                                            clause.examples.violate.forEach { ex ->
+                                                Text("× $ex", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                            }
+                                        }
+                                        if (clause.examples.allow.isNotEmpty()) {
+                                            Text("允许示例", style = MaterialTheme.typography.labelLarge, color = colors.success)
+                                            clause.examples.allow.forEach { ex ->
+                                                Text("✓ $ex", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (rules.appeal.isNotEmpty()) {
+                            item {
+                                IgngTile(soft = true) {
+                                    Text("申诉与复核机制", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                    Spacer(Modifier.height(8.dp))
+                                    rules.appeal.forEach { item ->
+                                        Text(item.title, style = MaterialTheme.typography.titleSmall, color = colors.accent)
+                                        Text(item.text, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                        Spacer(Modifier.height(6.dp))
+                                    }
                                 }
                             }
                         }
