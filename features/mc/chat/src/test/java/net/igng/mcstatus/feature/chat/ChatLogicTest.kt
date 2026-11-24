@@ -2,6 +2,7 @@ package net.igng.mcstatus.feature.chat
 
 import java.time.ZoneOffset
 import net.igng.mcstatus.core.data.ChatAttachmentDto
+import net.igng.mcstatus.core.data.ChatForwardChildDto
 import net.igng.mcstatus.core.data.ChatGroupSourceDto
 import net.igng.mcstatus.core.data.ChatLastMessageDto
 import net.igng.mcstatus.core.data.ChatMessageDto
@@ -296,5 +297,63 @@ class ChatLogicTest {
         )
         val sessions = buildUnifiedSessions(sources)
         assertEquals("https://p.qlogo.cn/gh/885647215/885647215/100", sessions.first().avatarUrl)
+    }
+
+    @Test
+    fun prioritizesPlatformNativeAvatarAndNativeNicknamePlanAIncludingForwards() {
+        // Bound QQ user: QQ avatar FIRST (not site avatar), QQ group nickname FIRST, IGNG nickname as secondary
+        val qqMsg = ChatMessageDto(
+            id = "qq-50",
+            source = "qq",
+            platform = "qq",
+            senderId = "1094950020",
+            senderName = "群里的星河",
+            content = "hello",
+        )
+        val profiles = mapOf(
+            "qq:1094950020" to ChatSenderProfileDto(
+                bound = true,
+                igngId = 101,
+                igngNickname = "IGNG星河",
+                avatarUrl = "https://img.igng.net/avatars/site.webp",
+            ),
+            "wechat:700000000000202" to ChatSenderProfileDto(
+                bound = true,
+                igngId = 202,
+                igngNickname = "IGNG小周",
+                platformNickname = "微信小周",
+                avatarUrl = "https://wx.qlogo.cn/mmhead/ver_1/zhou/0",
+            ),
+        )
+        val qqSender = resolveChatSender(qqMsg, profiles, activeAccount = null)
+        assertEquals("群里的星河", qqSender.displayName)
+        assertEquals("IGNG: IGNG星河", qqSender.secondaryName)
+        assertEquals("https://q1.qlogo.cn/g?b=qq&nk=1094950020&s=100", qqSender.avatarUrl)
+
+        // WeChat user with empty message snapshot falls back to profile.platformNickname first
+        val wxMsg = ChatMessageDto(
+            id = "qq-51",
+            source = "qq",
+            platform = "wechat",
+            senderId = "700000000000202",
+            senderName = "",
+            content = "hi",
+        )
+        val wxSender = resolveChatSender(wxMsg, profiles, activeAccount = null)
+        assertEquals("微信小周", wxSender.displayName)
+        assertEquals("IGNG: IGNG小周", wxSender.secondaryName)
+        assertEquals("https://wx.qlogo.cn/mmhead/ver_1/zhou/0", wxSender.avatarUrl)
+
+        // Forward child with numeric QQ placeholder resolves from profiles and uses QQ avatar
+        val fwdChild = ChatForwardChildDto(senderId = "1094950020", nickname = "1094950020", content = "测试")
+        val fwdSender = resolveForwardChildSender(fwdChild, profiles, defaultPlatform = "qq")
+        assertEquals("IGNG星河", fwdSender.displayName)
+        assertEquals("https://q1.qlogo.cn/g?b=qq&nk=1094950020&s=100", fwdSender.avatarUrl)
+
+        // Anonymous forward child with masked senderId never queries qlogo
+        val anonChild = ChatForwardChildDto(senderId = "109***20", nickname = "星河", content = "测试")
+        val anonSender = resolveForwardChildSender(anonChild, emptyMap(), defaultPlatform = "qq")
+        assertEquals("星河", anonSender.displayName)
+        assertNull(anonSender.avatarUrl)
     }
 }

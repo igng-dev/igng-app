@@ -839,8 +839,10 @@ data class ChatSenderProfileDto(
     @SerialName("user_id") val userId: String? = null,
     @SerialName("igng_nickname") val igngNickname: String? = null,
     @SerialName("igng_username") val igngUsername: String? = null,
+    @SerialName("platform_nickname") val platformNickname: String? = null,
     @SerialName("display_name") val displayName: String = "",
     @SerialName("avatar_url") val avatarUrl: String? = null,
+    @SerialName("igng_avatar_url") val igngAvatarUrl: String? = null,
     val badges: List<ChatSenderBadgeDto> = emptyList(),
     val relationship: ChatRelationshipDto? = null,
     @SerialName("luckperms_groups") val lpGroups: List<String> = emptyList(),
@@ -910,6 +912,7 @@ data class ChatForwardResponse(
     val summary: String? = null,
     val nodes: List<ChatForwardNodeDto> = emptyList(),
     val structure: List<ChatStructurePartDto> = emptyList(),
+    @SerialName("sender_profiles") val senderProfiles: Map<String, ChatSenderProfileDto> = emptyMap(),
 ) {
     val resolvedNodes: List<ChatForwardNodeDto> get() = nodes
 }

@@ -101,6 +101,7 @@ import net.igng.mcstatus.core.data.ChatForwardChildDto
 import net.igng.mcstatus.core.data.ChatForwardResponse
 import net.igng.mcstatus.core.data.ChatMessageDto
 import net.igng.mcstatus.core.data.ChatRepository
+import net.igng.mcstatus.core.data.ChatSenderProfileDto
 import net.igng.mcstatus.core.data.ChatStructurePartDto
 import net.igng.core.designsystem.IgngButton
 import net.igng.core.designsystem.IgngButtonStyle
@@ -210,14 +211,16 @@ fun ChatImageGalleryBlock(
     missingCount: Int,
     endpoints: SiteEndpoints,
     onPreviewGallery: (urls: List<String>, initialIndex: Int, titles: List<String?>) -> Unit,
+    allowTopLevelFallback: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val colors = IgngTheme.colors
     if (images.isEmpty() && missingCount <= 0) return
 
-    val fullUrls = remember(messageId, images) {
+    val fullUrls = remember(messageId, images, allowTopLevelFallback) {
         images.mapNotNull { att ->
-            endpoints.resolveApiMediaUrl(att.url ?: att.thumbUrl ?: "/api/v1/chat/media/$messageId/${att.index}")
+            val raw = att.url ?: att.thumbUrl ?: if (allowTopLevelFallback) "/api/v1/chat/media/$messageId/${att.index}" else null
+            endpoints.resolveApiMediaUrl(raw)
         }
     }
     val titles = remember(images) { images.map { friendlyMediaDisplayName(it.name, "聊天图片") } }
@@ -229,6 +232,7 @@ fun ChatImageGalleryBlock(
                 messageId = messageId,
                 att = att,
                 endpoints = endpoints,
+                allowTopLevelFallback = allowTopLevelFallback,
                 onClick = {
                     if (fullUrls.isNotEmpty()) onPreviewGallery(fullUrls, 0, titles)
                 },
@@ -243,12 +247,14 @@ fun ChatImageGalleryBlock(
                             val flatIndex = rowIndex * cols + colIndex
                             val isFace = att.kind.equals("face", ignoreCase = true)
                             val cellSize = if (isFace) 52.dp else if (cols == 2) 104.dp else 72.dp
-                            val imageCandidates = remember(messageId, att, endpoints) {
+                            val imageCandidates = remember(messageId, att, endpoints, allowTopLevelFallback) {
                                 buildList {
                                     endpoints.resolveApiMediaUrl(att.thumbUrl)?.let { add(it) }
                                     endpoints.resolveApiMediaUrl(att.url)?.let { add(it) }
-                                    endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}?variant=thumb")?.let { add(it) }
-                                    endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}")?.let { add(it) }
+                                    if (allowTopLevelFallback) {
+                                        endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}?variant=thumb")?.let { add(it) }
+                                        endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}")?.let { add(it) }
+                                    }
                                 }.distinct()
                             }
                             Box(
@@ -319,15 +325,27 @@ private fun ResilientChatImage(
 ) {
     val colors = IgngTheme.colors
     var attemptIndex by remember(candidates) { mutableIntStateOf(0) }
+    var retryEpoch by remember(candidates) { mutableIntStateOf(0) }
+    var isLoading by remember(candidates, attemptIndex, retryEpoch) { mutableStateOf(candidates.getOrNull(attemptIndex) != null) }
     val activeUrl = candidates.getOrNull(attemptIndex)
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (activeUrl != null) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 1.8.dp,
+                    color = colors.accent.copy(alpha = 0.65f),
+                )
+            }
             AsyncImage(
                 model = activeUrl,
                 contentDescription = contentDescription,
                 contentScale = contentScale,
+                onLoading = { isLoading = true },
+                onSuccess = { isLoading = false },
                 onError = {
+                    isLoading = false
                     if (attemptIndex < candidates.size) {
                         attemptIndex += 1
                     }
@@ -335,14 +353,28 @@ private fun ResilientChatImage(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            Icon(
-                imageVector = Icons.Rounded.HideImage,
-                contentDescription = "图片加载失败",
-                tint = colors.textMuted,
+            Column(
                 modifier = Modifier
-                    .size(22.dp)
-                    .clickable { attemptIndex = 0 },
-            )
+                    .clickable {
+                        attemptIndex = 0
+                        retryEpoch += 1
+                    }
+                    .padding(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.HideImage,
+                    contentDescription = "图片加载失败，点击重试",
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = "点此重试",
+                    style = IgngTheme.type.badge,
+                    color = colors.textMuted,
+                )
+            }
         }
     }
 }
@@ -352,24 +384,29 @@ private fun SingleChatImage(
     messageId: String,
     att: ChatAttachmentDto,
     endpoints: SiteEndpoints,
+    allowTopLevelFallback: Boolean = true,
     onClick: () -> Unit,
 ) {
     val colors = IgngTheme.colors
     val kind = att.kind.lowercase()
     val isFace = kind == "face" || kind == "emoji"
     val isMface = kind == "mface" || kind == "sticker"
-    val imageCandidates = remember(messageId, att, endpoints) {
+    val imageCandidates = remember(messageId, att, endpoints, allowTopLevelFallback) {
         buildList {
             if (att.isAnimated) {
                 endpoints.resolveApiMediaUrl(att.url)?.let { add(it) }
                 endpoints.resolveApiMediaUrl(att.thumbUrl)?.let { add(it) }
-                endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}")?.let { add(it) }
-                endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}?variant=thumb")?.let { add(it) }
+                if (allowTopLevelFallback) {
+                    endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}")?.let { add(it) }
+                    endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}?variant=thumb")?.let { add(it) }
+                }
             } else {
                 endpoints.resolveApiMediaUrl(att.thumbUrl)?.let { add(it) }
                 endpoints.resolveApiMediaUrl(att.url)?.let { add(it) }
-                endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}?variant=thumb")?.let { add(it) }
-                endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}")?.let { add(it) }
+                if (allowTopLevelFallback) {
+                    endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}?variant=thumb")?.let { add(it) }
+                    endpoints.resolveApiMediaUrl("/api/v1/chat/media/$messageId/${att.index}")?.let { add(it) }
+                }
             }
         }.distinct()
     }
@@ -1145,6 +1182,7 @@ fun ChatStructuredCard(
                         missingCount = 0,
                         endpoints = endpoints,
                         onPreviewGallery = onPreviewGallery,
+                        allowTopLevelFallback = false,
                     )
                 }
                 if (safeUrl != null) {
@@ -1239,6 +1277,8 @@ fun ChatForwardSummaryCard(
 @Composable
 fun ForwardViewerSheet(
     messageId: String,
+    platform: String = "qq",
+    sessionProfiles: Map<String, ChatSenderProfileDto> = emptyMap(),
     loading: Boolean,
     detail: ChatForwardResponse?,
     error: String?,
@@ -1250,6 +1290,9 @@ fun ForwardViewerSheet(
 ) {
     val colors = IgngTheme.colors
     val semantic = chatSemanticColors(colors.isDark)
+    val mergedProfiles = remember(sessionProfiles, detail) {
+        sessionProfiles + detail?.senderProfiles.orEmpty()
+    }
 
     val rootChildren: List<ChatForwardChildDto> = remember(detail) {
         if (detail == null) return@remember emptyList()
@@ -1319,19 +1362,17 @@ fun ForwardViewerSheet(
                 contentPadding = PaddingValues(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                itemsIndexed(currentEntries) { idx, child ->
-                    val name = child.nickname.ifBlank { "匿名" }
-                    val toneKey = child.senderId?.takeIf { ChatPlatformRules.isNumericQqId(it) }
-                        ?.let { "qq:$it" } ?: "fwd:$name"
-                    val tone = semantic.tones[ChatPlatformRules.identityToneIndex(toneKey)]
-                    val avatarUrl = child.senderId?.takeIf { ChatPlatformRules.isNumericQqId(it) }
-                        ?.let { "https://q1.qlogo.cn/g?b=qq&nk=$it&s=100" }
-                    val childParsed = remember(child) {
+                itemsIndexed(currentEntries) { _, child ->
+                    val sender = remember(child, mergedProfiles, platform) {
+                        resolveForwardChildSender(child, mergedProfiles, platform)
+                    }
+                    val tone = semantic.tones[sender.toneIndex.coerceIn(0, semantic.tones.lastIndex)]
+                    val childParsed = remember(child, platform) {
                         extractMessageDisplay(
                             ChatMessageDto(
                                 id = messageId,
                                 source = "qq",
-                                platform = "qq",
+                                platform = platform,
                                 content = child.content,
                                 attachments = child.attachments,
                                 messageStructure = child.children,
@@ -1348,41 +1389,39 @@ fun ForwardViewerSheet(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(tone.avatarBg),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Bold),
-                                color = tone.avatarFg,
-                            )
-                            if (!avatarUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = avatarUrl,
-                                    contentDescription = name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                        }
+                        ChatSenderAvatar(
+                            sender = sender,
+                            size = 32.dp,
+                            endpoints = endpoints,
+                        )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    text = name,
-                                    style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Bold),
-                                    color = tone.nameText,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                Row(
                                     modifier = Modifier.weight(1f),
-                                )
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    Text(
+                                        text = sender.displayName,
+                                        style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                                        color = tone.nameText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (!sender.secondaryName.isNullOrBlank()) {
+                                        Text(
+                                            text = sender.secondaryName,
+                                            style = IgngTheme.type.badge,
+                                            color = colors.textMuted,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
                                 if (!child.createdAt.isNullOrBlank()) {
                                     Text(
                                         text = formatMessageClock(child.createdAt),
@@ -1400,11 +1439,7 @@ fun ForwardViewerSheet(
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 if (childParsed.text.isNotBlank() && nestedForwards.isEmpty()) {
-                                    Text(
-                                        text = childParsed.text,
-                                        style = IgngTheme.type.body,
-                                        color = colors.textPrimary,
-                                    )
+                                    ChatRichMessageText(text = childParsed.text)
                                 }
                                 if (childImages.isNotEmpty() || childParsed.missingImages > 0) {
                                     ChatImageGalleryBlock(
@@ -1413,6 +1448,7 @@ fun ForwardViewerSheet(
                                         missingCount = childParsed.missingImages,
                                         endpoints = endpoints,
                                         onPreviewGallery = onPreviewGallery,
+                                        allowTopLevelFallback = false,
                                     )
                                 }
                                 if (childFiles.isNotEmpty()) {

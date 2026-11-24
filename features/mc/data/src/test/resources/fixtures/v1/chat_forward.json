@@ -31,7 +31,23 @@
           "nickname": "Alice",
           "content": "准备好了吗",
           "created_at": null,
-          "attachments": [],
+          "attachments": [
+            {
+              "index": 1,
+              "kind": "image",
+              "name": "prep.webp",
+              "url": "/api/v1/chat/media/qq-90001/1",
+              "thumb_url": "/api/v1/chat/media/qq-90001/1?variant=thumb",
+              "mime_type": null,
+              "size_bytes": null,
+              "width": 800,
+              "height": 600,
+              "is_animated": false,
+              "ocr_text": null,
+              "transcript": null,
+              "external_url": null
+            }
+          ],
           "children": []
         },
         {
@@ -44,5 +60,27 @@
         }
       ]
     }
-  ]
+  ],
+  "sender_profiles": {
+    "qq:10001": {
+      "bound": true,
+      "igng_id": 1024,
+      "user_id": "usr_1024",
+      "igng_nickname": "Alice",
+      "igng_username": "alice",
+      "platform_nickname": null,
+      "display_name": "Alice (10001)",
+      "avatar_url": "https://q1.qlogo.cn/g?b=qq&nk=10001&s=100",
+      "igng_avatar_url": "https://img.igng.net/avatars/a.webp",
+      "badges": [
+        {
+          "key": "pro",
+          "label": "云萤 Pro",
+          "tone": "pro"
+        }
+      ],
+      "relationship": null,
+      "luckperms_groups": []
+    }
+  }
 }

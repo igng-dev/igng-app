@@ -11,5 +11,7 @@ dependencies {
     implementation(project(":features:mc:model"))
     implementation(project(":features:mc:common"))
     implementation(project(":features:mc:data"))
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.browser)
+    testImplementation(libs.junit)
 }

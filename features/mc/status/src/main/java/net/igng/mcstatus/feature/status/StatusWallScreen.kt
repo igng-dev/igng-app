@@ -170,6 +170,7 @@ fun StatusWallScreen(
                             ServerStatusCard(
                                 server = server,
                                 series = series,
+                                preset = uiHolder.preset,
                                 onClick = { inspectedServer = server },
                                 modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
                             )
@@ -205,6 +206,7 @@ private fun StatusOverviewCard(label: String, value: String, modifier: Modifier 
 private fun ServerStatusCard(
     server: PublicServerStatusDto,
     series: ServerHistorySeriesDto?,
+    preset: StatusRangePreset,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -301,7 +303,12 @@ private fun ServerStatusCard(
         }
         if (buckets.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
-            IgngStatusHealthStrip(buckets = buckets)
+            IgngStatusHealthStrip(
+                buckets = buckets,
+                startLabel = "${preset.label}前",
+                endLabel = "现在",
+                windowLabel = preset.label,
+            )
         }
     }
 }
@@ -358,8 +365,12 @@ private fun ServerDetailBottomSheet(
                     points = tpsPoints,
                     lineColor = visual.accent,
                     valueFormatter = { "TPS ${IgngFormatters.formatDecimal(it, 2)}" },
+                    height = 172.dp,
                     minY = 0.0,
                     maxY = 20.5,
+                    referenceValue = 20.0,
+                    referenceLabel = "20.0",
+                    axisValueFormatter = { IgngFormatters.formatDecimal(it, 0) },
                 )
             }
 
@@ -374,12 +385,19 @@ private fun ServerDetailBottomSheet(
                     }
                 }
             }
+            val avgPing = remember(pingPoints) {
+                pingPoints.takeIf { it.isNotEmpty() }?.map { it.value }?.average()
+            }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 IgngSectionHeader(title = "网络延迟")
                 IgngLineChart(
                     points = pingPoints,
                     lineColor = colors.accent,
                     valueFormatter = { "${IgngFormatters.formatDecimal(it, 1)} ms" },
+                    height = 172.dp,
+                    referenceValue = avgPing,
+                    referenceLabel = avgPing?.let { "均值 ${it.toInt()}ms" },
+                    axisValueFormatter = { "${it.toInt()}ms" },
                 )
             }
 
@@ -400,7 +418,9 @@ private fun ServerDetailBottomSheet(
                         points = playerPoints,
                         lineColor = colors.success,
                         valueFormatter = { "${it.toInt()} 人" },
+                        height = 164.dp,
                         minY = 0.0,
+                        axisValueFormatter = { "${it.toInt()}" },
                     )
                 }
             } else {
@@ -421,7 +441,9 @@ private fun ServerDetailBottomSheet(
                         points = cpuPoints,
                         lineColor = colors.success,
                         valueFormatter = { "${IgngFormatters.formatDecimal(it, 1)}%" },
+                        height = 164.dp,
                         minY = 0.0,
+                        axisValueFormatter = { "${it.toInt()}%" },
                     )
                 }
             }

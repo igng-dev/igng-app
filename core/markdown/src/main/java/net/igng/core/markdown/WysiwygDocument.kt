@@ -224,6 +224,14 @@ object WysiwygCodec {
                 is InlineSpan.Strike -> append("~~").append(serializeInlines(span.children)).append("~~")
                 is InlineSpan.InlineCode -> append("`").append(span.code).append("`")
                 is InlineSpan.Highlight -> append("==").append(span.text).append("==")
+                is InlineSpan.Colored -> {
+                    val inner = serializeInlines(span.children)
+                    if (span.hexColor.isNullOrBlank()) {
+                        append(inner)
+                    } else {
+                        append("""<span style="color:${span.hexColor}">""").append(inner).append("</span>")
+                    }
+                }
                 is InlineSpan.Link -> append("[").append(span.label).append("](").append(span.url).append(")")
                 is InlineSpan.Mention -> append("@").append(span.handle)
             }

@@ -512,6 +512,13 @@ private fun buildInlineAnnotatedString(
                     append(span.text)
                     addStyle(SpanStyle(background = colors.warningLow), start, length)
                 }
+                is InlineSpan.Colored -> {
+                    val start = length
+                    appendSpans(span.children)
+                    parseSafeInlineColor(span.hexColor, isDark = colors.isDark)?.let { tint ->
+                        addStyle(SpanStyle(color = tint), start, length)
+                    }
+                }
                 is InlineSpan.Link -> {
                     val start = length
                     append(span.label)
@@ -552,4 +559,25 @@ private fun buildInlineAnnotatedString(
         }
     }
     appendSpans(spans)
+}
+
+private fun parseSafeInlineColor(hex: String?, isDark: Boolean): androidx.compose.ui.graphics.Color? {
+    val clean = hex?.trim()?.removePrefix("#") ?: return null
+    if (clean.length != 6) return null
+    val rgb = clean.toLongOrNull(16) ?: return null
+    val r = ((rgb shr 16) and 0xFF) / 255f
+    val g = ((rgb shr 8) and 0xFF) / 255f
+    val b = (rgb and 0xFF) / 255f
+    val luminance = 0.2126f * r + 0.7152f * g + 0.0722f * b
+    // Ensure legible contrast on both light paper and dark surfaces
+    val (adjR, adjG, adjB) = when {
+        !isDark && luminance > 0.72f -> Triple(r * 0.72f, g * 0.72f, b * 0.72f)
+        isDark && luminance < 0.28f -> Triple(
+            (r + (1f - r) * 0.45f).coerceIn(0f, 1f),
+            (g + (1f - g) * 0.45f).coerceIn(0f, 1f),
+            (b + (1f - b) * 0.45f).coerceIn(0f, 1f),
+        )
+        else -> Triple(r, g, b)
+    }
+    return androidx.compose.ui.graphics.Color(red = adjR, green = adjG, blue = adjB, alpha = 1f)
 }

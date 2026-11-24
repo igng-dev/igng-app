@@ -18,6 +18,7 @@ sealed interface InlineSpan {
     data class Strike(val children: List<InlineSpan>) : InlineSpan
     data class InlineCode(val code: String) : InlineSpan
     data class Highlight(val text: String) : InlineSpan
+    data class Colored(val hexColor: String?, val children: List<InlineSpan>) : InlineSpan
     data class Link(val label: String, val url: String) : InlineSpan
     data class Mention(val handle: String) : InlineSpan
 }
@@ -271,6 +272,65 @@ object MarkdownParser {
                 continue
             }
 
+            // Safe inline HTML tags commonly used inside Markdown docs (<font>, <span>, <br>, <b>, <i>, <s>, <code>, <a>)
+            if (input[idx] == '<') {
+                val brMatch = INLINE_BR_PREFIX_RE.find(rest)
+                if (brMatch != null) {
+                    textBuf.append('\n')
+                    idx += brMatch.value.length
+                    continue
+                }
+                val colorTagMatch = INLINE_COLOR_TAG_PREFIX_RE.find(rest)
+                if (colorTagMatch != null) {
+                    val tagName = colorTagMatch.groupValues[1].lowercase()
+                    val attrs = colorTagMatch.groupValues[2]
+                    val inner = colorTagMatch.groupValues[3]
+                    if (tagName == "font" || tagName == "span") {
+                        flushText()
+                        val hexColor = extractSafeHexColor(attrs)
+                        val children = parseInlines(inner)
+                        if (hexColor != null) {
+                            spans.add(InlineSpan.Colored(hexColor = hexColor, children = children))
+                        } else {
+                            spans.addAll(children)
+                        }
+                        idx += colorTagMatch.value.length
+                        continue
+                    }
+                }
+                val styledTagMatch = INLINE_SIMPLE_HTML_PREFIX_RE.find(rest)
+                if (styledTagMatch != null) {
+                    val tag = styledTagMatch.groupValues[1].lowercase()
+                    val inner = styledTagMatch.groupValues[2]
+                    flushText()
+                    when (tag) {
+                        "b", "strong" -> spans.add(InlineSpan.Bold(parseInlines(inner)))
+                        "i", "em" -> spans.add(InlineSpan.Italic(parseInlines(inner)))
+                        "s", "del" -> spans.add(InlineSpan.Strike(parseInlines(inner)))
+                        "mark" -> spans.add(InlineSpan.Highlight(extractPlainText(parseInlines(inner))))
+                        "code" -> spans.add(InlineSpan.InlineCode(unescapeHtml(inner)))
+                        "u" -> spans.addAll(parseInlines(inner))
+                    }
+                    idx += styledTagMatch.value.length
+                    continue
+                }
+                val anchorMatch = INLINE_ANCHOR_PREFIX_RE.find(rest)
+                if (anchorMatch != null) {
+                    val href = anchorMatch.groupValues[1].trim()
+                    val label = stripTags(anchorMatch.groupValues[2]).trim().ifBlank { href }
+                    flushText()
+                    spans.add(InlineSpan.Link(label = unescapeHtml(label), url = href))
+                    idx += anchorMatch.value.length
+                    continue
+                }
+                // Strip stray/unbalanced inline formatting tags (<font ...>, </font>, <span ...>, </span>)
+                val strayTagMatch = INLINE_STRAY_FORMAT_TAG_RE.find(rest)
+                if (strayTagMatch != null) {
+                    idx += strayTagMatch.value.length
+                    continue
+                }
+            }
+
             // Inline code `code`
             if (input[idx] == '`') {
                 val end = input.indexOf('`', idx + 1)
@@ -378,6 +438,7 @@ object MarkdownParser {
                 is InlineSpan.Strike -> append(extractPlainText(span.children))
                 is InlineSpan.InlineCode -> append(span.code)
                 is InlineSpan.Highlight -> append(span.text)
+                is InlineSpan.Colored -> append(extractPlainText(span.children))
                 is InlineSpan.Link -> append(span.label)
                 is InlineSpan.Mention -> append("@${span.handle}")
             }
@@ -475,6 +536,16 @@ object MarkdownParser {
         return unescapeHtml(s).replace(Regex("\n{3,}"), "\n\n").trim()
     }
 
+    private fun extractSafeHexColor(attrs: String): String? {
+        val hexMatch = SAFE_HEX_COLOR_RE.find(attrs) ?: return null
+        val raw = hexMatch.groupValues[1].uppercase()
+        return if (raw.length == 3) {
+            "#${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}"
+        } else {
+            "#$raw"
+        }
+    }
+
     private fun stripTags(text: String): String = text.replace(Regex("<[^>]+>"), "")
 
     private fun unescapeHtml(text: String): String = text
@@ -500,4 +571,10 @@ object MarkdownParser {
     private val LINK_PREFIX_RE = Regex("^\\[([^\\]]+)]\\(([^)]+)\\)")
     private val MENTION_PREFIX_RE = Regex("^@([A-Za-z0-9_\\u4e00-\\u9fff-]{1,32})")
     private val BARE_URL_PREFIX_RE = Regex("^https?://[^\\s<>\"'\\)]+")
+    private val INLINE_BR_PREFIX_RE = Regex("^(?i)<br\\s*/?>")
+    private val INLINE_COLOR_TAG_PREFIX_RE = Regex("^(?is)<(font|span)\\b([^>]*)>(.*?)</\\1>")
+    private val INLINE_SIMPLE_HTML_PREFIX_RE = Regex("^(?is)<(strong|b|em|i|del|s|mark|code|u)\\b[^>]*>(.*?)</\\1>")
+    private val INLINE_ANCHOR_PREFIX_RE = Regex("^(?is)<a\\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>")
+    private val INLINE_STRAY_FORMAT_TAG_RE = Regex("^(?i)</?(?:font|span)\\b[^>]*>")
+    private val SAFE_HEX_COLOR_RE = Regex("(?i)(?:color\\s*[:=]\\s*[\"']?)#([0-9a-f]{6}|[0-9a-f]{3})(?![0-9a-f])")
 }
