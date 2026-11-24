@@ -218,6 +218,14 @@ fun AdminConsoleScreen(
         AdminTab.USERS -> usersState.isUserRefreshing
         AdminTab.COLLECTIONS -> collectionsState.isUserRefreshing
     }
+    val currentRevalidating = when (selectedTab) {
+        AdminTab.POSTS -> postsState.isRevalidating
+        AdminTab.REVIEWS -> reviewsState.isRevalidating
+        AdminTab.REPORTS -> reportsState.isRevalidating
+        AdminTab.RISK -> riskState.isRevalidating
+        AdminTab.USERS -> usersState.isRevalidating
+        AdminTab.COLLECTIONS -> collectionsState.isRevalidating
+    }
     val currentError = when (selectedTab) {
         AdminTab.POSTS -> if (postsState.data == null) postsState.error else null
         AdminTab.REVIEWS -> if (reviewsState.data == null) reviewsState.error else null
@@ -304,6 +312,8 @@ fun AdminConsoleScreen(
 
         IgngPullToRefreshBox(
             isRefreshing = currentRefreshing,
+            isRevalidating = currentRevalidating,
+            showIdleDivider = true,
             onRefresh = { refreshCurrent(userInitiated = true) },
             modifier = Modifier.weight(1f),
         ) {

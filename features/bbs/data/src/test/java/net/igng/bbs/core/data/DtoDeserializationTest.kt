@@ -71,10 +71,13 @@ class DtoDeserializationTest {
         assertTrue(bootstrap.categories.isNotEmpty())
         assertTrue(bootstrap.reportReasons.isNotEmpty())
         assertTrue(bootstrap.appealGrounds.isNotEmpty())
+        assertEquals("1.17.0", bootstrap.contractVersion)
 
         val home = json.decodeFromString(BbsHomeDto.serializer(), readFixture("home.json"))
         assertTrue(home.recommendations.isNotEmpty())
         assertTrue(home.latestPosts.isNotEmpty())
+        assertTrue(home.recommendations.all { it.post.series == null })
+        assertTrue(home.latestPosts.all { it.series == null })
 
         val posts = json.decodeFromString(
             PaginatedResponseDto.serializer(PostSummaryDto.serializer()),

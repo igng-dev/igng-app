@@ -126,6 +126,8 @@ fun CreatorHubScreen(
 
         IgngPullToRefreshBox(
             isRefreshing = overviewState.isUserRefreshing,
+            isRevalidating = overviewState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { overviewHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

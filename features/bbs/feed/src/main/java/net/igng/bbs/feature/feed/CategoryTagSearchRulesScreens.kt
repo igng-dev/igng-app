@@ -51,6 +51,7 @@ import net.igng.bbs.core.data.BbsCacheKeys
 import net.igng.bbs.core.data.BbsCachePolicies
 import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.BbsDiskCodecs
+import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.BbsRulesDto
 import net.igng.bbs.core.model.ListWrapperDto
 import net.igng.bbs.core.model.PaginatedResponseDto
@@ -89,7 +90,7 @@ fun CategoryFeedScreen(
 ) {
     FilteredPostListScreen(
         container = container,
-        title = categoryTitle.ifBlank { categorySlug },
+        title = BbsFormatters.categoryDisplayName(categorySlug, categoryTitle),
         subtitle = "分区文章",
         categorySlug = categorySlug,
         tag = null,
@@ -111,7 +112,7 @@ fun TagFeedScreen(
 ) {
     FilteredPostListScreen(
         container = container,
-        title = "#$tag",
+        title = BbsFormatters.tagDisplayLabel(tag),
         subtitle = "标签聚合",
         categorySlug = null,
         tag = tag,
@@ -249,6 +250,8 @@ private fun FilteredPostListScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = feedState.isUserRefreshing,
+            isRevalidating = feedState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = {
                 holder.resetPagination(cacheKey)
                 feedHandle.refresh()
@@ -423,7 +426,7 @@ fun SearchScreen(
                             ) {
                                 hotTags.forEach { tag ->
                                     IgngTagChip(
-                                        text = "#${tag.name} (${tag.count})",
+                                        text = "${BbsFormatters.tagDisplayLabel(tag.name)} (${tag.count})",
                                         onClick = { onOpenTag(tag.name) },
                                     )
                                 }
@@ -526,6 +529,8 @@ fun RulesScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = rulesState.isUserRefreshing,
+            isRevalidating = rulesState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { rulesHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

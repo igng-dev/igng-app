@@ -136,6 +136,7 @@ fun ProfileCenterScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
+            showIdleDivider = true,
             onRefresh = {
                 scope.launch {
                     refreshing = true
@@ -379,6 +380,8 @@ fun UserProfileScreen(
         IgngTopBar(title = profile?.user?.displayName ?: "用户主页", onBack = onBack)
         IgngPullToRefreshBox(
             isRefreshing = profileState.isUserRefreshing,
+            isRevalidating = profileState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { profileHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -545,6 +548,8 @@ fun FavoritesScreen(
         IgngTopBar(title = "我的收藏", onBack = onBack)
         IgngPullToRefreshBox(
             isRefreshing = favState.isUserRefreshing,
+            isRevalidating = favState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { favHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -612,6 +617,8 @@ fun FollowingScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = followingState.isUserRefreshing,
+            isRevalidating = followingState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { followingHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

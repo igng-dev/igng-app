@@ -178,6 +178,8 @@ fun CreatorPostsScreen(
 
         IgngPullToRefreshBox(
             isRefreshing = postsState.isUserRefreshing,
+            isRevalidating = postsState.isRevalidating || invitesState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = {
                 postsHandle.refresh()
                 invitesHandle.silentRefresh()
@@ -435,6 +437,8 @@ fun CreatorColumnsScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = colsState.isUserRefreshing,
+            isRevalidating = colsState.isRevalidating || eventsState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = {
                 colsHandle.refresh()
                 eventsHandle.silentRefresh()
@@ -633,6 +637,8 @@ fun CreatorSeriesScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = seriesState.isUserRefreshing,
+            isRevalidating = seriesState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { seriesHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -774,6 +780,8 @@ fun CreatorCommentsScreen(
         IgngTopBar(title = "收到的评论管理", onBack = onBack)
         IgngPullToRefreshBox(
             isRefreshing = commentsState.isUserRefreshing,
+            isRevalidating = commentsState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { commentsHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -862,6 +870,8 @@ fun CreatorReviewsScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = reviewsState.isUserRefreshing,
+            isRevalidating = reviewsState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { reviewsHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -1027,6 +1037,8 @@ fun CreatorMediaScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = mediaState.isUserRefreshing,
+            isRevalidating = mediaState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { mediaHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

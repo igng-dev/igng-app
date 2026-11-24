@@ -46,6 +46,7 @@ import net.igng.bbs.core.data.BbsCacheKeys
 import net.igng.bbs.core.data.BbsCachePolicies
 import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.BbsDiskCodecs
+import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.ColumnDetailDto
 import net.igng.bbs.core.model.ColumnSummaryDto
 import net.igng.bbs.core.model.PaginatedResponseDto
@@ -184,7 +185,7 @@ fun ColumnSquareScreen(
             }
             items(bootstrap?.categories.orEmpty(), key = { it.id }) { cat ->
                 IgngTagChip(
-                    text = cat.name,
+                    text = BbsFormatters.categoryDisplayName(cat),
                     selected = selectedCategoryId == cat.id,
                     onClick = { selectedCategoryId = if (selectedCategoryId == cat.id) null else cat.id },
                 )
@@ -194,6 +195,8 @@ fun ColumnSquareScreen(
 
         IgngPullToRefreshBox(
             isRefreshing = colState.isUserRefreshing,
+            isRevalidating = colState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { colHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -336,6 +339,8 @@ fun ColumnDetailScreen(
 
         IgngPullToRefreshBox(
             isRefreshing = detailState.isUserRefreshing,
+            isRevalidating = detailState.isRevalidating,
+            showIdleDivider = true,
             onRefresh = { detailHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

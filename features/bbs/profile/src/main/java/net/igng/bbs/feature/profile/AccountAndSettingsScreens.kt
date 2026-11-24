@@ -48,6 +48,7 @@ import net.igng.bbs.core.data.BbsCacheTags
 import net.igng.bbs.core.data.UpdateMySettingsRequest
 import net.igng.bbs.core.data.UpdateUserPreferencesPatch
 import net.igng.bbs.core.model.AppPreferences
+import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.BbsUserSettingsDto
 import net.igng.bbs.core.model.BlockRuleDto
 import net.igng.core.data.IgngCacheScope
@@ -334,6 +335,8 @@ fun PrivacyPreferencesScreen(
             IgngTopBar(title = "隐私与内容偏好", onBack = onBack)
             IgngPullToRefreshBox(
                 isRefreshing = settingsState.isUserRefreshing,
+                isRevalidating = settingsState.isRevalidating,
+                showIdleDivider = true,
                 onRefresh = { settingsHandle.refresh() },
                 modifier = Modifier.weight(1f),
             ) {
@@ -387,7 +390,7 @@ fun PrivacyPreferencesScreen(
                                     bootstrap?.categories.orEmpty().forEach { cat ->
                                         val selected = cat.id in excludedCats
                                         IgngTagChip(
-                                            text = cat.name,
+                                            text = BbsFormatters.categoryDisplayName(cat),
                                             selected = selected,
                                             tone = if (selected) IgngTone.DANGER else IgngTone.NEUTRAL,
                                             onClick = {
@@ -546,12 +549,6 @@ fun AppSettingsScreen(
                             subtitle = "IGNG BBS 专属浏览与通知偏好",
                         )
                         Spacer(Modifier.height(10.dp))
-                        IgngSwitchRow(
-                            title = "首页自动折叠同系列文章",
-                            subtitle = "减少长连载在社区信息流中的刷屏感",
-                            checked = prefs.collapseSeriesInFeed,
-                            onCheckedChange = { scope.launch { container.settingsRepository.setCollapseSeriesInFeed(it) } },
-                        )
                         IgngSwitchRow(
                             title = "后台定期同步未读消息通知",
                             subtitle = "通过系统 WorkManager 低功耗轮询未读提醒",
