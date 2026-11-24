@@ -5,8 +5,25 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
+    <!-- Three ascending slanted beacon bars above the layered voxel stack -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M42,32.4 L46.4,30.1 A0.8,0.8 0 0,1 47.5,30.8 L47.5,36 L42,36 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M50,29.2 L54.4,26.9 A0.8,0.8 0 0,1 55.5,27.6 L55.5,36 L50,36 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M58,26.0 L62.4,23.7 A0.8,0.8 0 0,1 63.5,24.4 L63.5,36 L58,36 Z" />
+
+    <!-- Cascading rear layered slab silhouette (concentric gap around front tile) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M45.5,38.5 H69 A7,7 0 0,1 76,45.5 V66 A7,7 0 0,1 69,73 H67.8 V50.5 A9.3,9.3 0 0,0 58.5,41.2 H39.8 A6.8,6.8 0 0,1 45.5,38.5 Z" />
+
+    <!-- Front rounded voxel tile with symmetric stepped-pixel cutout and solid diamond core -->
     <path
         android:fillColor="#FFFFFFFF"
         android:fillType="evenOdd"
-        android:pathData="M20,17h68c4.4,0 8,3.6 8,8v58c0,4.4 -3.6,8 -8,8H20c-4.4,0 -8,-3.6 -8,-8V25c0,-4.4 3.6,-8 8,-8zM23,29h62c1.7,0 3,1.3 3,3v6c0,1.7 -1.3,3 -3,3H23c-1.7,0 -3,-1.3 -3,-3v-6c0,-1.7 1.3,-3 3,-3zM23,47h62c1.7,0 3,1.3 3,3v6c0,1.7 -1.3,3 -3,3H23c-1.7,0 -3,-1.3 -3,-3v-6c0,-1.7 1.3,-3 3,-3zM23,65h62c1.7,0 3,1.3 3,3v6c0,1.7 -1.3,3 -3,3H23c-1.7,0 -3,-1.3 -3,-3v-6c0,-1.7 1.3,-3 3,-3z" />
+        android:pathData="M37.5,44 H58.5 A6.5,6.5 0 0,1 65,50.5 V71.5 A6.5,6.5 0 0,1 58.5,78 H37.5 A6.5,6.5 0 0,1 31,71.5 V50.5 A6.5,6.5 0 0,1 37.5,44 Z M44.5,50 H51.5 V53.5 H55 V57 H58.5 V65 H55 V68.5 H51.5 V72 H44.5 V68.5 H41 V65 H37.5 V57 H41 V53.5 H44.5 Z M48,55.8 L53.2,61 L48,66.2 L42.8,61 Z" />
 </vector>
