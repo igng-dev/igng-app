@@ -36,6 +36,7 @@ import net.igng.core.data.IgngImageLoaderFactory
 import net.igng.core.data.IgngLocalJsonCache
 import net.igng.core.data.IgngSwrCache
 import net.igng.core.data.runSuspendCatching
+import net.igng.core.model.AppUpdateConfig
 import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.MotionIntensity
 import net.igng.core.model.ReaderTypographyPrefs
@@ -48,6 +49,7 @@ import net.igng.core.network.IgngHttpClient
 import net.igng.core.network.IgngJson
 import net.igng.core.network.SessionExpiredNotifier
 import net.igng.core.network.SingleFlightTokenRefresher
+import net.igng.core.updater.AppUpdateManager
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.mcstatus.core.model.BootstrapResponse
 import net.igng.mcstatus.core.model.DailyExpStatus
@@ -150,6 +152,7 @@ class IgngAppContainer(
     val appContext: Context,
     val endpoints: SiteEndpoints,
     val clientVersion: String,
+    val clientVersionCode: Int = 0,
 ) {
     private val _dailyExp = MutableStateFlow<DailyExpStatus?>(null)
     val dailyExp: StateFlow<DailyExpStatus?> = _dailyExp.asStateFlow()
@@ -227,6 +230,19 @@ class IgngAppContainer(
 
     val settingsRepository = SettingsRepository(appContext)
     val accountRepository = IgngAccountRepository(httpClient)
+    val appUpdateManager = AppUpdateManager(
+        context = appContext,
+        config = AppUpdateConfig(
+            appKey = "mc",
+            appName = "IGNGmc",
+            packageName = appContext.packageName,
+            currentVersionName = clientVersion,
+            currentVersionCode = clientVersionCode,
+            assetPrefix = "igng-mc-v",
+            userAgent = "IGNGmc-Android/$clientVersion",
+        ),
+        appScope = appScope,
+    )
     val authRepository = AuthRepository(endpoints, apiClient, oauthClient)
     val exploreRepository = ExploreRepository(endpoints, apiClient, exploreCache, swrCache = swrCache)
     val statusRepository = StatusRepository(endpoints, apiClient, swrCache = swrCache)
@@ -317,6 +333,9 @@ class IgngAppContainer(
                         tags = setOf(McCacheTags.CHAT_SOURCES),
                         diskCodec = McDiskCodecs.chatSources,
                     )
+                }
+                launch {
+                    appUpdateManager.cleanupObsoleteApks()
                 }
             }
         }
@@ -507,6 +526,7 @@ class IgngAppContainer(
         wikiCache.clearAll()
         swrCache.clearAll()
         IgngImageLoaderFactory.clearCaches(appContext, imageLoader)
+        appUpdateManager.clearCachedApks()
     }
 
     suspend fun cacheSizeBytes(): Long =
@@ -514,5 +534,6 @@ class IgngAppContainer(
             wikiCache.sizeBytes() +
             draftCache.sizeBytes() +
             swrCache.diskSizeBytes() +
-            IgngImageLoaderFactory.diskCacheSizeBytes(appContext)
+            IgngImageLoaderFactory.diskCacheSizeBytes(appContext) +
+            appUpdateManager.cacheSizeBytes()
 }

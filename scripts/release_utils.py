@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import re
 import subprocess
@@ -169,18 +170,70 @@ def load_app_metadata(meta_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
-def describe_app_change(app_key: str, scopes: dict[str, bool] | None) -> str:
+def change_scope_key(app_key: str, scopes: dict[str, bool] | None) -> str:
     if scopes is None:
-        return "首个统一家族版本发布"
+        return "initial"
     app_changed = scopes.get(app_key, False)
     core_changed = scopes.get("core", False)
     if app_changed and core_changed:
-        return "本应用变更 + 共享底座同步更新"
+        return "app_and_core"
     if app_changed:
-        return "本应用功能/修复更新"
+        return "app_only"
     if core_changed:
+        return "core_only"
+    return "unchanged"
+
+
+def describe_app_change(app_key: str, scopes: dict[str, bool] | None) -> str:
+    key = change_scope_key(app_key, scopes)
+    if key == "initial":
+        return "首个统一家族版本发布"
+    if key == "app_and_core":
+        return "本应用变更 + 共享底座同步更新"
+    if key == "app_only":
+        return "本应用功能/修复更新"
+    if key == "core_only":
         return "共享底座（Core / 设计系统 / 网络与认证）同步更新"
     return "本版本无独立业务改动，随家族统一版本同步构建"
+
+
+def build_update_manifest(
+    *,
+    tag: str,
+    version_name: str,
+    version_code: int,
+    commit: str,
+    prerelease: bool,
+    apps: list[dict[str, Any]],
+    scopes: dict[str, bool] | None = None,
+    custom_notes: str = "",
+    auto_notes: str = "",
+    published_at: str | None = None,
+) -> dict[str, Any]:
+    changelog = custom_notes.strip() or auto_notes.strip()
+    ts = (published_at or "").strip() or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    apps_map: dict[str, dict[str, Any]] = {}
+    for item in apps:
+        app_key = item["app_key"]
+        apps_map[app_key] = {
+            "package_name": item["app_id"],
+            "asset_name": item["asset_name"],
+            "size_bytes": int(item.get("apk_size_bytes", 0) or 0),
+            "sha256": item["apk_sha256"],
+            "cert_sha256": item["cert_sha256"],
+            "change_scope": change_scope_key(app_key, scopes),
+        }
+    return {
+        "schema_version": 1,
+        "tag": tag,
+        "version_name": version_name,
+        "version_code": version_code,
+        "commit": commit,
+        "prerelease": bool(prerelease),
+        "published_at": ts,
+        "changelog": changelog,
+        "apps": apps_map,
+    }
 
 
 def build_release_notes(
@@ -338,6 +391,23 @@ def cmd_render_notes(args: argparse.Namespace) -> int:
     )
     Path(args.output).write_text(notes, encoding="utf-8")
 
+    if args.manifest_output:
+        manifest = build_update_manifest(
+            tag=args.tag,
+            version_name=args.version_name,
+            version_code=args.version_code,
+            commit=args.commit,
+            prerelease=args.prerelease,
+            apps=apps,
+            scopes=scopes,
+            custom_notes=args.custom_notes or "",
+            auto_notes=auto_notes,
+        )
+        Path(args.manifest_output).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     if args.summary_output:
         summary = build_step_summary(
             tag=args.tag,
@@ -378,6 +448,7 @@ def main(argv: list[str] | None = None) -> int:
     p_notes.add_argument("--commit", required=True)
     p_notes.add_argument("--meta-dir", required=True)
     p_notes.add_argument("--output", required=True)
+    p_notes.add_argument("--manifest-output", default="")
     p_notes.add_argument("--summary-output", default="")
     p_notes.add_argument("--prev-tag", default="")
     p_notes.add_argument("--custom-notes", default="")

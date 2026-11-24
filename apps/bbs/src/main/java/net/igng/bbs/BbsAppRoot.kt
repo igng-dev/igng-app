@@ -141,6 +141,11 @@ fun BbsAppRoot(
         LaunchedEffect(Unit) {
             container.refreshFamilyAccounts()
         }
+        // Silent cold-start update check (24h cooldown, skips family-sync-only pushes)
+        LaunchedEffect(Unit) {
+            delay(2500L)
+            container.appUpdateManager.checkForUpdatesIfDue()
+        }
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {

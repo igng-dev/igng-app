@@ -82,6 +82,7 @@ class ReleaseUtilsTest(unittest.TestCase):
                         "app_title": "IGNGmc",
                         "app_id": "net.igng.mcstatus",
                         "asset_name": "igng-mc-v3.0.0.apk",
+                        "apk_size_bytes": 3357678,
                         "apk_sha256": "b" * 64,
                         "cert_sha256": "2" * 64,
                         "applinks_fp": "22:22",
@@ -97,6 +98,7 @@ class ReleaseUtilsTest(unittest.TestCase):
                         "app_title": "IGNG BBS",
                         "app_id": "net.igng.bbs",
                         "asset_name": "igng-bbs-v3.0.0.apk",
+                        "apk_size_bytes": 3055253,
                         "apk_sha256": "a" * 64,
                         "cert_sha256": "1" * 64,
                         "applinks_fp": "11:11",
@@ -134,6 +136,25 @@ class ReleaseUtilsTest(unittest.TestCase):
             )
             self.assertIn("正式发布（Latest）", summary)
             self.assertIn("igng-bbs-v3.0.0.apk", summary)
+
+            manifest = release_utils.build_update_manifest(
+                tag="v3.0.1",
+                version_name="3.0.1",
+                version_code=30001,
+                commit="abcdef1",
+                prerelease=False,
+                apps=apps,
+                scopes={"core": False, "bbs": True},
+                custom_notes="新增设置内一键更新功能",
+                published_at="2026-11-25T10:00:00Z",
+            )
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(manifest["version_code"], 30001)
+            self.assertEqual(manifest["changelog"], "新增设置内一键更新功能")
+            self.assertEqual(manifest["apps"]["bbs"]["change_scope"], "app_only")
+            self.assertEqual(manifest["apps"]["bbs"]["size_bytes"], 3055253)
+            self.assertEqual(manifest["apps"]["mc"]["change_scope"], "unchanged")
+            self.assertEqual(manifest["apps"]["mc"]["size_bytes"], 3357678)
 
 
 if __name__ == "__main__":

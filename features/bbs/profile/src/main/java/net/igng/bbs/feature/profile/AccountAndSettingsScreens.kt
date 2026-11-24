@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,7 +57,10 @@ import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAboutAppCard
 import net.igng.core.designsystem.IgngAccountVaultCard
 import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngAppUpdateCard
+import net.igng.core.designsystem.IgngAppUpdateSheet
 import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
+import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngCacheCard
 import net.igng.core.designsystem.IgngConfirmDialog
 import net.igng.core.designsystem.IgngDevicesSecurityCard
@@ -488,20 +492,29 @@ fun AppSettingsScreen(
     onBack: () -> Unit,
     onShowMessage: (String) -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val prefs by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
+    val updateSnapshot by container.appUpdateManager.snapshot.collectAsState()
     var cacheBytes by remember { mutableLongStateOf(0L) }
     var clearingCache by remember { mutableStateOf(false) }
+    var showUpdateSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
+    }
+
+    LifecycleResumeEffect(Unit) {
+        container.appUpdateManager.onResumeHost()
+        onPauseOrDispose { }
     }
 
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(title = "应用设置", subtitle = "外观画布、动效触感、通知与缓存", onBack = onBack)
+            IgngTopBar(title = "应用设置", subtitle = "外观画布、动效触感、通知、缓存与更新", onBack = onBack)
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -551,7 +564,7 @@ fun AppSettingsScreen(
                 item(key = "cache") {
                     IgngCacheCard(
                         cacheBytes = cacheBytes,
-                        subtitlePrefix = "社区快照与本地图片缓存",
+                        subtitlePrefix = "社区快照、更新包与本地图片缓存",
                         clearing = clearingCache,
                         onClearCache = {
                             scope.launch {
@@ -565,6 +578,23 @@ fun AppSettingsScreen(
                     )
                 }
 
+                item(key = "app_update") {
+                    IgngAppUpdateCard(
+                        snapshot = updateSnapshot,
+                        onCheckNow = { container.appUpdateManager.checkForUpdatesAsync(manual = true) },
+                        onStartUpdate = { container.appUpdateManager.startOneClickUpdate() },
+                        onCancelDownload = { container.appUpdateManager.cancelDownload() },
+                        onOpenInstallPermission = {
+                            container.appUpdateManager.openInstallPermissionSettings().onFailure {
+                                onShowMessage("无法打开系统安装权限设置，请在系统应用设置中手动开启")
+                            }
+                        },
+                        onTogglePrerelease = { enabled -> container.appUpdateManager.setIncludePrerelease(enabled) },
+                        onOpenReleasePage = { url -> IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark) },
+                        onOpenDetails = { showUpdateSheet = true },
+                    )
+                }
+
                 item(key = "about") {
                     IgngAboutAppCard(
                         appName = "IGNG BBS",
@@ -574,6 +604,24 @@ fun AppSettingsScreen(
                     )
                 }
             }
+        }
+    }
+
+    if (showUpdateSheet) {
+        updateSnapshot.activeRelease?.let { release ->
+            IgngAppUpdateSheet(
+                snapshot = updateSnapshot,
+                release = release,
+                onDismiss = { showUpdateSheet = false },
+                onStartUpdate = { container.appUpdateManager.startOneClickUpdate() },
+                onCancelDownload = { container.appUpdateManager.cancelDownload() },
+                onOpenInstallPermission = {
+                    container.appUpdateManager.openInstallPermissionSettings().onFailure {
+                        onShowMessage("无法打开系统安装权限设置，请在系统应用设置中手动开启")
+                    }
+                },
+                onOpenReleasePage = { url -> IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark) },
+            )
         }
     }
 }

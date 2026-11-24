@@ -135,6 +135,7 @@ jobs:
             :core:auth:testDebugUnitTest \
             :core:data:testDebugUnitTest \
             :core:markdown:testDebugUnitTest \
+            :core:updater:testDebugUnitTest \
             --no-daemon --stacktrace
 
   verify-bbs:

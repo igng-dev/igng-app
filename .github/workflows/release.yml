@@ -239,9 +239,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$APP_KEY" = "bbs" ]; then
-            sh ./gradlew :core:model:testDebugUnitTest :core:designsystem:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :features:bbs:model:testDebugUnitTest :features:bbs:data:testDebugUnitTest :apps:bbs:testDebugUnitTest --no-daemon
+            sh ./gradlew :core:model:testDebugUnitTest :core:designsystem:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :core:updater:testDebugUnitTest :features:bbs:model:testDebugUnitTest :features:bbs:data:testDebugUnitTest :apps:bbs:testDebugUnitTest --no-daemon
           elif [ "$APP_KEY" = "mc" ]; then
-            sh ./gradlew :core:model:testDebugUnitTest :core:designsystem:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :features:mc:model:testDebugUnitTest :features:mc:data:testDebugUnitTest :features:mc:chat:testDebugUnitTest :apps:mc:testDebugUnitTest --no-daemon
+            sh ./gradlew :core:model:testDebugUnitTest :core:designsystem:testDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest :core:markdown:testDebugUnitTest :core:updater:testDebugUnitTest :features:mc:model:testDebugUnitTest :features:mc:data:testDebugUnitTest :features:mc:chat:testDebugUnitTest :apps:mc:testDebugUnitTest --no-daemon
           fi
 
       - name: 构建正式签名 Release APK（BBS）
@@ -323,16 +323,18 @@ jobs:
           echo "=== dexdump verify ==="
           python3 scripts/verify-release-dex.py --app "$APP_KEY" "$FINAL_APK" --dexdump "$BUILD_TOOLS/dexdump"
 
-          export APP_KEY APP_TITLE APP_ID ASSET_NAME APK_SHA256 CERT_SHA256 APP_LINKS_FP KS_FORMAT OUT_DIR
+          export APP_KEY APP_TITLE APP_ID ASSET_NAME APK_SHA256 CERT_SHA256 APP_LINKS_FP KS_FORMAT OUT_DIR FINAL_APK
           python3 - <<'PY'
           import json, os
           from pathlib import Path
 
+          apk_size_bytes = Path(os.environ["FINAL_APK"]).stat().st_size
           meta = {
               "app_key": os.environ["APP_KEY"],
               "app_title": os.environ["APP_TITLE"],
               "app_id": os.environ["APP_ID"],
               "asset_name": os.environ["ASSET_NAME"],
+              "apk_size_bytes": apk_size_bytes,
               "apk_sha256": os.environ["APK_SHA256"],
               "cert_sha256": os.environ["CERT_SHA256"],
               "applinks_fp": os.environ["APP_LINKS_FP"],
@@ -411,6 +413,7 @@ jobs:
           fi
 
           NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          MANIFEST_FILE="${ASSETS_DIR}/update-manifest.json"
           RENDER_ARGS=(
             render-notes
             --tag "${TAG}"
@@ -419,6 +422,7 @@ jobs:
             --commit "${SHORT_SHA}"
             --meta-dir "${ASSETS_DIR}"
             --output "${NOTES_FILE}"
+            --manifest-output "${MANIFEST_FILE}"
             --summary-output "${GITHUB_STEP_SUMMARY}"
             --prev-tag "${PREV_TAG}"
             --custom-notes "${CUSTOM_NOTES}"
@@ -450,6 +454,7 @@ jobs:
             "$TAG"
             "${APK_FILES[@]}"
             "${ASSETS_DIR}/SHA256SUMS.txt"
+            "${ASSETS_DIR}/update-manifest.json"
             --title "IGNG Android Apps v${VERSION_NAME}"
             --notes-file "$NOTES_FILE"
           )

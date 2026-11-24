@@ -110,6 +110,7 @@ fun IgngMcApp(
     val sessionEpoch by container.sessionEpoch.collectAsState()
     val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
     val familyAccounts by container.familyAccounts.collectAsState()
+    val updateSnapshot by container.appUpdateManager.snapshot.collectAsState()
     val incomingIntent by incomingIntentFlow.collectAsState()
 
     IgngTheme(
@@ -127,6 +128,11 @@ fun IgngMcApp(
 
         LaunchedEffect(Unit) {
             container.refreshFamilyAccounts()
+        }
+        // Silent cold-start update check (24h cooldown, skips family-sync-only pushes)
+        LaunchedEffect(Unit) {
+            delay(2500L)
+            container.appUpdateManager.checkForUpdatesIfDue()
         }
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
@@ -393,6 +399,7 @@ fun IgngMcApp(
                             sessionEpoch = sessionEpoch,
                             dailyExp = dailyExp,
                             familyAccounts = familyAccounts,
+                            hasAppUpdate = updateSnapshot.hasBadgeAlert,
                             playerRepository = container.playerRepository,
                             ticketRepository = container.ticketRepository,
                             bottomPadding = topLevelBottomBarPadding,

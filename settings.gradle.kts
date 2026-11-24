@@ -35,6 +35,7 @@ include(
     ":core:auth",
     ":core:data",
     ":core:markdown",
+    ":core:updater",
 )
 
 // IGNG BBS domain modules (strictly isolated from MC / future Ink)
