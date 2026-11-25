@@ -305,6 +305,11 @@ enum class IgngPullRefreshStyle {
 
 val LocalIgngPullRefreshStyle = staticCompositionLocalOf { IgngPullRefreshStyle.FloatingGlyph }
 
+internal fun resolveTopRefreshIdleDividerColor(
+    trackColor: Color,
+    barAlpha: Float,
+): Color = trackColor.scaleAlpha(1f - barAlpha.coerceIn(0f, 1f))
+
 /**
  * Subtle 2dp top hairline refresh status bar.
  * - During pull-down gesture (`!active && pullProgress > 0f`): expands smoothly from center.
@@ -368,7 +373,7 @@ fun IgngTopRefreshBar(
             if (showIdleDivider && barAlpha < 0.99f) {
                 val dividerHeight = 1.dp.toPx().coerceAtMost(h)
                 drawRect(
-                    color = trackColor.copy(alpha = (1f - barAlpha).coerceIn(0f, 1f)),
+                    color = resolveTopRefreshIdleDividerColor(trackColor = trackColor, barAlpha = barAlpha),
                     topLeft = Offset(0f, h - dividerHeight),
                     size = Size(w, dividerHeight),
                 )
@@ -377,7 +382,7 @@ fun IgngTopRefreshBar(
             if (barAlpha <= 0.01f) return@Canvas
 
             drawRect(
-                color = color.copy(alpha = 0.16f * barAlpha),
+                color = color.scaleAlpha(0.16f * barAlpha),
                 topLeft = Offset.Zero,
                 size = Size(w, h),
             )
@@ -385,7 +390,7 @@ fun IgngTopRefreshBar(
             when {
                 active && reduced -> {
                     drawRect(
-                        color = color.copy(alpha = 0.78f * barAlpha),
+                        color = color.scaleAlpha(0.78f * barAlpha),
                         topLeft = Offset.Zero,
                         size = Size(w, h),
                     )
@@ -413,7 +418,7 @@ fun IgngTopRefreshBar(
                     val fillWidth = w * clampedPull
                     val startX = (w - fillWidth) * 0.5f
                     drawRect(
-                        color = color.copy(alpha = (0.45f + 0.55f * clampedPull) * barAlpha),
+                        color = color.scaleAlpha((0.45f + 0.55f * clampedPull) * barAlpha),
                         topLeft = Offset(startX, 0f),
                         size = Size(fillWidth, h),
                     )
@@ -442,8 +447,8 @@ private fun DrawScope.drawSweepSegment(
         brush = Brush.horizontalGradient(
             colors = listOf(
                 color.copy(alpha = 0f),
-                color.copy(alpha = alpha),
-                color.copy(alpha = alpha),
+                color.scaleAlpha(alpha),
+                color.scaleAlpha(alpha),
                 color.copy(alpha = 0f),
             ),
             startX = startX,

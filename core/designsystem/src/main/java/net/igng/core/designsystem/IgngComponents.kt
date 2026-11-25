@@ -938,7 +938,7 @@ fun IgngSkeletonRows(
                         .fillMaxWidth(0.45f)
                         .height(14.dp)
                         .clip(IgngTheme.radii.sm)
-                        .background(colors.lineStrong.copy(alpha = alpha)),
+                        .background(colors.lineStrong.scaleAlpha(alpha)),
                 )
                 Spacer(Modifier.height(10.dp))
                 Box(
@@ -946,7 +946,7 @@ fun IgngSkeletonRows(
                         .fillMaxWidth(0.85f)
                         .height(11.dp)
                         .clip(IgngTheme.radii.sm)
-                        .background(colors.line.copy(alpha = alpha)),
+                        .background(colors.line.scaleAlpha(alpha)),
                 )
                 Spacer(Modifier.height(6.dp))
                 Box(
@@ -954,7 +954,7 @@ fun IgngSkeletonRows(
                         .fillMaxWidth(0.62f)
                         .height(11.dp)
                         .clip(IgngTheme.radii.sm)
-                        .background(colors.line.copy(alpha = alpha)),
+                        .background(colors.line.scaleAlpha(alpha)),
                 )
             }
         }

@@ -247,7 +247,6 @@ fun PostReaderScreen(
                 if (!showArticlePullRefresh) {
                     IgngTopRefreshBar(
                         active = detailState.isInitialLoading || detailState.isRevalidating || detailState.isUserRefreshing,
-                        showIdleDivider = true,
                     )
                 }
 
@@ -285,7 +284,6 @@ fun PostReaderScreen(
                             IgngPullToRefreshBox(
                                 isRefreshing = detailState.isUserRefreshing,
                                 isRevalidating = detailState.isRevalidating,
-                                showIdleDivider = true,
                                 onRefresh = {
                                     detailHandle.refresh()
                                     commentsRefreshSignal++
