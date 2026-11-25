@@ -313,7 +313,6 @@ fun AdminConsoleScreen(
         IgngPullToRefreshBox(
             isRefreshing = currentRefreshing,
             isRevalidating = currentRevalidating,
-            showIdleDivider = true,
             onRefresh = { refreshCurrent(userInitiated = true) },
             modifier = Modifier.weight(1f),
         ) {

@@ -336,7 +336,6 @@ fun PrivacyPreferencesScreen(
             IgngPullToRefreshBox(
                 isRefreshing = settingsState.isUserRefreshing,
                 isRevalidating = settingsState.isRevalidating,
-                showIdleDivider = true,
                 onRefresh = { settingsHandle.refresh() },
                 modifier = Modifier.weight(1f),
             ) {

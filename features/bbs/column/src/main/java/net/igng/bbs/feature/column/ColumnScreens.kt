@@ -196,7 +196,6 @@ fun ColumnSquareScreen(
         IgngPullToRefreshBox(
             isRefreshing = colState.isUserRefreshing,
             isRevalidating = colState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { colHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -340,7 +339,6 @@ fun ColumnDetailScreen(
         IgngPullToRefreshBox(
             isRefreshing = detailState.isUserRefreshing,
             isRevalidating = detailState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { detailHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

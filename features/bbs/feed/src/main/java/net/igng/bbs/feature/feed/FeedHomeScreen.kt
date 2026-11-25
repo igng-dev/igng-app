@@ -325,7 +325,6 @@ fun FeedHomeScreen(
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
             isRevalidating = revalidating,
-            showIdleDivider = true,
             onRefresh = {
                 holder.resetPagination(feedKey)
                 scope.launch { container.refreshBootstrap(force = true) }

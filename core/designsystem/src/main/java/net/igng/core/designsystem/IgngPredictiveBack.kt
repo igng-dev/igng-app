@@ -1073,7 +1073,7 @@ internal fun Modifier.igngPredictiveCardLayer(
             if (t.borderAlpha > 0.005f) {
                 drawPath(
                     path = path,
-                    color = borderColor.copy(alpha = t.borderAlpha),
+                    color = borderColor.scaleAlpha(t.borderAlpha),
                     style = Stroke(width = strokePx),
                 )
             }

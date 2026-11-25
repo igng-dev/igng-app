@@ -136,7 +136,6 @@ fun ProfileCenterScreen(
         )
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
-            showIdleDivider = true,
             onRefresh = {
                 scope.launch {
                     refreshing = true
@@ -381,7 +380,6 @@ fun UserProfileScreen(
         IgngPullToRefreshBox(
             isRefreshing = profileState.isUserRefreshing,
             isRevalidating = profileState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { profileHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -549,7 +547,6 @@ fun FavoritesScreen(
         IgngPullToRefreshBox(
             isRefreshing = favState.isUserRefreshing,
             isRevalidating = favState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { favHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
@@ -618,7 +615,6 @@ fun FollowingScreen(
         IgngPullToRefreshBox(
             isRefreshing = followingState.isUserRefreshing,
             isRevalidating = followingState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { followingHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

@@ -245,7 +245,7 @@ fun IgngLineChart(
                     repeat(3) { step ->
                         val y = padY + h * (step / 2f)
                         drawLine(
-                            color = colors.line.copy(alpha = 0.72f),
+                            color = colors.line.scaleAlpha(0.72f),
                             start = Offset(padX, y),
                             end = Offset(size.width - padX, y),
                             strokeWidth = 0.8.dp.toPx(),

@@ -258,6 +258,14 @@ object IgngTheme {
         get() = LocalHapticsEnabled.current
 }
 
+/**
+ * Scales a color's existing alpha by [factor] (`0f..1f`) instead of overwriting it.
+ * Essential for semi-transparent design tokens such as [IgngColors.line] and [IgngColors.lineStrong]
+ * where calling [Color.copy] with an absolute alpha would blow out into solid white/black.
+ */
+internal fun Color.scaleAlpha(factor: Float): Color =
+    copy(alpha = (alpha * factor.coerceIn(0f, 1f)).coerceIn(0f, 1f))
+
 fun IgngColors.readerSurfaceColors(tone: ReaderCanvasTone): Triple<Color, Color, Color> = when (tone) {
     ReaderCanvasTone.DEFAULT -> Triple(canvas, textPrimary, textSecondary)
     ReaderCanvasTone.WARM_PAPER -> Triple(warmPaperCanvas, warmPaperText, warmPaperSecondary)

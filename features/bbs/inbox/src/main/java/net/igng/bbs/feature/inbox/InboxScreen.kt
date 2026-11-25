@@ -214,7 +214,6 @@ fun InboxScreen(
         IgngPullToRefreshBox(
             isRefreshing = inboxState.isUserRefreshing,
             isRevalidating = inboxState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { inboxHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {

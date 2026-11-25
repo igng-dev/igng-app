@@ -251,7 +251,6 @@ private fun FilteredPostListScreen(
         IgngPullToRefreshBox(
             isRefreshing = feedState.isUserRefreshing,
             isRevalidating = feedState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = {
                 holder.resetPagination(cacheKey)
                 feedHandle.refresh()
@@ -530,7 +529,6 @@ fun RulesScreen(
         IgngPullToRefreshBox(
             isRefreshing = rulesState.isUserRefreshing,
             isRevalidating = rulesState.isRevalidating,
-            showIdleDivider = true,
             onRefresh = { rulesHandle.refresh() },
             modifier = Modifier.weight(1f),
         ) {
