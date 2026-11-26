@@ -16,7 +16,7 @@ sealed interface AppRoute {
     @Serializable data class FamilyDetail(val familySlug: String) : AppRoute
     @Serializable data class PlayerPassport(val igngId: Int) : AppRoute
     @Serializable data class McCharacter(val username: String) : AppRoute
-    @Serializable data object CommunityHall : AppRoute
+    @Serializable data class CommunityHall(val initialServerId: Int? = null, val initialTab: String? = null) : AppRoute
     @Serializable data object PerfectRoster : AppRoute
     @Serializable data class WikiArticle(val pageId: Int, val resumeProgress: Boolean = false) : AppRoute
 
@@ -39,10 +39,10 @@ sealed interface AppRoute {
     // Dash Player Center destinations
     @Serializable data object Characters : AppRoute
     @Serializable data object Vault : AppRoute
-    @Serializable data object Lands : AppRoute
-    @Serializable data object Teleports : AppRoute
-    @Serializable data object FakePlayers : AppRoute
-    @Serializable data object VanillaStats : AppRoute
+    @Serializable data class Lands(val initialServerId: Int? = null) : AppRoute
+    @Serializable data class Teleports(val initialServerId: Int? = null) : AppRoute
+    @Serializable data class FakePlayers(val initialServerId: Int? = null) : AppRoute
+    @Serializable data class VanillaStats(val initialServerId: Int? = null) : AppRoute
     @Serializable data object Medals : AppRoute
     @Serializable data object PersonalPerfect : AppRoute
     @Serializable data object Permissions : AppRoute
@@ -51,7 +51,7 @@ sealed interface AppRoute {
     // Tickets
     @Serializable data object Tickets : AppRoute
     @Serializable data class TicketDetail(val ticketId: Int) : AppRoute
-    @Serializable data object CreateTicket : AppRoute
+    @Serializable data class CreateTicket(val initialServerId: Int? = null) : AppRoute
 
     // Admin pocket console & Settings
     @Serializable data object AdminConsole : AppRoute

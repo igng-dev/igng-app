@@ -76,6 +76,7 @@ data class TicketSummaryDto(
     val etag: String = "",
 ) {
     val id: Int get() = V1Id.parseNumeric(v1Id) ?: 0
+    val numericServerId: Int? get() = V1Id.parseNumeric(serverIdRaw)
     val statusLabel: String get() = if (status.equals("closed", true)) "已结单" else "处理中"
     val typeLabel: String get() = ticketTypeLabel(type)
     val creatorName: String get() = targets.firstOrNull()?.mcUsername?.ifBlank { null } ?: ticketRelationLabel(relation)
@@ -145,6 +146,7 @@ data class TicketDetailDto(
     val etag: String = "",
 ) {
     val id: Int get() = V1Id.parseNumeric(v1Id) ?: 0
+    val numericServerId: Int? get() = V1Id.parseNumeric(serverIdRaw)
     val statusLabel: String get() = if (status.equals("closed", true)) "已结单" else "处理中"
     val typeLabel: String get() = ticketTypeLabel(type)
     val creatorName: String get() = creator?.displayName?.ifBlank { null } ?: "玩家"

@@ -731,30 +731,40 @@ fun VaultScreen(
 
 // ==================== 3. My Lands / Teleports / Fake Players / Logins ====================
 
-private class MyLandsUiHolder {
+private class MyLandsUiHolder(initialServerId: Int?) {
     var query by mutableStateOf("")
     var submittedQuery by mutableStateOf("")
+    var selectedServerId by mutableStateOf(initialServerId)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
+fun MyLandsScreen(
+    playerRepository: PlayerRepository,
+    initialServerId: Int? = null,
+    onBack: () -> Unit,
+) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    val uiHolder = rememberScreenHolder("mc_lands_ui") { MyLandsUiHolder() }
+    val uiHolder = rememberScreenHolder("mc_lands_ui_${initialServerId ?: "all"}") { MyLandsUiHolder(initialServerId) }
     var editingLand by remember { mutableStateOf<PlayerLandDto?>(null) }
     var descDraft by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
 
     val (landsState, landsHandle) = rememberSwrResource<List<PlayerLandDto>>(
         cache = playerRepository.swrCache,
-        cacheKey = McCacheKeys.playerLands(uiHolder.submittedQuery),
+        cacheKey = McCacheKeys.playerLands(uiHolder.submittedQuery, uiHolder.selectedServerId),
         scope = IgngCacheScope.USER_ONLY,
         policy = McCachePolicies.Standard,
         tags = setOf(McCacheTags.LANDS),
         slotKey = "mc_my_lands",
     ) {
-        runSuspendCatching { playerRepository.fetchLands(keyword = uiHolder.submittedQuery).records }
+        runSuspendCatching {
+            playerRepository.fetchLands(
+                serverId = uiHolder.selectedServerId?.toString(),
+                keyword = uiHolder.submittedQuery,
+            ).records
+        }
     }
 
     val lands = landsState.data.orEmpty()
@@ -781,6 +791,24 @@ fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                 },
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+            if (initialServerId != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    IgngBadge(
+                        text = "当前服务器",
+                        tone = if (uiHolder.selectedServerId == initialServerId) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                        modifier = Modifier.clickable { uiHolder.selectedServerId = initialServerId },
+                    )
+                    IgngBadge(
+                        text = "全部服务器",
+                        tone = if (uiHolder.selectedServerId == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                        modifier = Modifier.clickable { uiHolder.selectedServerId = null },
+                    )
+                }
+            }
             Spacer(Modifier.height(10.dp))
             IgngPullToRefreshBox(
                 isRefreshing = landsState.isUserRefreshing,
@@ -874,8 +902,13 @@ fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
 }
 
 @Composable
-fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
+fun MyTeleportsScreen(
+    playerRepository: PlayerRepository,
+    initialServerId: Int? = null,
+    onBack: () -> Unit,
+) {
     val colors = IgngTheme.colors
+    var selectedServerId by remember(initialServerId) { mutableStateOf(initialServerId) }
     val (listState, listHandle) = rememberSwrResource<List<PlayerTeleportDto>>(
         cache = playerRepository.swrCache,
         cacheKey = McCacheKeys.PLAYER_TELEPORTS,
@@ -885,13 +918,44 @@ fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
     ) {
         runSuspendCatching { playerRepository.fetchTeleports() }
     }
-    val list = listState.data.orEmpty()
+    val allList = listState.data.orEmpty()
+    val serverFilters = remember(allList) {
+        allList
+            .filter { it.server_id > 0 }
+            .distinctBy { it.server_id }
+            .map { it.server_id to (it.server_name ?: "服务器 ${it.server_id}") }
+    }
+    val list = remember(allList, selectedServerId) {
+        if (selectedServerId == null) allList else allList.filter { it.server_id == selectedServerId }
+    }
     val loading = listState.isInitialLoading
     val error = listState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "我的传送点", subtitle = "点击坐标即可复制", onBack = onBack)
+            if (serverFilters.size > 1 || selectedServerId != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    IgngBadge(
+                        text = "全部服务器 (${allList.size})",
+                        tone = if (selectedServerId == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                        modifier = Modifier.clickable { selectedServerId = null },
+                    )
+                    serverFilters.forEach { (sid, sname) ->
+                        IgngBadge(
+                            text = sname,
+                            tone = if (selectedServerId == sid) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                            modifier = Modifier.clickable { selectedServerId = sid },
+                        )
+                    }
+                }
+            }
             IgngPullToRefreshBox(
                 isRefreshing = listState.isUserRefreshing,
                 onRefresh = { listHandle.refresh() },
@@ -902,7 +966,13 @@ fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                     error != null -> Box(Modifier.padding(16.dp)) {
                         IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { listHandle.refresh() })
                     }
-                    list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有传送点") }
+                    list.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = if (selectedServerId != null) "当前服务器还没有传送点" else "还没有传送点",
+                            actionLabel = if (selectedServerId != null && allList.isNotEmpty()) "查看全部服务器" else null,
+                            onAction = if (selectedServerId != null && allList.isNotEmpty()) { { selectedServerId = null } } else null,
+                        )
+                    }
                     else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         itemsIndexed(list, key = { _, tp -> tp.id }) { _, tp ->
                             IgngTile(modifier = Modifier.fillMaxWidth()) {
@@ -925,8 +995,13 @@ fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
 }
 
 @Composable
-fun MyFakePlayersScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
+fun MyFakePlayersScreen(
+    playerRepository: PlayerRepository,
+    initialServerId: Int? = null,
+    onBack: () -> Unit,
+) {
     val colors = IgngTheme.colors
+    var selectedServerId by remember(initialServerId) { mutableStateOf(initialServerId) }
     val (listState, listHandle) = rememberSwrResource<List<PlayerFakePlayerDto>>(
         cache = playerRepository.swrCache,
         cacheKey = McCacheKeys.PLAYER_FAKE_PLAYERS,
@@ -937,13 +1012,44 @@ fun MyFakePlayersScreen(playerRepository: PlayerRepository, onBack: () -> Unit) 
     ) {
         runSuspendCatching { playerRepository.fetchFakePlayers() }
     }
-    val list = listState.data.orEmpty()
+    val allList = listState.data.orEmpty()
+    val serverFilters = remember(allList) {
+        allList
+            .filter { it.server_id > 0 }
+            .distinctBy { it.server_id }
+            .map { it.server_id to (it.server_name ?: "服务器 ${it.server_id}") }
+    }
+    val list = remember(allList, selectedServerId) {
+        if (selectedServerId == null) allList else allList.filter { it.server_id == selectedServerId }
+    }
     val loading = listState.isInitialLoading
     val error = listState.error
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(title = "我的假人", subtitle = "查看在线假人状态与位置", onBack = onBack)
+            if (serverFilters.size > 1 || selectedServerId != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    IgngBadge(
+                        text = "全部服务器 (${allList.size})",
+                        tone = if (selectedServerId == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                        modifier = Modifier.clickable { selectedServerId = null },
+                    )
+                    serverFilters.forEach { (sid, sname) ->
+                        IgngBadge(
+                            text = sname,
+                            tone = if (selectedServerId == sid) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                            modifier = Modifier.clickable { selectedServerId = sid },
+                        )
+                    }
+                }
+            }
             IgngPullToRefreshBox(
                 isRefreshing = listState.isUserRefreshing,
                 onRefresh = { listHandle.refresh() },
@@ -954,7 +1060,13 @@ fun MyFakePlayersScreen(playerRepository: PlayerRepository, onBack: () -> Unit) 
                     error != null -> Box(Modifier.padding(16.dp)) {
                         IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { listHandle.refresh() })
                     }
-                    list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "当前没有在线假人") }
+                    list.isEmpty() -> Box(Modifier.padding(16.dp)) {
+                        IgngStateBlock(
+                            title = if (selectedServerId != null) "当前服务器没有在线假人" else "当前没有在线假人",
+                            actionLabel = if (selectedServerId != null && allList.isNotEmpty()) "查看全部服务器" else null,
+                            onAction = if (selectedServerId != null && allList.isNotEmpty()) { { selectedServerId = null } } else null,
+                        )
+                    }
                     else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         itemsIndexed(list, key = { _, fp -> fp.id }) { _, fp ->
                             IgngTile(modifier = Modifier.fillMaxWidth()) {
@@ -1204,14 +1316,20 @@ fun LoginActivityScreen(
 
 // ==================== 4. Vanilla Stats / Medals / Perfect / Permissions ====================
 
-private class VanillaStatsUiHolder {
-    var selectedServerId by mutableStateOf<Int?>(null)
+private class VanillaStatsUiHolder(initialServerId: Int?) {
+    var selectedServerId by mutableStateOf<Int?>(initialServerId)
 }
 
 @Composable
-fun VanillaStatsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
+fun VanillaStatsScreen(
+    playerRepository: PlayerRepository,
+    initialServerId: Int? = null,
+    onBack: () -> Unit,
+) {
     val colors = IgngTheme.colors
-    val uiHolder = rememberScreenHolder("mc_vanilla_stats_ui") { VanillaStatsUiHolder() }
+    val uiHolder = rememberScreenHolder("mc_vanilla_stats_ui_${initialServerId ?: "all"}") {
+        VanillaStatsUiHolder(initialServerId)
+    }
 
     val (statsState, statsHandle) = rememberSwrResource<VanillaStatsResponse>(
         cache = playerRepository.swrCache,
