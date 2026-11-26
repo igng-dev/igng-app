@@ -2,10 +2,11 @@ package net.igng.mcstatus.feature.wiki
 
 import java.net.URI
 import java.net.URLDecoder
+import java.net.URLEncoder
+import net.igng.core.markdown.TocEntry
 import net.igng.mcstatus.core.data.WikiCatalogResponse
 import net.igng.mcstatus.core.data.WikiNavNodeDto
 import net.igng.mcstatus.core.data.WikiPageSummary
-import net.igng.core.markdown.TocEntry
 
 data class WikiBreadcrumb(
     val label: String,
@@ -38,8 +39,29 @@ data class WikiLinearPage(
 }
 
 /**
+ * Flattened mobile-friendly tutorial row inside a top-level [WikiCategorySection].
+ * Keeps nested sub-folder context in [subGroupLabel] so narrow mobile screens never crush
+ * deep titles with multi-level horizontal indentation.
+ */
+data class WikiCategoryRow(
+    val pageId: Int,
+    val title: String,
+    val updatedAt: String?,
+    val subGroupLabel: String?,
+    val isOverview: Boolean,
+)
+
+data class WikiCategorySection(
+    val id: String,
+    val folderNodeId: Int?,
+    val title: String,
+    val items: List<WikiCategoryRow>,
+)
+
+/**
  * Hierarchical & linear navigation index built from [WikiCatalogResponse]:
- * - Preserves the real multi-level folder/page tree for the left Wiki sidebar drawer
+ * - Preserves the real multi-level folder/page tree for the full-width bottom directory sheet
+ * - Builds flattened mobile-friendly [sections] for the catalog hub horizontal category filter
  * - Computes DFS linear order for standard Wiki Prev / Next page navigation
  * - Computes Breadcrumb trails and ancestor folder sets for active-node auto-expansion
  * - Resolves internal `docs.igng.net/<kb>/...` / `wiki.igng.net/<kb>/...` / relative Wiki links in-app
@@ -52,6 +74,7 @@ class WikiCatalogIndex(val catalog: WikiCatalogResponse) {
 
     val tree: List<WikiTreeNode>
     val linearPages: List<WikiLinearPage>
+    val sections: List<WikiCategorySection>
     private val entryByPageId: Map<Int, WikiLinearPage>
     private val indexByPageId: Map<Int, Int>
     private val pageIdByNormalizedPath: Map<String, Int>
@@ -160,6 +183,86 @@ class WikiCatalogIndex(val catalog: WikiCatalogResponse) {
         entryByPageId = linear.associateBy { it.page.id }
         indexByPageId = linear.mapIndexed { idx, entry -> entry.page.id to idx }.toMap()
 
+        val builtSections = mutableListOf<WikiCategorySection>()
+        val looseRows = mutableListOf<WikiCategoryRow>()
+        val sectionedPageIds = HashSet<Int>()
+
+        fun collectRows(node: WikiTreeNode, subGroupParts: List<String>, out: MutableList<WikiCategoryRow>) {
+            val subLabel = subGroupParts.joinToString(" / ").ifBlank { null }
+            node.pageId?.let { pid ->
+                if (sectionedPageIds.add(pid)) {
+                    val entry = entryByPageId[pid]
+                    out += WikiCategoryRow(
+                        pageId = pid,
+                        title = entry?.page?.title?.ifBlank { node.title } ?: node.title,
+                        updatedAt = entry?.page?.updatedAt,
+                        subGroupLabel = subLabel,
+                        isOverview = node.isFolder,
+                    )
+                }
+            }
+            node.children.forEach { child ->
+                val nextSub = if (child.isFolder) subGroupParts + child.title else subGroupParts
+                collectRows(child, nextSub, out)
+            }
+        }
+
+        tree.forEach { topNode ->
+            if (topNode.isFolder) {
+                val rows = mutableListOf<WikiCategoryRow>()
+                collectRows(topNode, emptyList(), rows)
+                if (rows.isNotEmpty()) {
+                    builtSections += WikiCategorySection(
+                        id = "folder_${topNode.id}",
+                        folderNodeId = topNode.id,
+                        title = topNode.title,
+                        items = rows,
+                    )
+                }
+            } else {
+                topNode.pageId?.let { pid ->
+                    if (sectionedPageIds.add(pid)) {
+                        val entry = entryByPageId[pid]
+                        looseRows += WikiCategoryRow(
+                            pageId = pid,
+                            title = entry?.page?.title?.ifBlank { topNode.title } ?: topNode.title,
+                            updatedAt = entry?.page?.updatedAt,
+                            subGroupLabel = null,
+                            isOverview = false,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (looseRows.isNotEmpty()) {
+            builtSections.add(
+                0,
+                WikiCategorySection(
+                    id = "basic_loose",
+                    folderNodeId = null,
+                    title = "基础指南",
+                    items = looseRows,
+                ),
+            )
+        } else if (builtSections.isEmpty() && rootPage != null) {
+            builtSections += WikiCategorySection(
+                id = "kb_root_only",
+                folderNodeId = null,
+                title = kbName,
+                items = listOf(
+                    WikiCategoryRow(
+                        pageId = rootPage.id,
+                        title = rootPage.title.ifBlank { kbName },
+                        updatedAt = rootPage.updatedAt,
+                        subGroupLabel = null,
+                        isOverview = true,
+                    ),
+                ),
+            )
+        }
+        sections = builtSections
+
         val pathMap = LinkedHashMap<String, Int>()
         val slugMap = LinkedHashMap<String, Int>()
         linear.forEach { entry ->
@@ -204,6 +307,29 @@ class WikiCatalogIndex(val catalog: WikiCatalogResponse) {
 
     fun ancestorFoldersOf(pageId: Int): Set<Int> =
         entryByPageId[pageId]?.ancestorFolderIds.orEmpty()
+
+    fun firstTopFolderIdOf(pageId: Int): Int? {
+        val ancestors = ancestorFoldersOf(pageId)
+        return tree.firstOrNull { it.isFolder && (it.id in ancestors || it.pageId == pageId) }?.id
+    }
+
+    fun publicWebUrlOf(pageId: Int, baseUrl: String = "https://docs.igng.net"): String {
+        val cleanBase = baseUrl.trimEnd('/')
+        val encodedKb = encodeSegment(kbSlug)
+        if (rootPage != null && pageId == rootPage.id) {
+            return "$cleanBase/$encodedKb"
+        }
+        val rawPath = entryByPageId[pageId]?.fullPath.orEmpty()
+        val segments = decodePathSegments(rawPath)
+        if (segments.isEmpty()) return "$cleanBase/$encodedKb"
+        val withoutKb = if (segments.first().equals(kbSlug, ignoreCase = true)) {
+            segments.drop(1)
+        } else {
+            segments
+        }
+        if (withoutKb.isEmpty()) return "$cleanBase/$encodedKb"
+        return "$cleanBase/$encodedKb/${withoutKb.joinToString("/") { encodeSegment(it) }}"
+    }
 
     fun search(query: String): List<WikiLinearPage> {
         val q = query.trim().lowercase()
@@ -287,6 +413,9 @@ class WikiCatalogIndex(val catalog: WikiCatalogResponse) {
 
     companion object {
         private val WIKI_HOSTS = setOf("docs.igng.net", "wiki.igng.net")
+
+        private fun encodeSegment(segment: String): String =
+            URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
 
         private fun decodePathSegments(raw: String): List<String> =
             raw.trim()

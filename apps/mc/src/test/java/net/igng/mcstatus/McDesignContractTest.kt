@@ -96,4 +96,33 @@ class McDesignContractTest {
         val statusWall = File(root, "features/mc/status/src/main/java/net/igng/mcstatus/feature/status/StatusWallScreen.kt").readText()
         assertTrue("StatusWallScreen preserves live telemetry pulse", statusWall.contains("pulse = server.online"))
     }
+
+    @Test
+    fun wikiFollowsMobileNativeQuietCraftArchitecture() {
+        val root = repoRoot()
+        val wikiMainDir = File(root, "features/mc/wiki/src/main")
+        val wikiFiles = wikiMainDir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        assertTrue("Wiki feature must have main Kotlin sources", wikiFiles.isNotEmpty())
+
+        wikiFiles.forEach { file ->
+            val src = file.readText()
+            assertFalse("${file.name} must not use edge-conflicting ModalNavigationDrawer", src.contains("ModalNavigationDrawer"))
+            assertFalse("${file.name} must not use ModalDrawerSheet", src.contains("ModalDrawerSheet"))
+            assertFalse("${file.name} must not hardcode legacy 0.6.dp/0.8.dp borders", src.contains("0.6.dp") || src.contains("0.8.dp"))
+            assertFalse("${file.name} must not hardcode sub-ladder 10.sp font sizes", src.contains("10.sp"))
+            assertFalse("${file.name} must not use hardcoded rainbow Color(0x...) tints", src.contains("Color(0x"))
+        }
+
+        val catalog = File(root, "features/mc/wiki/src/main/java/net/igng/mcstatus/feature/wiki/WikiCatalogScreen.kt").readText()
+        assertTrue("WikiCatalogScreen must group tutorials using IgngGroupedSection", catalog.contains("IgngGroupedSection"))
+        assertTrue("WikiCatalogScreen must render tutorial items using IgngListRow", catalog.contains("IgngListRow"))
+
+        val article = File(root, "features/mc/wiki/src/main/java/net/igng/mcstatus/feature/wiki/WikiArticleScreen.kt").readText()
+        assertTrue("WikiArticleScreen must provide right-edge scrubbing scrollbar", article.contains("IgngLazyColumnScrollbar"))
+        assertTrue("WikiArticleScreen must auto-hide floating thumb bar on scroll", article.contains("rememberIgngScrollBarVisibility"))
+        assertTrue("WikiArticleScreen must group prev/next footer with IgngGroupedSection", article.contains("IgngGroupedSection"))
+
+        val markdown = File(root, "core/markdown/src/main/java/net/igng/core/markdown/IgngMarkdownCanvas.kt").readText()
+        assertFalse("Shared markdown renderer must avoid MaterialTheme.typography splits", markdown.contains("MaterialTheme.typography"))
+    }
 }

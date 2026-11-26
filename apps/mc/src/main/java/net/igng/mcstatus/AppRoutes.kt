@@ -18,7 +18,7 @@ sealed interface AppRoute {
     @Serializable data class McCharacter(val username: String) : AppRoute
     @Serializable data object CommunityHall : AppRoute
     @Serializable data object PerfectRoster : AppRoute
-    @Serializable data class WikiArticle(val pageId: Int) : AppRoute
+    @Serializable data class WikiArticle(val pageId: Int, val resumeProgress: Boolean = false) : AppRoute
 
     // Chat sub-pages (hide bottom floating nav bar for full-screen reading)
     @Serializable data object CommunityChannels : AppRoute

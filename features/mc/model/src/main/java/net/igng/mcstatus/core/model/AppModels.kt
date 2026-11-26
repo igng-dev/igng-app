@@ -142,6 +142,18 @@ data class AppPreferences(
     val reader: ReaderTypographyPrefs = ReaderTypographyPrefs(),
 )
 
+@Serializable
+data class WikiReadingProgress(
+    val pageId: Int = 0,
+    val progressRatio: Float = 0f,
+    val firstVisibleItemIndex: Int = 0,
+    val firstVisibleItemScrollOffset: Int = 0,
+    val updatedAtMs: Long = 0L,
+) {
+    val progressPercent: Int
+        get() = (progressRatio.coerceIn(0f, 1f) * 100f).toInt()
+}
+
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Content<T>(val data: T, val refreshing: Boolean = false) : UiState<T>

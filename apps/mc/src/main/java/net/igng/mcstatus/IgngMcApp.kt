@@ -393,7 +393,9 @@ fun IgngMcApp(
                             wikiRepository = container.wikiRepository,
                             settingsRepository = container.settingsRepository,
                             bottomPadding = topLevelBottomBarPadding,
-                            onOpenArticle = { pageId -> navController.navigate(AppRoute.WikiArticle(pageId)) },
+                            onOpenArticle = { pageId, resume ->
+                                navController.navigate(AppRoute.WikiArticle(pageId, resumeProgress = resume))
+                            },
                         )
                     }
 
@@ -509,9 +511,13 @@ fun IgngMcApp(
                         val route = entry.toRoute<AppRoute.WikiArticle>()
                         WikiArticleScreen(
                             pageId = route.pageId,
+                            resumeProgress = route.resumeProgress,
                             wikiRepository = container.wikiRepository,
                             settingsRepository = container.settingsRepository,
                             onBack = { navController.popBackStack() },
+                            onOpenLinkedArticle = { targetPageId ->
+                                navController.navigate(AppRoute.WikiArticle(targetPageId))
+                            },
                         )
                     }
 

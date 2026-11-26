@@ -141,4 +141,84 @@ class WikiNavigationLogicTest {
         assertEquals(21, hits.first().page.id)
         assertTrue(estimateWikiReadingMinutes("测试".repeat(400)) >= 2)
     }
+
+    @Test
+    fun buildsFlattenedMobileSectionsWithSubGroupsOverviewAndWebUrls() {
+        val nestedCatalog = WikiCatalogResponse(
+            knowledgeBase = WikiKnowledgeBaseDto(
+                id = 1,
+                slug = "IGNGmc",
+                name = "IGNGmc 百科",
+                rootPage = WikiPageSummary(id = 7, slug = "", title = "欢迎来到 IGNGmc", path = ""),
+            ),
+            nodes = listOf(
+                WikiNavNodeDto(
+                    id = 50,
+                    nodeType = "page",
+                    slug = "快速上手",
+                    title = "快速上手",
+                    sortOrder = 0,
+                    path = "快速上手",
+                    page = WikiPageSummary(id = 51, slug = "快速上手", title = "快速上手", path = "快速上手"),
+                ),
+                WikiNavNodeDto(
+                    id = 200,
+                    nodeType = "folder",
+                    slug = "插件教程",
+                    title = "插件教程",
+                    sortOrder = 1,
+                    path = "插件教程",
+                    page = WikiPageSummary(id = 2000, slug = "插件教程", title = "插件总览", path = "插件教程"),
+                    children = listOf(
+                        WikiNavNodeDto(
+                            id = 210,
+                            parentId = 200,
+                            nodeType = "folder",
+                            slug = "经济与商店",
+                            title = "经济与商店",
+                            sortOrder = 1,
+                            path = "插件教程/经济与商店",
+                            children = listOf(
+                                WikiNavNodeDto(
+                                    id = 211,
+                                    parentId = 210,
+                                    nodeType = "page",
+                                    slug = "箱子商店",
+                                    title = "箱子商店",
+                                    sortOrder = 1,
+                                    path = "IGNGmc/插件教程/经济与商店/箱子商店",
+                                    page = WikiPageSummary(
+                                        id = 22,
+                                        slug = "箱子商店",
+                                        title = "箱子商店",
+                                        path = "IGNGmc/插件教程/经济与商店/箱子商店",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val index = WikiCatalogIndex(nestedCatalog)
+        assertEquals(2, index.sections.size)
+        assertEquals("基础指南", index.sections[0].title)
+        assertEquals(listOf(51), index.sections[0].items.map { it.pageId })
+
+        val pluginSection = index.sections[1]
+        assertEquals("插件教程", pluginSection.title)
+        assertEquals(2, pluginSection.items.size)
+        assertTrue(pluginSection.items[0].isOverview)
+        assertEquals(2000, pluginSection.items[0].pageId)
+        assertEquals("经济与商店", pluginSection.items[1].subGroupLabel)
+        assertEquals(22, pluginSection.items[1].pageId)
+
+        assertEquals(200, index.firstTopFolderIdOf(22))
+        assertEquals("https://docs.igng.net/IGNGmc", index.publicWebUrlOf(7))
+        // Should not double-prefix IGNGmc when fullPath already starts with IGNGmc/
+        val shopUrl = index.publicWebUrlOf(22)
+        assertTrue(shopUrl.startsWith("https://docs.igng.net/IGNGmc/"))
+        assertTrue(!shopUrl.contains("/IGNGmc/IGNGmc/"))
+    }
 }
