@@ -55,6 +55,7 @@ import net.igng.mcstatus.core.model.BootstrapResponse
 import net.igng.mcstatus.core.model.DailyExpStatus
 import net.igng.mcstatus.core.model.McAdminRole
 import net.igng.mcstatus.core.model.SiteEndpoints
+import net.igng.mcstatus.core.model.WikiReadingProgress
 
 private val Context.igngPrefsDataStore by preferencesDataStore(name = "igng_mc_v2_prefs")
 
@@ -73,6 +74,14 @@ class SettingsRepository(private val context: Context) {
 
     val recentWikiIds: Flow<List<Int>> = context.igngPrefsDataStore.data.map { prefs ->
         prefs[KEY_RECENT_WIKI].orEmpty().split(",").mapNotNull { it.toIntOrNull() }
+    }
+
+    val bookmarkedWikiIds: Flow<List<Int>> = context.igngPrefsDataStore.data.map { prefs ->
+        prefs[KEY_BOOKMARKED_WIKI].orEmpty().split(",").mapNotNull { it.toIntOrNull() }
+    }
+
+    val wikiReadingProgress: Flow<Map<Int, WikiReadingProgress>> = context.igngPrefsDataStore.data.map { prefs ->
+        decodeWikiProgressMap(prefs[KEY_WIKI_PROGRESS])
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -107,6 +116,61 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    suspend fun toggleWikiBookmark(pageId: Int): Boolean {
+        var added = false
+        context.igngPrefsDataStore.edit { prefs ->
+            val current = prefs[KEY_BOOKMARKED_WIKI].orEmpty().split(",").mapNotNull { it.toIntOrNull() }
+            val next = if (pageId in current) {
+                added = false
+                current.filterNot { it == pageId }
+            } else {
+                added = true
+                (listOf(pageId) + current.filterNot { it == pageId }).take(48)
+            }
+            prefs[KEY_BOOKMARKED_WIKI] = next.joinToString(",")
+        }
+        return added
+    }
+
+    suspend fun saveWikiReadingProgress(
+        pageId: Int,
+        progressRatio: Float,
+        firstVisibleItemIndex: Int,
+        firstVisibleItemScrollOffset: Int,
+    ) {
+        context.igngPrefsDataStore.edit { prefs ->
+            val current = decodeWikiProgressMap(prefs[KEY_WIKI_PROGRESS]).toMutableMap()
+            val clampedRatio = progressRatio.coerceIn(0f, 1f)
+            current[pageId] = WikiReadingProgress(
+                pageId = pageId,
+                progressRatio = clampedRatio,
+                firstVisibleItemIndex = firstVisibleItemIndex.coerceAtLeast(0),
+                firstVisibleItemScrollOffset = firstVisibleItemScrollOffset.coerceAtLeast(0),
+                updatedAtMs = System.currentTimeMillis(),
+            )
+            val trimmed = current.values
+                .sortedByDescending { it.updatedAtMs }
+                .take(32)
+                .associate { it.pageId.toString() to it }
+            prefs[KEY_WIKI_PROGRESS] = IgngJson.instance.encodeToString(
+                MapSerializer(String.serializer(), WikiReadingProgress.serializer()),
+                trimmed,
+            )
+        }
+    }
+
+    private fun decodeWikiProgressMap(raw: String?): Map<Int, WikiReadingProgress> = raw?.let {
+        runCatching {
+            IgngJson.instance.decodeFromString(
+                MapSerializer(String.serializer(), WikiReadingProgress.serializer()),
+                it,
+            ).mapNotNull { (k, v) ->
+                val id = k.toIntOrNull() ?: v.pageId.takeIf { pid -> pid > 0 } ?: return@mapNotNull null
+                id to v.copy(pageId = id)
+            }.toMap()
+        }.getOrNull()
+    }.orEmpty()
+
     suspend fun getCachedDailyExp(userId: Long, periodUtc: String): DailyExpStatus? {
         val raw = context.igngPrefsDataStore.data.first()[KEY_DAILY_EXP_CACHE] ?: return null
         val map = decodeDailyMap(raw)
@@ -139,6 +203,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_HAPTICS = booleanPreferencesKey("haptics_enabled")
         val KEY_READER_PREFS = stringPreferencesKey("reader_typography_prefs_v1")
         val KEY_RECENT_WIKI = stringPreferencesKey("recent_wiki_ids")
+        val KEY_BOOKMARKED_WIKI = stringPreferencesKey("bookmarked_wiki_ids_v1")
+        val KEY_WIKI_PROGRESS = stringPreferencesKey("wiki_reading_progress_v1")
         val KEY_DAILY_EXP_CACHE = stringPreferencesKey("daily_exp_cache_v1")
         val KEY_SESSION_EPOCH = intPreferencesKey("session_epoch")
     }

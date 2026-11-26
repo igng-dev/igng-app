@@ -24,9 +24,7 @@ import androidx.compose.material.icons.rounded.CheckBox
 import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.PlayCircleOutline
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,12 +47,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import net.igng.core.designsystem.IgngColors
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngHapticKind
+import net.igng.core.designsystem.IgngStroke
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.copyTextToClipboard
 import net.igng.core.designsystem.igngPressScale
@@ -63,8 +64,7 @@ import net.igng.core.designsystem.rememberIgngHaptics
 import net.igng.core.model.ReaderTypographyPrefs
 
 /**
- * Shared IGNG Markdown document renderer used across BBS posts, MC Wiki articles,
- * MC Historian reports, and future IGNG Ink readers.
+ * Shared IGNG Markdown document renderer used across all IGNG family readers.
  */
 @Composable
 fun IgngMarkdownDocumentView(
@@ -73,6 +73,7 @@ fun IgngMarkdownDocumentView(
     onImageClick: (String) -> Unit = {},
     onLinkClick: (String) -> Unit = {},
     onMentionClick: (String) -> Unit = {},
+    onInlineCodeClick: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -86,6 +87,7 @@ fun IgngMarkdownDocumentView(
                 onImageClick = onImageClick,
                 onLinkClick = onLinkClick,
                 onMentionClick = onMentionClick,
+                onInlineCodeClick = onInlineCodeClick,
             )
         }
     }
@@ -98,6 +100,7 @@ fun IgngMarkdownBlockView(
     onImageClick: (String) -> Unit = {},
     onLinkClick: (String) -> Unit = {},
     onMentionClick: (String) -> Unit = {},
+    onInlineCodeClick: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = IgngTheme.colors
@@ -116,18 +119,19 @@ fun IgngMarkdownBlockView(
     when (block) {
         is MarkdownBlock.Heading -> {
             val scale = when (block.level) {
-                1 -> 1.48f
-                2 -> 1.30f
-                3 -> 1.15f
-                else -> 1.05f
+                1 -> 1.44f
+                2 -> 1.26f
+                3 -> 1.13f
+                else -> 1.04f
             }
             val topSpace = when (block.level) {
-                1 -> 10.dp
-                2 -> 8.dp
+                1 -> 14.dp
+                2 -> 12.dp
+                3 -> 8.dp
                 else -> 4.dp
             }
-            val annotated = remember(block.inlines, colors, onLinkClick, onMentionClick) {
-                buildInlineAnnotatedString(block.inlines, colors, onLinkClick, onMentionClick)
+            val annotated = remember(block.inlines, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                buildInlineAnnotatedString(block.inlines, colors, onLinkClick, onMentionClick, onInlineCodeClick)
             }
             Column(modifier = modifier.padding(top = topSpace)) {
                 Text(
@@ -136,18 +140,19 @@ fun IgngMarkdownBlockView(
                         fontSize = (typography.fontSizeSp * scale).sp,
                         lineHeight = (typography.fontSizeSp * scale * 1.35f).sp,
                         fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.sp,
                     ),
                 )
                 if (block.level <= 2) {
                     Spacer(Modifier.height(6.dp))
-                    HorizontalDivider(color = colors.line)
+                    IgngHairlineDivider()
                 }
             }
         }
 
         is MarkdownBlock.Paragraph -> {
-            val annotated = remember(block.inlines, colors, onLinkClick, onMentionClick) {
-                buildInlineAnnotatedString(block.inlines, colors, onLinkClick, onMentionClick)
+            val annotated = remember(block.inlines, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                buildInlineAnnotatedString(block.inlines, colors, onLinkClick, onMentionClick, onInlineCodeClick)
             }
             Text(
                 text = annotated,
@@ -157,10 +162,10 @@ fun IgngMarkdownBlockView(
         }
 
         is MarkdownBlock.BulletList -> {
-            Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 block.items.forEach { item ->
-                    val annotated = remember(item, colors, onLinkClick, onMentionClick) {
-                        buildInlineAnnotatedString(item, colors, onLinkClick, onMentionClick)
+                    val annotated = remember(item, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                        buildInlineAnnotatedString(item, colors, onLinkClick, onMentionClick, onInlineCodeClick)
                     }
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Text(
@@ -179,10 +184,10 @@ fun IgngMarkdownBlockView(
         }
 
         is MarkdownBlock.OrderedList -> {
-            Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 block.items.forEachIndexed { idx, item ->
-                    val annotated = remember(item, colors, onLinkClick, onMentionClick) {
-                        buildInlineAnnotatedString(item, colors, onLinkClick, onMentionClick)
+                    val annotated = remember(item, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                        buildInlineAnnotatedString(item, colors, onLinkClick, onMentionClick, onInlineCodeClick)
                     }
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Text(
@@ -205,10 +210,10 @@ fun IgngMarkdownBlockView(
         }
 
         is MarkdownBlock.TaskList -> {
-            Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 block.items.forEach { item ->
-                    val annotated = remember(item.inlines, colors, onLinkClick, onMentionClick) {
-                        buildInlineAnnotatedString(item.inlines, colors, onLinkClick, onMentionClick)
+                    val annotated = remember(item.inlines, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                        buildInlineAnnotatedString(item.inlines, colors, onLinkClick, onMentionClick, onInlineCodeClick)
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -243,13 +248,14 @@ fun IgngMarkdownBlockView(
                     .height(IntrinsicSize.Min)
                     .clip(radii.sm)
                     .background(colors.tileSoft)
+                    .border(IgngStroke.hairline, colors.line, radii.sm)
                     .padding(end = 12.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .width(4.dp)
+                        .width(3.dp)
                         .fillMaxHeight()
-                        .background(colors.accent.copy(alpha = 0.7f)),
+                        .background(colors.quoteBar),
                 )
                 Column(
                     modifier = Modifier
@@ -258,8 +264,8 @@ fun IgngMarkdownBlockView(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     block.lines.forEach { line ->
-                        val annotated = remember(line, colors, onLinkClick, onMentionClick) {
-                            buildInlineAnnotatedString(line, colors, onLinkClick, onMentionClick)
+                        val annotated = remember(line, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                            buildInlineAnnotatedString(line, colors, onLinkClick, onMentionClick, onInlineCodeClick)
                         }
                         Text(
                             text = annotated,
@@ -285,31 +291,31 @@ fun IgngMarkdownBlockView(
                     .fillMaxWidth()
                     .clip(radii.md)
                     .background(colors.codeBackground)
-                    .border(1.dp, colors.line, radii.md),
+                    .border(IgngStroke.hairline, colors.line, radii.md),
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colors.tileSoft)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
                         text = block.language.ifBlank { "代码" },
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        style = IgngTheme.type.mono.copy(fontSize = 11.5.sp),
                         color = colors.textSecondary,
                     )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clip(radii.pill)
+                            .clip(radii.xs)
                             .clickable {
                                 copyTextToClipboard(context, "code", block.code)
                                 haptic(IgngHapticKind.Confirm)
                                 copied = true
                             }
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                     ) {
                         Icon(
                             imageVector = if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
@@ -320,11 +326,12 @@ fun IgngMarkdownBlockView(
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = if (copied) "已复制" else "复制",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = IgngTheme.type.badge,
                             color = if (copied) colors.success else colors.accent,
                         )
                     }
                 }
+                IgngHairlineDivider()
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -336,7 +343,7 @@ fun IgngMarkdownBlockView(
                         style = TextStyle(
                             fontFamily = FontFamily.Monospace,
                             fontSize = (typography.fontSizeSp - 2.5f).coerceAtLeast(12f).sp,
-                            lineHeight = (typography.fontSizeSp * 1.35f).sp,
+                            lineHeight = (typography.fontSizeSp * 1.4f).sp,
                             color = colors.textPrimary,
                         ),
                     )
@@ -349,14 +356,14 @@ fun IgngMarkdownBlockView(
                 modifier = modifier
                     .fillMaxWidth()
                     .clip(radii.md)
-                    .border(1.dp, colors.line, radii.md)
+                    .border(IgngStroke.hairline, colors.line, radii.md)
                     .horizontalScroll(rememberScrollState()),
             ) {
                 Column {
                     Row(modifier = Modifier.background(colors.tileSoft)) {
                         block.headers.forEach { cell ->
-                            val annotated = remember(cell, colors, onLinkClick, onMentionClick) {
-                                buildInlineAnnotatedString(cell, colors, onLinkClick, onMentionClick)
+                            val annotated = remember(cell, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                                buildInlineAnnotatedString(cell, colors, onLinkClick, onMentionClick, onInlineCodeClick)
                             }
                             Box(
                                 modifier = Modifier
@@ -365,7 +372,7 @@ fun IgngMarkdownBlockView(
                             ) {
                                 Text(
                                     text = annotated,
-                                    style = MaterialTheme.typography.labelLarge.copy(
+                                    style = IgngTheme.type.caption.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = primaryText,
                                     ),
@@ -374,13 +381,13 @@ fun IgngMarkdownBlockView(
                         }
                     }
                     block.rows.forEachIndexed { rIdx, row ->
-                        HorizontalDivider(color = colors.line)
+                        IgngHairlineDivider()
                         Row(modifier = Modifier.background(if (rIdx % 2 == 0) colors.tile else colors.tileSoft.copy(alpha = 0.5f))) {
                             val cols = block.headers.size.coerceAtLeast(row.size)
                             for (c in 0 until cols) {
                                 val cell = row.getOrNull(c).orEmpty()
-                                val annotated = remember(cell, colors, onLinkClick, onMentionClick) {
-                                    buildInlineAnnotatedString(cell, colors, onLinkClick, onMentionClick)
+                                val annotated = remember(cell, colors, onLinkClick, onMentionClick, onInlineCodeClick) {
+                                    buildInlineAnnotatedString(cell, colors, onLinkClick, onMentionClick, onInlineCodeClick)
                                 }
                                 Box(
                                     modifier = Modifier
@@ -389,7 +396,7 @@ fun IgngMarkdownBlockView(
                                 ) {
                                     Text(
                                         text = annotated,
-                                        style = MaterialTheme.typography.bodySmall.copy(color = primaryText),
+                                        style = IgngTheme.type.caption.copy(color = primaryText),
                                     )
                                 }
                             }
@@ -400,10 +407,7 @@ fun IgngMarkdownBlockView(
         }
 
         is MarkdownBlock.Divider -> {
-            HorizontalDivider(
-                modifier = modifier.padding(vertical = 8.dp),
-                color = colors.lineStrong,
-            )
+            IgngHairlineDivider(modifier = modifier.padding(vertical = 8.dp))
         }
 
         is MarkdownBlock.Image -> {
@@ -419,14 +423,14 @@ fun IgngMarkdownBlockView(
                         .fillMaxWidth()
                         .clip(radii.md)
                         .background(colors.tileSoft)
-                        .border(1.dp, colors.line, radii.md)
+                        .border(IgngStroke.hairline, colors.line, radii.md)
                         .igngPressScale(haptic = true, onClick = { onImageClick(block.url) }),
                 )
                 if (block.alt.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = block.alt,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = IgngTheme.type.meta,
                         color = secondaryText,
                     )
                 }
@@ -439,7 +443,7 @@ fun IgngMarkdownBlockView(
                     .fillMaxWidth()
                     .clip(radii.md)
                     .background(colors.tileSoft)
-                    .border(1.dp, colors.line, radii.md)
+                    .border(IgngStroke.hairline, colors.line, radii.md)
                     .igngPressScale(haptic = true, onClick = { onLinkClick(block.url) })
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -449,19 +453,22 @@ fun IgngMarkdownBlockView(
                     imageVector = Icons.Rounded.PlayCircleOutline,
                     contentDescription = null,
                     tint = colors.accent,
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(28.dp),
                 )
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = block.label,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = primaryText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = block.url,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = IgngTheme.type.meta,
                         color = secondaryText,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -474,6 +481,7 @@ private fun buildInlineAnnotatedString(
     colors: IgngColors,
     onLinkClick: (String) -> Unit,
     onMentionClick: (String) -> Unit,
+    onInlineCodeClick: ((String) -> Unit)? = null,
 ): AnnotatedString = buildAnnotatedString {
     fun appendSpans(list: List<InlineSpan>) {
         list.forEach { span ->
@@ -497,15 +505,24 @@ private fun buildInlineAnnotatedString(
                 is InlineSpan.InlineCode -> {
                     val start = length
                     append(" ${span.code} ")
-                    addStyle(
-                        SpanStyle(
-                            fontFamily = FontFamily.Monospace,
-                            background = colors.codeBackground,
-                            color = colors.accent,
-                        ),
-                        start,
-                        length,
+                    val codeStyle = SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        background = colors.codeBackground,
+                        color = colors.accent,
                     )
+                    if (onInlineCodeClick != null && span.code.isNotBlank()) {
+                        addLink(
+                            LinkAnnotation.Clickable(
+                                tag = "CODE",
+                                styles = TextLinkStyles(style = codeStyle),
+                                linkInteractionListener = { onInlineCodeClick(span.code) },
+                            ),
+                            start = start,
+                            end = length,
+                        )
+                    } else {
+                        addStyle(codeStyle, start, length)
+                    }
                 }
                 is InlineSpan.Highlight -> {
                     val start = length
