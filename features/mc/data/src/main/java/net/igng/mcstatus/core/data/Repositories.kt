@@ -83,8 +83,12 @@ class ExploreRepository(
     suspend fun fetchMcCharacter(username: String): McCharacterProfileResponse =
         json.decodeFromString(api.get("${endpoints.api}/api/v1/mc/characters/${Uri.encode(username)}", allowAnonymousFallback = true))
 
-    suspend fun fetchPublicLands(): List<HallLandDto> =
-        json.decodeFromString<HallLandsResponse>(api.get("${endpoints.api}/api/v1/mc/hall/lands", allowAnonymousFallback = true)).data
+    suspend fun fetchPublicLands(serverId: Int? = null): List<HallLandDto> {
+        val url = "${endpoints.api}/api/v1/mc/hall/lands".toHttpUrl().newBuilder()
+            .apply { if (serverId != null) addQueryParameter("server_id", V1Id.format("srv", serverId)) }
+            .build().toString()
+        return json.decodeFromString<HallLandsResponse>(api.get(url, allowAnonymousFallback = true)).data
+    }
 
     suspend fun fetchPublicFakePlayers(): List<HallFakePlayerDto> =
         json.decodeFromString<HallFakePlayersResponse>(api.get("${endpoints.api}/api/v1/mc/hall/fake-players", allowAnonymousFallback = true)).data
@@ -340,11 +344,19 @@ class PlayerRepository(
         return res
     }
 
-    suspend fun fetchTeleports(): List<PlayerTeleportDto> =
-        json.decodeFromString<PlayerTeleportsResponse>(api.get("${endpoints.api}/api/v1/mc/teleport-homes")).data
+    suspend fun fetchTeleports(serverId: Int? = null): List<PlayerTeleportDto> {
+        val url = "${endpoints.api}/api/v1/mc/teleport-homes".toHttpUrl().newBuilder()
+            .apply { if (serverId != null) addQueryParameter("server_id", V1Id.format("srv", serverId)) }
+            .build().toString()
+        return json.decodeFromString<PlayerTeleportsResponse>(api.get(url)).data
+    }
 
-    suspend fun fetchFakePlayers(): List<PlayerFakePlayerDto> =
-        json.decodeFromString<PlayerFakePlayersResponse>(api.get("${endpoints.api}/api/v1/mc/fake-players")).data
+    suspend fun fetchFakePlayers(serverId: Int? = null): List<PlayerFakePlayerDto> {
+        val url = "${endpoints.api}/api/v1/mc/fake-players".toHttpUrl().newBuilder()
+            .apply { if (serverId != null) addQueryParameter("server_id", V1Id.format("srv", serverId)) }
+            .build().toString()
+        return json.decodeFromString<PlayerFakePlayersResponse>(api.get(url)).data
+    }
 
     suspend fun fetchVaultOverview(): VaultOverviewResponse =
         json.decodeFromString(api.get("${endpoints.api}/api/v1/mc/vaults"))

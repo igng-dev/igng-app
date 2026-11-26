@@ -532,7 +532,9 @@ data class HallLandDto(
     @SerialName("environment_flags") val environmentFlags: Map<String, JsonElement> = emptyMap(),
     val description: String = "",
     @SerialName("updated_at") val updatedAt: String? = null,
-)
+) {
+    val numericServerId: Int? get() = V1Id.parseNumeric(serverId)
+}
 
 @Serializable
 data class HallLandsResponse(
@@ -555,6 +557,7 @@ data class HallFakePlayerDto(
     @SerialName("last_updated_at") val lastUpdatedAt: String? = null,
 ) {
     val serverName: String get() = serverNameRaw ?: serverId ?: "服务器"
+    val numericServerId: Int? get() = V1Id.parseNumeric(serverId)
 }
 
 @Serializable

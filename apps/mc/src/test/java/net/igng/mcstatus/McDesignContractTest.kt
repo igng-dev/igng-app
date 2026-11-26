@@ -63,6 +63,10 @@ class McDesignContractTest {
         assertTrue("ExploreScreen must consolidate discovery links into IgngGroupedSection", explore.contains("IgngGroupedSection"))
         assertTrue("ExploreScreen must use monochrome IgngListRow entries", explore.contains("IgngListRow"))
         assertFalse("ExploreScreen must not use hardcoded rainbow Color(0x...) tints", explore.contains("Color(0x"))
+
+        val companionCards = File(root, "features/mc/explore/src/main/java/net/igng/mcstatus/feature/explore/CompanionCards.kt").readText()
+        assertFalse("CompanionCards must not dye the full screen with accentOverride", companionCards.contains("accentOverride ="))
+        assertFalse("CompanionCards must not use hardcoded rainbow Color(0x...) tints", companionCards.contains("Color(0x"))
     }
 
     @Test
@@ -84,17 +88,21 @@ class McDesignContractTest {
         val nonTelemetryFiles = listOf(
             "features/mc/explore/src/main/java/net/igng/mcstatus/feature/explore/ExploreScreen.kt",
             "features/mc/explore/src/main/java/net/igng/mcstatus/feature/explore/ExploreSubScreens.kt",
+            "features/mc/explore/src/main/java/net/igng/mcstatus/feature/explore/CompanionCards.kt",
             "features/mc/ticket/src/main/java/net/igng/mcstatus/feature/ticket/TicketScreens.kt",
             "features/mc/player/src/main/java/net/igng/mcstatus/feature/player/PlayerSubScreens.kt",
         )
         nonTelemetryFiles.forEach { rel ->
             val src = File(root, rel).readText()
-            assertFalse("$rel must not enable live pulse animations", src.contains("pulse = true"))
+            assertFalse("$rel must not enable non-telemetry pulse animations", src.contains("pulse = true"))
             assertFalse("$rel must not tie pulse to non-telemetry state", src.contains("pulse = !isClosed"))
         }
 
         val statusWall = File(root, "features/mc/status/src/main/java/net/igng/mcstatus/feature/status/StatusWallScreen.kt").readText()
         assertTrue("StatusWallScreen preserves live telemetry pulse", statusWall.contains("pulse = server.online"))
+
+        val companionCards = File(root, "features/mc/explore/src/main/java/net/igng/mcstatus/feature/explore/CompanionCards.kt").readText()
+        assertTrue("ServerTelemetryHeroCard binds pulse strictly to live online telemetry", companionCards.contains("pulse = status?.online == true"))
     }
 
     @Test

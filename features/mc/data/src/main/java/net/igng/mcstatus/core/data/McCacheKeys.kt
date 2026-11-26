@@ -42,11 +42,16 @@ object McCacheKeys {
     const val ADMIN_HISTORIAN = "mc:admin:historian"
     const val CORE_DEVICES = "core:devices"
 
-    fun statusHistory(preset: StatusRangePreset): String = "mc:status:history:${preset.name}"
+    fun statusHistory(preset: StatusRangePreset, serverId: Int? = null): String =
+        if (serverId == null) "mc:status:history:${preset.name}" else "mc:status:history:${preset.name}:$serverId"
+    fun hallLands(serverId: Int? = null): String =
+        if (serverId == null) HALL_LANDS else "mc:hall:lands:$serverId"
     fun chatLatest(source: String, targetId: String): String = "mc:chat:latest:$source:$targetId"
+    fun serverChatPreview(serverId: Int): String = "mc:chat:preview:server:$serverId"
     fun wikiCatalog(kb: String = "IGNGmc"): String = "mc:wiki:catalog:$kb"
     fun wikiPage(pageId: Int, kb: String = "IGNGmc"): String = "mc:wiki:page:$kb:$pageId"
-    fun playerLands(query: String): String = "mc:player:lands:${query.trim()}"
+    fun playerLands(query: String, serverId: Int? = null): String =
+        if (serverId == null) "mc:player:lands:${query.trim()}" else "mc:player:lands:$serverId:${query.trim()}"
     fun playerLoginRecords(username: String?, page: Int): String = "mc:player:logins:${username.orEmpty()}:$page"
     fun playerStats(serverId: Int?): String = "mc:player:stats:${serverId ?: "all"}"
     fun playerVaultItems(vaultId: String, query: String): String = "mc:vault:items:$vaultId:${query.trim()}"

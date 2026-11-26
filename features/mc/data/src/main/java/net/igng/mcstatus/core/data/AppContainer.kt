@@ -84,6 +84,16 @@ class SettingsRepository(private val context: Context) {
         decodeWikiProgressMap(prefs[KEY_WIKI_PROGRESS])
     }
 
+    val lastSelectedServerKey: Flow<String?> = context.igngPrefsDataStore.data.map { prefs ->
+        prefs[KEY_LAST_SELECTED_SERVER]?.takeIf { it.isNotBlank() }
+    }
+
+    suspend fun setLastSelectedServerKey(key: String) {
+        val clean = key.trim()
+        if (clean.isEmpty()) return
+        context.igngPrefsDataStore.edit { it[KEY_LAST_SELECTED_SERVER] = clean }
+    }
+
     suspend fun setThemeMode(mode: ThemeMode) {
         context.igngPrefsDataStore.edit { it[KEY_THEME] = mode.id }
     }
@@ -207,6 +217,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_WIKI_PROGRESS = stringPreferencesKey("wiki_reading_progress_v1")
         val KEY_DAILY_EXP_CACHE = stringPreferencesKey("daily_exp_cache_v1")
         val KEY_SESSION_EPOCH = intPreferencesKey("session_epoch")
+        val KEY_LAST_SELECTED_SERVER = stringPreferencesKey("last_selected_server_key_v1")
     }
 }
 

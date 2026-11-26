@@ -591,6 +591,7 @@ fun TicketDetailScreen(
 fun CreateTicketScreen(
     endpoints: SiteEndpoints,
     ticketRepository: TicketRepository,
+    initialServerId: Int? = null,
     onBack: () -> Unit,
     onCreated: (Int) -> Unit,
 ) {
@@ -602,7 +603,7 @@ fun CreateTicketScreen(
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf("") }
-    var selectedServerId by remember { mutableStateOf<Int?>(null) }
+    var selectedServerId by remember(initialServerId) { mutableStateOf<Int?>(initialServerId) }
     var targetSearch by remember { mutableStateOf("") }
     var playerMatches by remember { mutableStateOf<List<TicketPlayerOption>>(emptyList()) }
     val selectedTargets = remember { mutableStateListOf<String>() }

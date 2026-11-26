@@ -12,13 +12,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.rounded.AutoStories
-import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -189,7 +189,7 @@ fun IgngMcApp(
                 "chat" -> navController.navigate(AppRoute.Chat) { launchSingleTop = true }
                 "create_ticket" -> {
                     if (container.activeAccount.value != null) {
-                        navController.navigate(AppRoute.CreateTicket) { launchSingleTop = true }
+                        navController.navigate(AppRoute.CreateTicket()) { launchSingleTop = true }
                     } else {
                         navController.navigate(AppRoute.PlayerCenter) { launchSingleTop = true }
                     }
@@ -273,7 +273,7 @@ fun IgngMcApp(
 
         val navItems = remember {
             listOf(
-                IgngNavTabItem("explore", "探索", Icons.Rounded.Explore, Icons.Outlined.Explore),
+                IgngNavTabItem("explore", "游玩", Icons.Rounded.SportsEsports, Icons.Outlined.SportsEsports),
                 IgngNavTabItem("chat", "聊天", Icons.Rounded.Forum, Icons.Outlined.Forum),
                 IgngNavTabItem("wiki", "百科", Icons.Rounded.AutoStories, Icons.Outlined.AutoStories),
                 IgngNavTabItem("player", "我的", Icons.Rounded.Person, Icons.Outlined.Person),
@@ -302,24 +302,52 @@ fun IgngMcApp(
                 ) {
                     igngComposable<AppRoute.Explore> {
                         ExploreScreen(
+                            endpoints = container.endpoints,
                             exploreRepository = container.exploreRepository,
                             statusRepository = container.statusRepository,
+                            chatRepository = container.chatRepository,
+                            playerRepository = container.playerRepository,
+                            settingsRepository = container.settingsRepository,
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
                             bottomPadding = topLevelBottomBarPadding,
+                            onSignIn = { startOAuth(forceLogin = false) },
                             onOpenSearch = { navController.navigate(AppRoute.GlobalSearch) },
                             onOpenStatusWall = { navController.navigate(AppRoute.StatusWall) },
                             onOpenMap = { fam, season -> navController.navigate(AppRoute.WorldMap(fam, season)) },
                             onOpenFamilyDetail = { fam ->
                                 navController.navigate(AppRoute.FamilyDetail(fam.slug))
                             },
-                            onOpenCommunityHall = { navController.navigate(AppRoute.CommunityHall) },
+                            onOpenCommunityHall = { serverId, tab ->
+                                navController.navigate(AppRoute.CommunityHall(initialServerId = serverId, initialTab = tab))
+                            },
                             onOpenPerfectWall = { navController.navigate(AppRoute.PerfectRoster) },
                             onOpenMyProfile = {
                                 navController.navigate(AppRoute.PlayerCenter) {
                                     popUpTo(AppRoute.Explore) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
+                                }
+                            },
+                            onOpenServerChat = { serverId, title ->
+                                navController.navigate(
+                                    AppRoute.ChatConversation(
+                                        source = "server",
+                                        targetId = serverId.toString(),
+                                        platform = "mc",
+                                        title = title,
+                                    ),
+                                )
+                            },
+                            onOpenMyLands = { serverId -> navController.navigate(AppRoute.Lands(serverId)) },
+                            onOpenMyTeleports = { serverId -> navController.navigate(AppRoute.Teleports(serverId)) },
+                            onOpenMyFakePlayers = { serverId -> navController.navigate(AppRoute.FakePlayers(serverId)) },
+                            onOpenVanillaStats = { serverId -> navController.navigate(AppRoute.VanillaStats(serverId)) },
+                            onOpenCreateTicket = { serverId ->
+                                if (activeAccount != null && sessionAuthStatus == SessionAuthStatus.ACTIVE) {
+                                    navController.navigate(AppRoute.CreateTicket(serverId))
+                                } else {
+                                    startOAuth(forceLogin = false)
                                 }
                             },
                         )
@@ -416,13 +444,13 @@ fun IgngMcApp(
                                 when (target) {
                                     PlayerDestination.CHARACTERS -> navController.navigate(AppRoute.Characters)
                                     PlayerDestination.TICKETS -> navController.navigate(AppRoute.Tickets)
-                                    PlayerDestination.CREATE_TICKET -> navController.navigate(AppRoute.CreateTicket)
+                                    PlayerDestination.CREATE_TICKET -> navController.navigate(AppRoute.CreateTicket())
                                     PlayerDestination.VAULT -> navController.navigate(AppRoute.Vault)
                                     PlayerDestination.ACTIVITY -> navController.navigate(AppRoute.LoginActivity)
-                                    PlayerDestination.LANDS -> navController.navigate(AppRoute.Lands)
-                                    PlayerDestination.TELEPORTS -> navController.navigate(AppRoute.Teleports)
-                                    PlayerDestination.FAKE_PLAYERS -> navController.navigate(AppRoute.FakePlayers)
-                                    PlayerDestination.STATS -> navController.navigate(AppRoute.VanillaStats)
+                                    PlayerDestination.LANDS -> navController.navigate(AppRoute.Lands())
+                                    PlayerDestination.TELEPORTS -> navController.navigate(AppRoute.Teleports())
+                                    PlayerDestination.FAKE_PLAYERS -> navController.navigate(AppRoute.FakePlayers())
+                                    PlayerDestination.STATS -> navController.navigate(AppRoute.VanillaStats())
                                     PlayerDestination.MEDALS -> navController.navigate(AppRoute.Medals)
                                     PlayerDestination.PERFECT -> navController.navigate(AppRoute.PersonalPerfect)
                                     PlayerDestination.PERMISSIONS -> navController.navigate(AppRoute.Permissions)
@@ -492,9 +520,12 @@ fun IgngMcApp(
                         )
                     }
 
-                    igngComposable<AppRoute.CommunityHall> {
+                    igngComposable<AppRoute.CommunityHall> { entry ->
+                        val route = entry.toRoute<AppRoute.CommunityHall>()
                         CommunityHallScreen(
                             exploreRepository = container.exploreRepository,
+                            initialServerId = route.initialServerId,
+                            initialTab = route.initialTab,
                             onBack = { navController.popBackStack() },
                         )
                     }
@@ -527,17 +558,21 @@ fun IgngMcApp(
                     igngComposable<AppRoute.Vault> {
                         VaultScreen(container.playerRepository) { navController.popBackStack() }
                     }
-                    igngComposable<AppRoute.Lands> {
-                        MyLandsScreen(container.playerRepository) { navController.popBackStack() }
+                    igngComposable<AppRoute.Lands> { entry ->
+                        val route = entry.toRoute<AppRoute.Lands>()
+                        MyLandsScreen(container.playerRepository, initialServerId = route.initialServerId) { navController.popBackStack() }
                     }
-                    igngComposable<AppRoute.Teleports> {
-                        MyTeleportsScreen(container.playerRepository) { navController.popBackStack() }
+                    igngComposable<AppRoute.Teleports> { entry ->
+                        val route = entry.toRoute<AppRoute.Teleports>()
+                        MyTeleportsScreen(container.playerRepository, initialServerId = route.initialServerId) { navController.popBackStack() }
                     }
-                    igngComposable<AppRoute.FakePlayers> {
-                        MyFakePlayersScreen(container.playerRepository) { navController.popBackStack() }
+                    igngComposable<AppRoute.FakePlayers> { entry ->
+                        val route = entry.toRoute<AppRoute.FakePlayers>()
+                        MyFakePlayersScreen(container.playerRepository, initialServerId = route.initialServerId) { navController.popBackStack() }
                     }
-                    igngComposable<AppRoute.VanillaStats> {
-                        VanillaStatsScreen(container.playerRepository) { navController.popBackStack() }
+                    igngComposable<AppRoute.VanillaStats> { entry ->
+                        val route = entry.toRoute<AppRoute.VanillaStats>()
+                        VanillaStatsScreen(container.playerRepository, initialServerId = route.initialServerId) { navController.popBackStack() }
                     }
                     igngComposable<AppRoute.Medals> {
                         MyMedalsScreen(container.playerRepository) { navController.popBackStack() }
@@ -562,7 +597,7 @@ fun IgngMcApp(
                             ticketRepository = container.ticketRepository,
                             onBack = { navController.popBackStack() },
                             onOpenDetail = { id -> navController.navigate(AppRoute.TicketDetail(id)) },
-                            onCreateTicket = { navController.navigate(AppRoute.CreateTicket) },
+                            onCreateTicket = { navController.navigate(AppRoute.CreateTicket()) },
                         )
                     }
 
@@ -576,10 +611,12 @@ fun IgngMcApp(
                         )
                     }
 
-                    igngComposable<AppRoute.CreateTicket> {
+                    igngComposable<AppRoute.CreateTicket> { entry ->
+                        val route = entry.toRoute<AppRoute.CreateTicket>()
                         CreateTicketScreen(
                             endpoints = container.endpoints,
                             ticketRepository = container.ticketRepository,
+                            initialServerId = route.initialServerId,
                             onBack = { navController.popBackStack() },
                             onCreated = { id ->
                                 navController.popBackStack()

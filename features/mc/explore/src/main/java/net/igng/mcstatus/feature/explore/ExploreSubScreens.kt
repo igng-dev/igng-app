@@ -726,33 +726,50 @@ private enum class HallTab(val label: String) {
     TICKETS("公开工单"),
 }
 
-private class CommunityHallUiHolder {
-    var tab by mutableStateOf(HallTab.LANDS)
+private class CommunityHallUiHolder(
+    initialTab: HallTab,
+    initialServerId: Int?,
+) {
+    var tab by mutableStateOf(initialTab)
     var search by mutableStateOf("")
+    var serverFilterId by mutableStateOf(initialServerId)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CommunityHallScreen(
     exploreRepository: ExploreRepository,
+    initialServerId: Int? = null,
+    initialTab: String? = null,
     onBack: () -> Unit,
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    val uiHolder = rememberScreenHolder("community_hall_ui") { CommunityHallUiHolder() }
+    val resolvedInitialTab = remember(initialTab) {
+        when (initialTab?.trim()?.lowercase()) {
+            "fakes", "fake", "fake_players" -> HallTab.FAKES
+            "tickets", "ticket" -> HallTab.TICKETS
+            else -> HallTab.LANDS
+        }
+    }
+    val uiHolder = rememberScreenHolder("community_hall_ui_${initialServerId ?: "all"}_${resolvedInitialTab.name}") {
+        CommunityHallUiHolder(resolvedInitialTab, initialServerId)
+    }
     var selectedLand by remember { mutableStateOf<HallLandDto?>(null) }
     var selectedTicketDetail by remember { mutableStateOf<TicketDetailDto?>(null) }
     var loadingTicketDetail by remember { mutableStateOf(false) }
 
+    val activeServerFilter = uiHolder.serverFilterId
+
     val (landsState, landsHandle) = rememberSwrResource<List<HallLandDto>>(
         cache = exploreRepository.swrCache,
-        cacheKey = McCacheKeys.HALL_LANDS,
+        cacheKey = McCacheKeys.hallLands(activeServerFilter),
         scope = IgngCacheScope.PUBLIC,
         policy = McCachePolicies.Standard,
         tags = setOf(McCacheTags.HALL),
         enabled = uiHolder.tab == HallTab.LANDS,
         slotKey = "hall_lands",
-    ) { runSuspendCatching { exploreRepository.fetchPublicLands() } }
+    ) { runSuspendCatching { exploreRepository.fetchPublicLands(serverId = activeServerFilter) } }
 
     val (fakesState, fakesHandle) = rememberSwrResource<List<HallFakePlayerDto>>(
         cache = exploreRepository.swrCache,
@@ -815,6 +832,20 @@ fun CommunityHallScreen(
                     onValueChange = { uiHolder.search = it },
                     placeholder = "筛选名称、玩家或服务器…",
                 )
+                if (initialServerId != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IgngBadge(
+                            text = "仅看当前服务器",
+                            tone = if (uiHolder.serverFilterId == initialServerId) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                            modifier = Modifier.clickable { uiHolder.serverFilterId = initialServerId },
+                        )
+                        IgngBadge(
+                            text = "全部服务器",
+                            tone = if (uiHolder.serverFilterId == null) IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                            modifier = Modifier.clickable { uiHolder.serverFilterId = null },
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(10.dp))
             IgngPullToRefreshBox(
@@ -841,7 +872,8 @@ fun CommunityHallScreen(
                         when (uiHolder.tab) {
                         HallTab.LANDS -> {
                             val filtered = lands.filter {
-                                q.isEmpty() || it.name.lowercase().contains(q) || it.ownerName.lowercase().contains(q) || it.serverName.lowercase().contains(q)
+                                (activeServerFilter == null || it.numericServerId == activeServerFilter) &&
+                                    (q.isEmpty() || it.name.lowercase().contains(q) || it.ownerName.lowercase().contains(q) || it.serverName.lowercase().contains(q))
                             }
                             if (filtered.isEmpty()) {
                                 item { IgngStateBlock(title = "还没有匹配的公开领地") }
@@ -871,7 +903,8 @@ fun CommunityHallScreen(
                         }
                         HallTab.FAKES -> {
                             val filtered = fakes.filter {
-                                q.isEmpty() || it.name.lowercase().contains(q) || it.ownerName.lowercase().contains(q) || it.serverName.lowercase().contains(q)
+                                (activeServerFilter == null || it.numericServerId == activeServerFilter) &&
+                                    (q.isEmpty() || it.name.lowercase().contains(q) || it.ownerName.lowercase().contains(q) || it.serverName.lowercase().contains(q))
                             }
                             if (filtered.isEmpty()) {
                                 item { IgngStateBlock(title = "当前没有在线假人") }
@@ -891,7 +924,8 @@ fun CommunityHallScreen(
                         }
                         HallTab.TICKETS -> {
                             val filtered = tickets.filter {
-                                q.isEmpty() || it.title.lowercase().contains(q) || it.creatorName.lowercase().contains(q)
+                                (activeServerFilter == null || it.numericServerId == activeServerFilter) &&
+                                    (q.isEmpty() || it.title.lowercase().contains(q) || it.creatorName.lowercase().contains(q))
                             }
                             if (filtered.isEmpty()) {
                                 item { IgngStateBlock(title = "还没有公开工单") }

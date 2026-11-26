@@ -11,4 +11,6 @@ dependencies {
     implementation(project(":features:mc:common"))
     implementation(project(":features:mc:data"))
     implementation(libs.androidx.browser)
+
+    testImplementation(libs.junit)
 }
