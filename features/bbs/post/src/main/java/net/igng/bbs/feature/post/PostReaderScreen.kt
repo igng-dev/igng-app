@@ -70,7 +70,7 @@ import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngHairlineDivider
-import net.igng.core.designsystem.IgngImageGalleryLightbox
+import net.igng.core.designsystem.IgngImageLightbox
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLazyColumnScrollbar
 import net.igng.core.designsystem.IgngLoadingCenter
@@ -89,6 +89,7 @@ import net.igng.core.designsystem.readerSurfaceColors
 import net.igng.core.designsystem.rememberIgngReadingProgress
 import net.igng.core.designsystem.rememberIgngScrollBarVisibility
 import net.igng.core.markdown.IgngMarkdownBlockView
+import net.igng.core.markdown.MarkdownBlock
 import net.igng.core.markdown.MarkdownParser
 import net.igng.core.network.ApiResult
 
@@ -157,13 +158,17 @@ fun PostReaderScreen(
         container.postRepository.recordView(current.id)
     }
 
-    val document = remember(detail?.content, detail?.format, detail?.id) {
+    val document = remember(detail?.content, detail?.format, detail?.id, detail?.mediaUrls, detail?.mediaMeta) {
         val d = detail ?: return@remember null
         MarkdownParser.parse(
             source = d.content,
             format = d.format,
             resolveUrl = { raw ->
-                d.mediaUrls[raw] ?: container.endpoints.resolveMediaUrl(raw, d.id) ?: raw
+                container.endpoints.resolvePostMediaUrl(raw, d.id, d.mediaUrls)
+            },
+            resolveImageAspectRatio = { raw, resolved ->
+                container.endpoints.resolvePostMediaAspectRatio(raw, d.mediaMeta)
+                    ?: container.endpoints.resolvePostMediaAspectRatio(resolved, d.mediaMeta)
             },
         )
     }
@@ -591,9 +596,13 @@ fun PostReaderScreen(
 
     // Image Lightbox
     lightboxIndex?.let { idx ->
-        IgngImageGalleryLightbox(
-            imageUrls = document?.imageUrls.orEmpty(),
+        val imageBlocks = remember(document) {
+            document?.blocks?.filterIsInstance<MarkdownBlock.Image>().orEmpty()
+        }
+        IgngImageLightbox(
+            imageUrls = imageBlocks.map { it.url }.ifEmpty { document?.imageUrls.orEmpty() },
             initialIndex = idx,
+            titles = imageBlocks.map { it.alt.ifBlank { null } },
             onDismiss = { lightboxIndex = null },
         )
     }

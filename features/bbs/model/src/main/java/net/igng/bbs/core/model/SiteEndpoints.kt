@@ -33,6 +33,31 @@ data class SiteEndpoints(
         return value
     }
 
+    fun resolvePostMediaUrl(
+        rawUrl: String,
+        postId: String? = null,
+        mediaUrls: Map<String, String> = emptyMap(),
+    ): String {
+        val direct = mediaUrls[rawUrl]
+        if (!direct.isNullOrBlank()) return direct
+        val hex = extractMediaHexId(rawUrl)
+        if (hex != null) {
+            val mapped = mediaUrls[hex]
+            if (!mapped.isNullOrBlank()) return mapped
+        }
+        return resolveMediaUrl(rawUrl, postId) ?: rawUrl
+    }
+
+    fun resolvePostMediaAspectRatio(
+        rawUrl: String?,
+        mediaMeta: Map<String, MediaMetaDto>,
+    ): Float? {
+        if (rawUrl.isNullOrBlank() || mediaMeta.isEmpty()) return null
+        mediaMeta[rawUrl]?.aspectRatio?.let { return it }
+        val hex = extractMediaHexId(rawUrl) ?: return null
+        return mediaMeta[hex]?.aspectRatio
+    }
+
     fun postWebUrl(numericId: Int): String = "$bbsWebRoot/post/$numericId"
     fun columnWebUrl(slugOrId: String): String = "$bbsWebRoot/columns/$slugOrId"
     fun userWebUrl(idOrUsername: String): String = "$bbsWebRoot/user/$idOrUsername"
@@ -45,6 +70,18 @@ data class SiteEndpoints(
         const val CLIENT_ID = "igng_bbs_android"
         const val OAUTH_REDIRECT_URI = "igngbbs://auth/callback"
         private val LEGACY_MEDIA_RE = Regex("/api/media/files/([a-fA-F0-9]{32})/content")
+        private val RAW_HEX_ID_RE = Regex("^[a-fA-F0-9]{32}$")
+        private val MANAGED_MEDIA_HEX_RE = Regex(
+            "(?:^|/)(?:i/|p/|api/media/posts/\\d+/|api/media/files/|api/v1/media/med_)([a-fA-F0-9]{32})(?:\\.(?:webp|png|jpe?g|gif|avif)|/content)?(?=[?/#]|$)",
+            RegexOption.IGNORE_CASE,
+        )
+
+        fun extractMediaHexId(rawUrl: String?): String? {
+            val value = rawUrl?.trim().orEmpty()
+            if (value.isEmpty()) return null
+            if (RAW_HEX_ID_RE.matches(value)) return value.lowercase()
+            return MANAGED_MEDIA_HEX_RE.find(value)?.groupValues?.getOrNull(1)?.lowercase()
+        }
 
         fun extractHost(url: String): String? = IgngCoreEndpoints.extractHost(url)
     }

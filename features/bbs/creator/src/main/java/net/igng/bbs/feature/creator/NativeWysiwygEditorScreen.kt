@@ -65,14 +65,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -87,9 +85,11 @@ import net.igng.bbs.core.data.SubmitCreatorPostRequest
 import net.igng.bbs.core.data.UpdateCreatorPostRequest
 import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.ListWrapperDto
+import net.igng.bbs.core.model.MediaMetaDto
 import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
+import net.igng.core.designsystem.IgngContentImage
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
@@ -172,12 +172,15 @@ fun NativeWysiwygEditorScreen(
     var loading by remember { mutableStateOf(postId != null) }
     var busy by remember { mutableStateOf(false) }
     var uploadingImage by remember { mutableStateOf(false) }
+    var uploadingImageUri by remember { mutableStateOf<Uri?>(null) }
     var statusBanner by remember { mutableStateOf<String?>(null) }
     var recoverableDraft by remember { mutableStateOf<LocalEditorDraft?>(null) }
     var showAddBlockSheet by remember { mutableStateOf(false) }
     var convertTargetBlockId by remember { mutableStateOf<String?>(null) }
     var showPublishSheet by remember { mutableStateOf(false) }
     var pendingImageBlockId by remember { mutableStateOf<String?>(null) }
+    var mediaUrlsMap by remember(postId) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var mediaMetaMap by remember(postId) { mutableStateOf<Map<String, MediaMetaDto>>(emptyMap()) }
 
     fun updateBlocks(next: List<WysiwygBlock>) {
         val safe = next.ifEmpty { listOf(WysiwygBlock(type = WysiwygBlockType.PARAGRAPH)) }
@@ -201,6 +204,7 @@ fun NativeWysiwygEditorScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             uploadingImage = true
+            uploadingImageUri = uri
             statusBanner = null
             val bytesAndMeta = withContext(Dispatchers.IO) {
                 runCatching {
@@ -218,12 +222,29 @@ fun NativeWysiwygEditorScreen(
             if (bytesAndMeta == null) {
                 statusBanner = "无法读取所选图片，请重新选择"
                 uploadingImage = false
+                uploadingImageUri = null
                 return@launch
             }
             val (bytes, mime, fileName) = bytesAndMeta
             when (val res = container.creatorRepository.uploadMedia(fileName, mime, bytes)) {
                 is ApiResult.Success -> {
-                    val mdUrl = res.data.markdownUrl.ifBlank { res.data.url }
+                    val uploaded = res.data
+                    val mdUrl = uploaded.markdownUrl.ifBlank { uploaded.url }
+                    val hexId = uploaded.rawId.trim().lowercase().takeIf { it.length == 32 }
+                        ?: net.igng.bbs.core.model.SiteEndpoints.extractMediaHexId(mdUrl)
+                        ?: net.igng.bbs.core.model.SiteEndpoints.extractMediaHexId(uploaded.url)
+                    if (hexId != null) {
+                        if (uploaded.url.isNotBlank()) {
+                            mediaUrlsMap = mediaUrlsMap + (hexId to (container.endpoints.resolveMediaUrl(uploaded.url, currentPostId) ?: uploaded.url))
+                        }
+                        if (uploaded.width > 0 && uploaded.height > 0) {
+                            mediaMetaMap = mediaMetaMap + (hexId to MediaMetaDto(
+                                width = uploaded.width,
+                                height = uploaded.height,
+                                mimeType = uploaded.mimeType ?: uploaded.contentType,
+                            ))
+                        }
+                    }
                     val targetId = pendingImageBlockId
                     val blocks = history.present.toMutableList()
                     val existingIdx = targetId?.let { id -> blocks.indexOfFirst { it.id == id } } ?: -1
@@ -242,6 +263,7 @@ fun NativeWysiwygEditorScreen(
             }
             pendingImageBlockId = null
             uploadingImage = false
+            uploadingImageUri = null
         }
     }
 
@@ -265,6 +287,8 @@ fun NativeWysiwygEditorScreen(
                     selectedCategoryId = d.category?.id ?: selectedCategoryId
                     selectedColumnId = d.column?.id ?: selectedColumnId
                     visibility = d.visibility
+                    mediaUrlsMap = d.mediaUrls
+                    mediaMetaMap = d.mediaMeta
                     rawSource = srcContent
                     history = WysiwygHistory(present = WysiwygCodec.fromMarkdown(srcContent, srcFormat))
                 }
@@ -518,7 +542,13 @@ fun NativeWysiwygEditorScreen(
                             isActive = isActive,
                             canMoveUp = index > 0,
                             canMoveDown = index < history.present.lastIndex,
-                            resolveImageUrl = { raw -> container.endpoints.resolveMediaUrl(raw, currentPostId) ?: raw },
+                            resolveImageUrl = { raw ->
+                                container.endpoints.resolvePostMediaUrl(raw, currentPostId, mediaUrlsMap)
+                            },
+                            resolveImageAspectRatio = { raw ->
+                                container.endpoints.resolvePostMediaAspectRatio(raw, mediaMetaMap)
+                            },
+                            uploadingPreviewUri = if (uploadingImage && pendingImageBlockId == block.id) uploadingImageUri else null,
                             onActivate = { activeBlockId = block.id },
                             onChange = { updated ->
                                 val next = history.present.toMutableList()
@@ -552,6 +582,29 @@ fun NativeWysiwygEditorScreen(
                                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             },
                         )
+                    }
+
+                    // Inline uploading preview when inserting a brand-new image block
+                    if (uploadingImage && pendingImageBlockId == null && uploadingImageUri != null) {
+                        item(key = "uploading_new_image") {
+                            IgngTile(padding = PaddingValues(14.dp)) {
+                                Text(
+                                    text = "正在上传图片",
+                                    style = IgngTheme.type.meta,
+                                    color = colors.accent,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                IgngContentImage(
+                                    model = uploadingImageUri,
+                                    contentDescription = "正在上传的图片",
+                                    shape = RoundedCornerShape(IgngRadius.control),
+                                    maxPlaceholderHeight = 180.dp,
+                                    maxKnownPlaceholderHeight = 220.dp,
+                                    compactError = true,
+                                    uploadingOverlay = true,
+                                )
+                            }
+                        }
                     }
 
                     // Add Block Bar
@@ -636,11 +689,17 @@ fun NativeWysiwygEditorScreen(
             }
 
             EditorMode.PREVIEW -> {
-                val doc = remember(rawSource, format) {
+                val doc = remember(rawSource, format, mediaUrlsMap, mediaMetaMap) {
                     MarkdownParser.parse(
                         source = rawSource,
                         format = format,
-                        resolveUrl = { raw -> container.endpoints.resolveMediaUrl(raw, currentPostId) ?: raw },
+                        resolveUrl = { raw ->
+                            container.endpoints.resolvePostMediaUrl(raw, currentPostId, mediaUrlsMap)
+                        },
+                        resolveImageAspectRatio = { raw, resolved ->
+                            container.endpoints.resolvePostMediaAspectRatio(raw, mediaMetaMap)
+                                ?: container.endpoints.resolvePostMediaAspectRatio(resolved, mediaMetaMap)
+                        },
                     )
                 }
                 LazyColumn(
@@ -824,6 +883,8 @@ private fun WysiwygBlockEditorCard(
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     resolveImageUrl: (String) -> String,
+    resolveImageAspectRatio: (String) -> Float? = { null },
+    uploadingPreviewUri: Uri? = null,
     onActivate: () -> Unit,
     onChange: (WysiwygBlock) -> Unit,
     onMoveUp: () -> Unit,
@@ -1098,15 +1159,18 @@ private fun WysiwygBlockEditorCard(
 
             WysiwygBlockType.IMAGE -> {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (block.imageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = resolveImageUrl(block.imageUrl),
-                            contentDescription = block.caption,
-                            contentScale = ContentScale.FillWidth,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(IgngRadius.control))
-                                .background(colors.tileSoft),
+                    val previewModel: Any? = uploadingPreviewUri
+                        ?: block.imageUrl.takeIf { it.isNotBlank() }?.let(resolveImageUrl)
+                    if (previewModel != null) {
+                        IgngContentImage(
+                            model = previewModel,
+                            contentDescription = block.caption.ifBlank { "插图预览" },
+                            aspectRatioHint = if (uploadingPreviewUri != null) null else resolveImageAspectRatio(block.imageUrl),
+                            shape = RoundedCornerShape(IgngRadius.control),
+                            maxPlaceholderHeight = 180.dp,
+                            maxKnownPlaceholderHeight = 240.dp,
+                            compactError = true,
+                            uploadingOverlay = uploadingPreviewUri != null,
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

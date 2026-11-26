@@ -280,6 +280,16 @@ data class ColumnSummaryDto(
 )
 
 @Serializable
+data class MediaMetaDto(
+    val width: Int = 0,
+    val height: Int = 0,
+    @SerialName("mime_type") val mimeType: String? = null,
+) {
+    val aspectRatio: Float?
+        get() = if (width > 0 && height > 0) width.toFloat() / height.toFloat() else null
+}
+
+@Serializable
 data class PostDetailDto(
     val id: String = "",
     @SerialName("numeric_id") val numericId: Int = 0,
@@ -309,6 +319,7 @@ data class PostDetailDto(
     val series: PostSeriesNavDto? = null,
     @SerialName("viewer_state") val viewerState: PostViewerStateDto = PostViewerStateDto(),
     @SerialName("media_urls") val mediaUrls: Map<String, String> = emptyMap(),
+    @SerialName("media_meta") val mediaMeta: Map<String, MediaMetaDto> = emptyMap(),
     @SerialName("moderation_status") val moderationStatus: String? = null,
     @SerialName("rejection_reason") val rejectionReason: String? = null,
     val suggestion: String? = null,
@@ -740,6 +751,8 @@ data class CreatorPostDetailDto(
     val suggestion: String? = null,
     val provisional: Boolean = false,
     @SerialName("risk_at_submission") val riskAtSubmission: Boolean = false,
+    @SerialName("media_urls") val mediaUrls: Map<String, String> = emptyMap(),
+    @SerialName("media_meta") val mediaMeta: Map<String, MediaMetaDto> = emptyMap(),
 )
 
 @Serializable

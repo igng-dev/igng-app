@@ -50,11 +50,33 @@ class MarkdownAndWysiwygTest {
 
     @Test
     fun convertsLegacyHtmlPostsIntoBlocks() {
-        val html = "<h2>标题</h2><p>你好 <strong>世界</strong></p><blockquote>引用文本</blockquote><img src=\"https://img.example/a.png\" alt=\"图\" />"
+        val html = "<h2>标题</h2><p>你好 <strong>世界</strong></p><blockquote>引用文本</blockquote><img src=\"https://img.example/a.png\" alt=\"图\" width=\"1200\" height=\"800\" />"
         val doc = MarkdownParser.parse(html, format = "html")
         assertTrue(doc.blocks.any { it is MarkdownBlock.Heading && it.plainText == "标题" })
         assertTrue(doc.blocks.any { it is MarkdownBlock.Blockquote })
         assertEquals(listOf("https://img.example/a.png"), doc.imageUrls)
+        val img = doc.blocks.filterIsInstance<MarkdownBlock.Image>().single()
+        assertEquals(1.5f, img.aspectRatio!!, 0.0001f)
+    }
+
+    @Test
+    fun attachesResolvedImageAspectRatiosToMarkdownBlocks() {
+        val md = "前文\n\n![封面](/i/0123456789abcdef0123456789abcdef)\n\n行内![图2](/i/fedcba9876543210fedcba9876543210)后文"
+        val doc = MarkdownParser.parse(
+            source = md,
+            resolveUrl = { raw -> "https://www.igng.net$raw" },
+            resolveImageAspectRatio = { raw, _ ->
+                when {
+                    raw.contains("0123456789abcdef") -> 1600f / 900f
+                    raw.contains("fedcba9876543210") -> 0.75f
+                    else -> null
+                }
+            },
+        )
+        val imgs = doc.blocks.filterIsInstance<MarkdownBlock.Image>()
+        assertEquals(2, imgs.size)
+        assertEquals(1600f / 900f, imgs[0].aspectRatio!!, 0.0001f)
+        assertEquals(0.75f, imgs[1].aspectRatio!!, 0.0001f)
     }
 
     @Test
