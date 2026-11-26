@@ -70,31 +70,31 @@ data class IgngColors(
 
 val IgngLightColors = IgngColors(
     isDark = false,
-    canvas = Color(0xFFF4F6FA),
+    canvas = Color(0xFFF5F6F8),
     tile = Color(0xFFFFFFFF),
-    tileSoft = Color(0xFFF7F9FC),
-    tilePressed = Color(0xFFF0F4FA),
-    line = Color(0x170F172A),
-    lineStrong = Color(0x2E0F172A),
+    tileSoft = Color(0xFFF7F8FA),
+    tilePressed = Color(0xFFEEF1F5),
+    line = Color(0x120F172A),
+    lineStrong = Color(0x240F172A),
     textPrimary = Color(0xFF1F2328),
     textSecondary = Color(0xFF57606A),
     textMuted = Color(0xFF8C959F),
     accent = Color(0xFF2563EB),
     accentHover = Color(0xFF1D4ED8),
     onAccent = Color(0xFFFFFFFF),
-    accentSoft = Color(0x172563EB),
-    accentGlow = Color(0x382563EB),
-    auraBlue = Color(0x102563EB),
-    auraViolet = Color(0x0D8B5CF6),
+    accentSoft = Color(0x142563EB),
+    accentGlow = Color(0x2E2563EB),
+    auraBlue = Color(0x0D2563EB),
+    auraViolet = Color(0x088B5CF6),
     success = Color(0xFF116329),
-    successBg = Color(0x14116329),
+    successBg = Color(0x12116329),
     warning = Color(0xFF9A6700),
-    warningBg = Color(0x1A9A6700),
+    warningBg = Color(0x169A6700),
     danger = Color(0xFFB42318),
-    dangerBg = Color(0x14B42318),
-    glassBar = Color(0xEBFFFFFF),
+    dangerBg = Color(0x12B42318),
+    glassBar = Color(0xF7FFFFFF),
     scrim = Color(0x660B0F16),
-    codeBackground = Color(0xFFF1F4F9),
+    codeBackground = Color(0xFFF3F5F8),
     quoteBar = Color(0xFFCBD5E1),
     warmPaperCanvas = Color(0xFFFAF6EE),
     warmPaperText = Color(0xFF2C261F),
@@ -103,112 +103,153 @@ val IgngLightColors = IgngColors(
 
 val IgngDarkColors = IgngColors(
     isDark = true,
-    canvas = Color(0xFF0B0F16),
-    tile = Color(0xFF141A23),
-    tileSoft = Color(0xFF19202B),
-    tilePressed = Color(0xFF1E2735),
-    line = Color(0x17FFFFFF),
-    lineStrong = Color(0x30FFFFFF),
-    textPrimary = Color(0xFFF0F6FC),
+    canvas = Color(0xFF0D1117),
+    tile = Color(0xFF151B23),
+    tileSoft = Color(0xFF1B222C),
+    tilePressed = Color(0xFF212936),
+    line = Color(0x14FFFFFF),
+    lineStrong = Color(0x26FFFFFF),
+    textPrimary = Color(0xFFE6EDF3),
     textSecondary = Color(0xFF8B949E),
     textMuted = Color(0xFF6E7681),
     accent = Color(0xFF58A6FF),
     accentHover = Color(0xFF79B8FF),
     onAccent = Color(0xFF0D1117),
-    accentSoft = Color(0x2158A6FF),
-    accentGlow = Color(0x4758A6FF),
-    auraBlue = Color(0x1458A6FF),
-    auraViolet = Color(0x128B5CF6),
+    accentSoft = Color(0x1F58A6FF),
+    accentGlow = Color(0x3D58A6FF),
+    auraBlue = Color(0x1058A6FF),
+    auraViolet = Color(0x0A8B5CF6),
     success = Color(0xFF56D364),
-    successBg = Color(0x1C56D364),
+    successBg = Color(0x1856D364),
     warning = Color(0xFFE3B341),
-    warningBg = Color(0x21E3B341),
+    warningBg = Color(0x1CE3B341),
     danger = Color(0xFFFF7B72),
-    dangerBg = Color(0x1CFF7B72),
-    glassBar = Color(0xE8141A23),
+    dangerBg = Color(0x18FF7B72),
+    glassBar = Color(0xF512171F),
     scrim = Color(0x99000000),
-    codeBackground = Color(0xFF101620),
+    codeBackground = Color(0xFF11161E),
     quoteBar = Color(0xFF334155),
     warmPaperCanvas = Color(0xFF171410),
     warmPaperText = Color(0xFFEAE2D3),
     warmPaperSecondary = Color(0xFFA89C89),
 )
 
+/**
+ * Quiet Craft stroke scale: crisp sub-dp hairline borders on high-DPI mobile screens
+ * so cards and dividers match the delicacy of web `1px` rules without wireframe heaviness.
+ */
+object IgngStroke {
+    val hairline = 0.5.dp
+    val focus = 1.dp
+}
+
+/**
+ * Crisp geometric radius scale aligned with IGNG Web's `console.css` & `bento.css`.
+ */
 object IgngRadius {
-    val tile = 20.dp
-    val card = 16.dp
-    val inner = 14.dp
-    val control = 12.dp
+    val hero = 18.dp
+    val tile = 14.dp
+    val card = 14.dp
+    val inner = 10.dp
+    val control = 10.dp
+    val badge = 6.dp
     val pill = 999.dp
 }
 
 @Immutable
 data class IgngRadii(
+    val xs: RoundedCornerShape = RoundedCornerShape(6.dp),
     val sm: RoundedCornerShape = RoundedCornerShape(10.dp),
-    val md: RoundedCornerShape = RoundedCornerShape(14.dp),
-    val lg: RoundedCornerShape = RoundedCornerShape(20.dp),
-    val xl: RoundedCornerShape = RoundedCornerShape(24.dp),
-    val hero: RoundedCornerShape = RoundedCornerShape(24.dp),
+    val md: RoundedCornerShape = RoundedCornerShape(12.dp),
+    val lg: RoundedCornerShape = RoundedCornerShape(14.dp),
+    val xl: RoundedCornerShape = RoundedCornerShape(18.dp),
+    val hero: RoundedCornerShape = RoundedCornerShape(18.dp),
+    val badge: RoundedCornerShape = RoundedCornerShape(6.dp),
     val pill: RoundedCornerShape = RoundedCornerShape(999.dp),
 )
 
+/**
+ * Unified Quiet Craft typography scale — the single source of truth across every IGNG Android app.
+ * Tuned for CJK readability: neutral tracking on Chinese headings, generous 1.5x+ body line height,
+ * calm secondary section eyebrows, and tabular numerals (`tnum`) on metrics and metadata.
+ */
 @Immutable
 data class IgngTextStyles(
     val heroTitle: TextStyle = TextStyle(
-        fontSize = 26.sp,
-        lineHeight = 32.sp,
+        fontSize = 24.sp,
+        lineHeight = 31.sp,
         fontWeight = FontWeight.Bold,
-        letterSpacing = (-0.5).sp,
+        letterSpacing = 0.sp,
     ),
     val pageTitle: TextStyle = TextStyle(
         fontSize = 21.sp,
-        lineHeight = 27.sp,
+        lineHeight = 28.sp,
         fontWeight = FontWeight.Bold,
-        letterSpacing = (-0.3).sp,
+        letterSpacing = 0.sp,
+    ),
+    val subpageTitle: TextStyle = TextStyle(
+        fontSize = 17.sp,
+        lineHeight = 23.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.sp,
+    ),
+    val sectionLabel: TextStyle = TextStyle(
+        fontSize = 12.5.sp,
+        lineHeight = 17.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.1.sp,
     ),
     val sectionTitle: TextStyle = TextStyle(
-        fontSize = 16.sp,
+        fontSize = 15.5.sp,
         lineHeight = 22.sp,
         fontWeight = FontWeight.SemiBold,
-        letterSpacing = (-0.15).sp,
+        letterSpacing = 0.sp,
     ),
     val cardTitle: TextStyle = TextStyle(
-        fontSize = 15.sp,
-        lineHeight = 21.sp,
+        fontSize = 15.5.sp,
+        lineHeight = 22.sp,
         fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.sp,
     ),
     val body: TextStyle = TextStyle(
         fontSize = 14.sp,
-        lineHeight = 21.sp,
+        lineHeight = 22.sp,
         fontWeight = FontWeight.Normal,
     ),
     val bodyMedium: TextStyle = TextStyle(
         fontSize = 14.sp,
-        lineHeight = 20.sp,
+        lineHeight = 21.sp,
         fontWeight = FontWeight.Medium,
     ),
     val caption: TextStyle = TextStyle(
-        fontSize = 12.sp,
-        lineHeight = 17.sp,
+        fontSize = 12.5.sp,
+        lineHeight = 18.sp,
         fontWeight = FontWeight.Normal,
+    ),
+    val meta: TextStyle = TextStyle(
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        fontWeight = FontWeight.Normal,
+        fontFeatureSettings = "tnum",
     ),
     val badge: TextStyle = TextStyle(
         fontSize = 11.sp,
-        lineHeight = 14.sp,
-        fontWeight = FontWeight.SemiBold,
+        lineHeight = 15.sp,
+        fontWeight = FontWeight.Medium,
     ),
     val metricLarge: TextStyle = TextStyle(
         fontSize = 24.sp,
         lineHeight = 28.sp,
-        fontWeight = FontWeight.ExtraBold,
+        fontWeight = FontWeight.Bold,
         fontFeatureSettings = "tnum",
-        letterSpacing = (-0.4).sp,
+        letterSpacing = (-0.3).sp,
     ),
     val metricMedium: TextStyle = TextStyle(
         fontSize = 17.sp,
         lineHeight = 22.sp,
         fontWeight = FontWeight.Bold,
         fontFeatureSettings = "tnum",
+        letterSpacing = (-0.2).sp,
     ),
     val mono: TextStyle = TextStyle(
         fontFamily = FontFamily.Monospace,
@@ -416,12 +457,12 @@ fun IgngTheme(
                 titleLarge = type.pageTitle,
                 titleMedium = type.sectionTitle,
                 titleSmall = type.cardTitle,
-                bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.Normal),
+                bodyLarge = type.bodyMedium,
                 bodyMedium = type.body,
                 bodySmall = type.caption,
-                labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+                labelLarge = type.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 labelMedium = type.badge,
-                labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
+                labelSmall = type.meta,
             ),
             content = content,
         )

@@ -1,32 +1,32 @@
 package net.igng.bbs.feature.inbox
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DoneAll
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,17 +54,20 @@ import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPullToRefreshBox
-import net.igng.core.designsystem.IgngRadius
+import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
-import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.rememberIgngPageContentPadding
 
 private val INBOX_TABS = listOf(
     "all" to "全部",
@@ -156,6 +159,14 @@ fun InboxScreen(
             return
         }
 
+        val submitInboxSearch = {
+            val trimmed = query.trim()
+            if (trimmed == submittedQuery) {
+                inboxHandle.refresh()
+            } else {
+                submittedQuery = trimmed
+            }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,32 +174,22 @@ fun InboxScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            IgngSearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("搜索通知正文或标题", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(IgngRadius.pill),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = colors.tile,
-                    unfocusedContainerColor = colors.tile,
-                    focusedBorderColor = colors.accent,
-                    unfocusedBorderColor = colors.line,
-                ),
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.textMuted) },
-            )
-            IgngTagChip(
-                text = "查找",
-                tone = IgngTone.ACCENT,
-                onClick = {
-                    val trimmed = query.trim()
-                    if (trimmed == submittedQuery) {
-                        inboxHandle.refresh()
-                    } else {
-                        submittedQuery = trimmed
-                    }
+                placeholder = "搜索通知正文或标题",
+                onSubmit = submitInboxSearch,
+                onClear = {
+                    query = ""
+                    submittedQuery = ""
                 },
+                modifier = Modifier.weight(1f),
+            )
+            IgngButton(
+                text = "查找",
+                style = IgngButtonStyle.Secondary,
+                compact = true,
+                onClick = submitInboxSearch,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -228,75 +229,84 @@ fun InboxScreen(
                         subtitle = "当有人回复或 @提到你，或者有新的系统通知时会立刻出现在这里。",
                     )
                 }
-                else -> LazyColumn(
-                    contentPadding = rememberIgngPageContentPadding(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(items, key = { it.id }) { item ->
-                        IgngTile(
-                            soft = item.isRead,
-                            padding = PaddingValues(14.dp),
-                            onClick = {
-                                if (!item.isRead) {
-                                    container.inboxRepository.patchItemReadLocally(item.id)
-                                    scope.launch {
-                                        container.inboxRepository.markItemRead(item.id)
-                                        container.refreshBootstrap(force = true)
+                else -> {
+                    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    LazyColumn(
+                        contentPadding = PaddingValues(top = 0.dp, bottom = navBottom + 24.dp),
+                    ) {
+                        item(key = "inbox_top_rule") { IgngHairlineDivider() }
+                        itemsIndexed(items, key = { _, it -> it.id }) { idx, item ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(if (item.isRead) colors.canvas else colors.tile)
+                                    .clickable {
+                                        if (!item.isRead) {
+                                            container.inboxRepository.patchItemReadLocally(item.id)
+                                            scope.launch {
+                                                container.inboxRepository.markItemRead(item.id)
+                                                container.refreshBootstrap(force = true)
+                                            }
+                                        }
+                                        val targetPostId = item.postId
+                                        if (!targetPostId.isNullOrBlank()) {
+                                            onOpenPost(targetPostId)
+                                        } else {
+                                            detailItem = item
+                                        }
                                     }
-                                }
-                                val targetPostId = item.postId
-                                if (!targetPostId.isNullOrBlank()) {
-                                    onOpenPost(targetPostId)
-                                } else {
-                                    detailItem = item
-                                }
-                            },
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (!item.isRead) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(colors.accent),
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (!item.isRead) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(colors.accent),
+                                        )
+                                    }
+                                    IgngBadge(
+                                        text = when (item.kind) {
+                                            "mention" -> "提及"
+                                            "reply" -> "回复"
+                                            "column" -> "专栏"
+                                            else -> "系统"
+                                        },
+                                        tone = if (item.kind == "mention") IgngBadgeTone.Accent else IgngBadgeTone.Neutral,
+                                    )
+                                    Text(
+                                        text = BbsFormatters.relativeTime(item.createdAt),
+                                        style = IgngTheme.type.meta,
+                                        color = colors.textMuted,
                                     )
                                 }
-                                IgngTagChip(
-                                    text = when (item.kind) {
-                                        "mention" -> "提及"
-                                        "reply" -> "回复"
-                                        "column" -> "专栏"
-                                        else -> "系统"
-                                    },
-                                    tone = if (item.kind == "mention") IgngTone.ACCENT else IgngTone.NEUTRAL,
-                                )
+                                Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = BbsFormatters.relativeTime(item.createdAt),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.textMuted,
-                                )
-                            }
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = item.title,
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = if (item.isRead) FontWeight.Normal else FontWeight.SemiBold,
-                                ),
-                                color = colors.textPrimary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (item.content.isNotBlank()) {
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = item.content,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.textSecondary,
-                                    maxLines = 3,
+                                    text = item.title,
+                                    style = IgngTheme.type.bodyMedium.copy(
+                                        fontWeight = if (item.isRead) FontWeight.Normal else FontWeight.SemiBold,
+                                    ),
+                                    color = if (item.isRead) colors.textSecondary else colors.textPrimary,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                if (item.content.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = item.content,
+                                        style = IgngTheme.type.caption,
+                                        color = colors.textSecondary,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            if (idx < items.lastIndex) {
+                                IgngHairlineDivider(startIndent = 16.dp, endIndent = 16.dp)
                             }
                         }
+                        item(key = "inbox_bottom_rule") { IgngHairlineDivider() }
                     }
                 }
             }

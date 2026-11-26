@@ -1,10 +1,4 @@
 package net.igng.core.designsystem
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -41,7 +35,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -60,6 +54,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -68,6 +63,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -91,68 +87,241 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 
 /**
- * Subtle ambient radial blue/violet background matching `packages/theme/globals.css`.
+ * Quiet Craft root canvas.
+ * Renders a serene solid canvas by default so daily reading/utility screens stay visually calm.
+ * Set [showAmbientGlow] = true (or pass [accentOverride]) only on deliberate brand hero surfaces.
  */
 @Composable
 fun IgngAmbientCanvas(
     modifier: Modifier = Modifier,
     accentOverride: Color? = null,
+    showAmbientGlow: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val colors = IgngTheme.colors
     val intensity = IgngTheme.motionIntensity
-    val topLeftColor by animateColorAsState(
-        targetValue = (accentOverride ?: colors.accent).copy(alpha = if (colors.isDark) 0.11f else 0.06f),
-        animationSpec = IgngMotion.ambientTween(intensity),
-        label = "ambientTopGlow",
-    )
+    val enableGlow = showAmbientGlow || accentOverride != null
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(colors.canvas),
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(topLeftColor, Color.Transparent),
-                    center = Offset(size.width * 0.12f, size.height * 0.08f),
+        if (enableGlow) {
+            val topTint by animateColorAsState(
+                targetValue = (accentOverride ?: colors.accent).copy(alpha = if (colors.isDark) 0.08f else 0.045f),
+                animationSpec = IgngMotion.ambientTween(intensity),
+                label = "ambientTopWash",
+            )
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(topTint, Color.Transparent),
+                        center = Offset(size.width * 0.5f, -size.height * 0.08f),
+                        radius = size.maxDimension * 0.55f,
+                    ),
+                    center = Offset(size.width * 0.5f, -size.height * 0.08f),
                     radius = size.maxDimension * 0.55f,
-                ),
-                center = Offset(size.width * 0.12f, size.height * 0.08f),
-                radius = size.maxDimension * 0.55f,
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(colors.auraViolet, Color.Transparent),
-                    center = Offset(size.width * 0.9f, size.height * 0.88f),
-                    radius = size.maxDimension * 0.5f,
-                ),
-                center = Offset(size.width * 0.9f, size.height * 0.88f),
-                radius = size.maxDimension * 0.5f,
-            )
+                )
+            }
         }
         content()
     }
 }
 
+/**
+ * Crisp sub-dp hairline divider matching IGNG Web's `1px solid var(--bbs-line)` delicacy on 3x screens.
+ */
+@Composable
+fun IgngHairlineDivider(
+    modifier: Modifier = Modifier,
+    startIndent: Dp = 0.dp,
+    endIndent: Dp = 0.dp,
+) {
+    HorizontalDivider(
+        modifier = modifier.padding(start = startIndent, end = endIndent),
+        thickness = IgngStroke.hairline,
+        color = IgngTheme.colors.line,
+    )
+}
 
 /**
- * Standard Bento 2.0 Tile card: crisp 1dp border, clean surface, zero visual noise.
+ * Tier-1 Quiet Craft grouped surface: consolidates related menu entries, settings, or structured rows
+ * into a single clean hairline-bordered panel instead of scattering standalone cards across the screen.
+ */
+@Composable
+fun IgngGroupedSection(
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = IgngTheme.colors
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (!title.isNullOrBlank()) {
+            IgngSectionHeader(
+                title = title,
+                actionLabel = actionLabel,
+                onAction = onAction,
+                trailing = trailing,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = IgngTheme.radii.lg,
+            color = colors.tile,
+            border = BorderStroke(IgngStroke.hairline, colors.line),
+            shadowElevation = 0.dp,
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                content = content,
+            )
+        }
+    }
+}
+
+/**
+ * Quiet Craft grouped list row designed to live inside [IgngGroupedSection].
+ * Uses serene press tint (zero bouncing scale), monochrome icons by default, and indented hairlines.
+ */
+@Composable
+fun IgngListRow(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    iconTint: Color = IgngTheme.colors.textSecondary,
+    value: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    showChevron: Boolean = true,
+    showDivider: Boolean = false,
+) {
+    val colors = IgngTheme.colors
+    val intensity = IgngTheme.motionIntensity
+    val haptic = rememberIgngHaptics()
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val rowBg by animateColorAsState(
+        targetValue = if (pressed) colors.tilePressed else Color.Transparent,
+        animationSpec = IgngMotion.microTween(intensity),
+        label = "listRowBg",
+    )
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(rowBg)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = {
+                        haptic(IgngHapticKind.Tick)
+                        onClick()
+                    },
+                )
+                .defaultMinSize(minHeight = 52.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = IgngTheme.type.bodyMedium,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = IgngTheme.type.meta,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (!value.isNullOrBlank()) {
+                Text(
+                    text = value,
+                    style = IgngTheme.type.meta,
+                    color = colors.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (trailing != null) {
+                trailing()
+            }
+            if (showChevron) {
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = colors.textMuted,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        if (showDivider) {
+            IgngHairlineDivider(
+                startIndent = if (icon != null) 48.dp else 16.dp,
+                endIndent = 16.dp,
+            )
+        }
+    }
+}
+
+/**
+ * Editorial full-bleed surface container for continuous hairline-separated feeds
+ * (mobile counterpart of IGNG Web's `.bbs-tile--flush > .bbs-rows`).
+ */
+@Composable
+fun IgngFeedSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = IgngTheme.colors
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(colors.tile),
+    ) {
+        IgngHairlineDivider()
+        content()
+        IgngHairlineDivider()
+    }
+}
+
+/**
+ * Tier-2 Quiet Craft Tile card: crisp 0.5dp hairline border, clean flat surface, zero muddy shadow.
  */
 @Composable
 fun IgngTile(
@@ -168,8 +337,8 @@ fun IgngTile(
         modifier = modifier,
         shape = shape,
         color = if (soft) colors.tileSoft else colors.tile,
-        border = BorderStroke(1.dp, borderColor),
-        shadowElevation = if (colors.isDark) 0.dp else 0.5.dp,
+        border = BorderStroke(IgngStroke.hairline, borderColor),
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
@@ -179,8 +348,8 @@ fun IgngTile(
 }
 
 /**
- * Interactive Bento Tile with press micro-scale, subtle accent border highlight,
- * and haptic tap feedback — the mobile counterpart of IGNG Web's `AnimatedBlock`.
+ * Interactive Quiet Craft Tile with calm surface press transition and subtle haptics.
+ * Avoids distracting border color flashes and exaggerated bounce on routine cards.
  */
 @Composable
 fun IgngInteractiveTile(
@@ -190,6 +359,7 @@ fun IgngInteractiveTile(
     soft: Boolean = false,
     accentBorder: Color? = null,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    pressScale: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = IgngTheme.colors
@@ -200,8 +370,9 @@ fun IgngInteractiveTile(
 
     val border by animateColorAsState(
         targetValue = when {
-            pressed -> (accentBorder ?: colors.accent).copy(alpha = 0.55f)
-            accentBorder != null -> accentBorder.copy(alpha = 0.28f)
+            accentBorder != null && pressed -> accentBorder.copy(alpha = 0.42f)
+            accentBorder != null -> accentBorder.copy(alpha = 0.24f)
+            pressed -> colors.lineStrong
             else -> colors.line
         },
         animationSpec = IgngMotion.microTween(intensity),
@@ -217,9 +388,14 @@ fun IgngInteractiveTile(
         label = "tileBg",
     )
 
+    val interactiveMod = if (pressScale) {
+        modifier.igngPressScale(interactionSource)
+    } else {
+        modifier
+    }
+
     Surface(
-        modifier = modifier
-            .igngPressScale(interactionSource)
+        modifier = interactiveMod
             .clip(shape)
             .clickable(
                 interactionSource = interactionSource,
@@ -231,8 +407,8 @@ fun IgngInteractiveTile(
             ),
         shape = shape,
         color = bg,
-        border = BorderStroke(1.dp, border),
-        shadowElevation = if (colors.isDark) 0.dp else 0.5.dp,
+        border = BorderStroke(IgngStroke.hairline, border),
+        shadowElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
@@ -277,15 +453,15 @@ fun IgngButton(
         IgngButtonStyle.Danger -> if (pressed) colors.onAccent else colors.danger
     }
     val border = when (style) {
-        IgngButtonStyle.Secondary -> BorderStroke(1.dp, colors.lineStrong)
-        IgngButtonStyle.Danger -> BorderStroke(1.dp, colors.danger.copy(alpha = 0.35f))
+        IgngButtonStyle.Secondary -> BorderStroke(IgngStroke.hairline, colors.lineStrong)
+        IgngButtonStyle.Danger -> BorderStroke(IgngStroke.hairline, colors.danger.copy(alpha = 0.30f))
         else -> null
     }
 
     val effectiveAlpha = if (enabled) 1f else 0.45f
     Surface(
         modifier = modifier
-            .igngPressScale(interactionSource, pressedScale = 0.97f)
+            .igngPressScale(interactionSource, pressedScale = 0.985f)
             .clip(IgngTheme.radii.sm)
             .clickable(
                 enabled = enabled && !loading,
@@ -349,6 +525,10 @@ enum class IgngBadgeTone {
     Danger,
 }
 
+/**
+ * Quiet Craft status badge matching IGNG Web's `.cs-badge` / `.bbs-pill`:
+ * crisp 6dp square-rounded corners, soft semantic tint, no heavy colored borders.
+ */
 @Composable
 fun IgngBadge(
     text: String,
@@ -367,25 +547,31 @@ fun IgngBadge(
         IgngBadgeTone.Danger -> colors.danger
     }
     val bg = when {
-        customColor != null -> customColor.copy(alpha = if (colors.isDark) 0.18f else 0.11f)
+        customColor != null -> customColor.copy(alpha = if (colors.isDark) 0.14f else 0.10f)
         tone == IgngBadgeTone.Neutral -> colors.tileSoft
         tone == IgngBadgeTone.Accent -> colors.accentSoft
         tone == IgngBadgeTone.Success -> colors.successBg
         tone == IgngBadgeTone.Warning -> colors.warningBg
         else -> colors.dangerBg
     }
+    val shape = IgngTheme.radii.badge
+    val borderMod = if (tone == IgngBadgeTone.Neutral && customColor == null) {
+        Modifier.border(IgngStroke.hairline, colors.line, shape)
+    } else {
+        Modifier
+    }
 
     Row(
         modifier = modifier
-            .clip(IgngTheme.radii.pill)
+            .clip(shape)
             .background(bg)
-            .border(1.dp, fg.copy(alpha = if (tone == IgngBadgeTone.Neutral) 0.16f else 0.24f), IgngTheme.radii.pill)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+            .then(borderMod)
+            .padding(horizontal = 7.dp, vertical = 2.5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         if (leadingDot) {
-            IgngLivePulseDot(color = fg, active = pulse)
+            IgngLivePulseDot(color = fg, active = pulse, size = 6.dp)
         }
         Text(
             text = text,
@@ -401,14 +587,14 @@ fun IgngBadge(
 fun IgngLivePulseDot(
     color: Color,
     active: Boolean = true,
-    size: Dp = 7.dp,
+    size: Dp = 6.dp,
 ) {
     val reduced = IgngTheme.motionReduced
     val pulseAlpha = if (active && !reduced) {
         val transition = rememberInfiniteTransition(label = "livePulse")
         transition.animateFloat(
             initialValue = 0.25f,
-            targetValue = 0.7f,
+            targetValue = 0.65f,
             animationSpec = infiniteRepeatable(
                 animation = tween(1400, easing = LinearEasing),
                 repeatMode = RepeatMode.Reverse,
@@ -424,7 +610,7 @@ fun IgngLivePulseDot(
                 modifier = Modifier
                     .size(size + 4.dp)
                     .clip(CircleShape)
-                    .background(color.copy(alpha = pulseAlpha * 0.45f)),
+                    .background(color.copy(alpha = pulseAlpha * 0.42f)),
             )
         }
         Box(
@@ -437,7 +623,7 @@ fun IgngLivePulseDot(
 }
 
 /**
- * Interactive copy pill with animated Copy -> Check morph + success glow.
+ * Interactive copy pill with animated Copy -> Check morph + success feedback.
  */
 @Composable
 fun IgngCopyPill(
@@ -460,7 +646,7 @@ fun IgngCopyPill(
     }
 
     val border by animateColorAsState(
-        targetValue = if (copied) colors.success else colors.lineStrong,
+        targetValue = if (copied) colors.success else colors.line,
         animationSpec = IgngMotion.microTween(intensity),
         label = "copyBorder",
     )
@@ -473,10 +659,9 @@ fun IgngCopyPill(
 
     Row(
         modifier = modifier
-            .igngPressScale(interaction)
             .clip(IgngTheme.radii.sm)
             .background(bg)
-            .border(1.dp, border, IgngTheme.radii.sm)
+            .border(IgngStroke.hairline, border, IgngTheme.radii.sm)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -486,13 +671,13 @@ fun IgngCopyPill(
                     copied = true
                 },
             )
-            .padding(horizontal = 11.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = if (copied) "已复制" else (label ?: value),
-            style = if (mono && !copied) IgngTheme.type.mono else IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+            style = if (mono && !copied) IgngTheme.type.mono else IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium),
             color = if (copied) colors.success else colors.textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -569,14 +754,15 @@ fun <T> IgngSegmentedTabs(
     val intensity = IgngTheme.motionIntensity
     val haptic = rememberIgngHaptics()
     val selectedIndex = items.indexOf(selected).coerceAtLeast(0)
+    val thumbShape = RoundedCornerShape(8.dp)
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .clip(IgngTheme.radii.md)
+            .clip(IgngTheme.radii.sm)
             .background(colors.tileSoft)
-            .border(1.dp, colors.line, IgngTheme.radii.md)
-            .padding(4.dp),
+            .border(IgngStroke.hairline, colors.line, IgngTheme.radii.sm)
+            .padding(3.dp),
     ) {
         val segmentWidth = maxWidth / items.size
         val indicatorOffset by animateDpAsState(
@@ -589,10 +775,10 @@ fun <T> IgngSegmentedTabs(
             modifier = Modifier
                 .offset(x = indicatorOffset)
                 .width(segmentWidth)
-                .height(34.dp)
-                .clip(IgngTheme.radii.sm)
+                .height(32.dp)
+                .clip(thumbShape)
                 .background(colors.tile)
-                .border(1.dp, colors.lineStrong, IgngTheme.radii.sm),
+                .border(IgngStroke.hairline, colors.line, thumbShape),
         )
 
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -606,8 +792,8 @@ fun <T> IgngSegmentedTabs(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(34.dp)
-                        .clip(IgngTheme.radii.sm)
+                        .height(32.dp)
+                        .clip(thumbShape)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -623,7 +809,7 @@ fun <T> IgngSegmentedTabs(
                     Text(
                         text = labelOf(item),
                         style = IgngTheme.type.caption.copy(
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         ),
                         color = textColor,
                         maxLines = 1,
@@ -639,11 +825,12 @@ data class IgngNavTabItem(
     val id: String,
     val label: String,
     val icon: ImageVector,
+    val unselectedIcon: ImageVector = icon,
     val badgeCount: Int = 0,
 )
 
 /**
- * Legacy alias forwarding to unified zero-jitter [IgngFloatingDockBar].
+ * Legacy alias forwarding to unified fixed-slot [IgngFloatingDockBar].
  */
 @Composable
 fun IgngFloatingNavBar(
@@ -658,6 +845,12 @@ fun IgngFloatingNavBar(
     modifier = modifier,
 )
 
+/**
+ * Unified Quiet Craft top bar:
+ * - Top-level tab header (`onBack == null`): bold 21sp page title + clean trailing actions.
+ * - Secondary detail header (`onBack != null`): lightweight borderless 44dp back touch target +
+ *   refined 17sp SemiBold title without heavy boxed back buttons.
+ */
 @Composable
 fun IgngTopBar(
     title: String,
@@ -671,37 +864,35 @@ fun IgngTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(
+                start = if (onBack != null) 6.dp else 16.dp,
+                end = 12.dp,
+                top = if (onBack != null) 6.dp else 10.dp,
+                bottom = if (onBack != null) 6.dp else 8.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (onBack != null) {
-            Surface(
-                shape = IgngTheme.radii.sm,
-                color = colors.tile,
-                border = BorderStroke(1.dp, colors.line),
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(IgngTheme.radii.sm)
-                    .clickable {
-                        haptic(IgngHapticKind.Tap)
-                        onBack()
-                    },
+            IconButton(
+                onClick = {
+                    haptic(IgngHapticKind.Tap)
+                    onBack()
+                },
+                modifier = Modifier.size(44.dp),
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "返回",
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(19.dp),
-                    )
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "返回",
+                    tint = colors.textPrimary,
+                    modifier = Modifier.size(22.dp),
+                )
             }
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = IgngTheme.type.pageTitle,
+                style = if (onBack != null) IgngTheme.type.subpageTitle else IgngTheme.type.pageTitle,
                 color = colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -709,7 +900,7 @@ fun IgngTopBar(
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,
-                    style = IgngTheme.type.caption,
+                    style = IgngTheme.type.meta,
                     color = colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -718,13 +909,18 @@ fun IgngTopBar(
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             actions()
         }
     }
 }
 
+/**
+ * Quiet Craft section eyebrow header.
+ * Defaults to a calm 12.5sp secondary eyebrow (`sectionLabel`) so page content titles take visual priority;
+ * pass [prominent] = true for primary headings inside standalone cards or sheets.
+ */
 @Composable
 fun IgngSectionHeader(
     title: String,
@@ -733,6 +929,7 @@ fun IgngSectionHeader(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    prominent: Boolean = false,
 ) {
     val colors = IgngTheme.colors
     Row(
@@ -743,14 +940,14 @@ fun IgngSectionHeader(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = IgngTheme.type.sectionTitle,
-                color = colors.textPrimary,
+                style = if (prominent) IgngTheme.type.sectionTitle else IgngTheme.type.sectionLabel,
+                color = if (prominent) colors.textPrimary else colors.textSecondary,
             )
             if (!subtitle.isNullOrBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = subtitle,
-                    style = IgngTheme.type.caption,
+                    style = IgngTheme.type.meta,
                     color = colors.textSecondary,
                 )
             }
@@ -762,12 +959,12 @@ fun IgngSectionHeader(
             Spacer(Modifier.width(12.dp))
             Text(
                 text = actionLabel,
-                style = MaterialTheme.typography.labelLarge,
+                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium),
                 color = colors.accent,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(IgngRadius.pill))
+                    .clip(IgngTheme.radii.xs)
                     .clickable(onClick = onAction)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
             )
         }
     }
@@ -780,14 +977,15 @@ fun IgngSearchField(
     placeholder: String,
     modifier: Modifier = Modifier,
     onSubmit: (() -> Unit)? = null,
+    onClear: (() -> Unit)? = null,
 ) {
     val colors = IgngTheme.colors
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(IgngTheme.radii.md)
+            .clip(IgngTheme.radii.sm)
             .background(colors.tile)
-            .border(1.dp, colors.lineStrong, IgngTheme.radii.md)
+            .border(IgngStroke.hairline, colors.lineStrong, IgngTheme.radii.sm)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -795,7 +993,7 @@ fun IgngSearchField(
         Icon(
             imageVector = Icons.Rounded.Search,
             contentDescription = null,
-            tint = colors.textSecondary,
+            tint = colors.textMuted,
             modifier = Modifier.size(18.dp),
         )
         Box(modifier = Modifier.weight(1f)) {
@@ -814,14 +1012,25 @@ fun IgngSearchField(
                 singleLine = true,
                 textStyle = IgngTheme.type.body.copy(color = colors.textPrimary),
                 cursorBrush = SolidColor(colors.accent),
-                keyboardOptions = KeyboardOptions.Default,
-                keyboardActions = KeyboardActions(onDone = { onSubmit?.invoke() }),
+                keyboardOptions = KeyboardOptions(
+                    imeAction = if (onSubmit != null) {
+                        androidx.compose.ui.text.input.ImeAction.Search
+                    } else {
+                        androidx.compose.ui.text.input.ImeAction.Done
+                    },
+                ),
+                keyboardActions = KeyboardActions(
+                    onSearch = { onSubmit?.invoke() },
+                    onDone = { onSubmit?.invoke() },
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         if (value.isNotEmpty()) {
             IconButton(
-                onClick = { onValueChange("") },
+                onClick = {
+                    if (onClear != null) onClear() else onValueChange("")
+                },
                 modifier = Modifier.size(24.dp),
             ) {
                 Icon(
@@ -853,7 +1062,7 @@ fun IgngTextField(
         if (label.isNotBlank()) {
             Text(
                 text = label,
-                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium),
                 color = if (isError) colors.danger else colors.textSecondary,
             )
         }
@@ -863,7 +1072,7 @@ fun IgngTextField(
                 .clip(IgngTheme.radii.sm)
                 .background(colors.tileSoft)
                 .border(
-                    width = 1.dp,
+                    width = if (isError) IgngStroke.focus else IgngStroke.hairline,
                     color = if (isError) colors.danger else colors.lineStrong,
                     shape = IgngTheme.radii.sm,
                 )
@@ -894,7 +1103,7 @@ fun IgngTextField(
         if (!supportingText.isNullOrBlank()) {
             Text(
                 text = supportingText,
-                style = IgngTheme.type.caption,
+                style = IgngTheme.type.meta,
                 color = if (isError) colors.danger else colors.textSecondary,
             )
         }
@@ -903,7 +1112,7 @@ fun IgngTextField(
 
 /**
  * Calm skeleton rows per `docs/console-design.md`: no flashy gradient sweep,
- * only gentle low-amplitude opacity breathing to preview layout height without CLS.
+ * only gentle low-amplitude opacity breathing inside a single grouped container.
  */
 @Composable
 fun IgngSkeletonRows(
@@ -927,17 +1136,18 @@ fun IgngSkeletonRows(
         ).value
     }
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        repeat(count) {
-            IgngTile(modifier = Modifier.fillMaxWidth()) {
+    IgngGroupedSection(modifier = modifier) {
+        repeat(count) { idx ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(0.45f)
                         .height(14.dp)
-                        .clip(IgngTheme.radii.sm)
+                        .clip(IgngTheme.radii.xs)
                         .background(colors.lineStrong.scaleAlpha(alpha)),
                 )
                 Spacer(Modifier.height(10.dp))
@@ -945,7 +1155,7 @@ fun IgngSkeletonRows(
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
                         .height(11.dp)
-                        .clip(IgngTheme.radii.sm)
+                        .clip(IgngTheme.radii.xs)
                         .background(colors.line.scaleAlpha(alpha)),
                 )
                 Spacer(Modifier.height(6.dp))
@@ -953,9 +1163,12 @@ fun IgngSkeletonRows(
                     modifier = Modifier
                         .fillMaxWidth(0.62f)
                         .height(11.dp)
-                        .clip(IgngTheme.radii.sm)
+                        .clip(IgngTheme.radii.xs)
                         .background(colors.line.scaleAlpha(alpha)),
                 )
+            }
+            if (idx < count - 1) {
+                IgngHairlineDivider(startIndent = 16.dp, endIndent = 16.dp)
             }
         }
     }
@@ -973,7 +1186,7 @@ fun IgngStateBlock(
     val colors = IgngTheme.colors
     IgngTile(
         modifier = modifier.fillMaxWidth(),
-        borderColor = if (isError) colors.danger.copy(alpha = 0.3f) else colors.line,
+        borderColor = if (isError) colors.danger.copy(alpha = 0.30f) else colors.line,
         contentPadding = PaddingValues(24.dp),
     ) {
         Column(
@@ -983,7 +1196,7 @@ fun IgngStateBlock(
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(42.dp)
                     .clip(IgngTheme.radii.md)
                     .background(if (isError) colors.dangerBg else colors.tileSoft),
                 contentAlignment = Alignment.Center,
@@ -1038,7 +1251,7 @@ fun IgngDetailSheet(
         containerColor = colors.tile,
         contentColor = colors.textPrimary,
         scrimColor = colors.scrim,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     ) {
         val scrollMod = if (scrollable) {
             Modifier.verticalScroll(rememberScrollState())
@@ -1054,7 +1267,7 @@ fun IgngDetailSheet(
                 .padding(bottom = 24.dp),
         ) {
             if (!title.isNullOrBlank()) {
-                Text(text = title, style = IgngTheme.type.pageTitle, color = colors.textPrimary)
+                Text(text = title, style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
                 if (!subtitle.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(text = subtitle, style = IgngTheme.type.caption, color = colors.textSecondary)
@@ -1115,12 +1328,12 @@ fun IgngAvatar(
             .size(size)
             .clip(CircleShape)
             .background(colors.accentSoft)
-            .border(1.dp, colors.lineStrong, CircleShape),
+            .border(IgngStroke.hairline, colors.line, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = initial,
-            style = IgngTheme.type.cardTitle,
+            style = if (size <= 26.dp) IgngTheme.type.badge else IgngTheme.type.cardTitle,
             color = colors.accent,
         )
         if (!avatarUrl.isNullOrBlank()) {
@@ -1135,9 +1348,7 @@ fun IgngAvatar(
 }
 
 // =============================================================================
-// Unified Bento 2.0 convenience components & overloads (shared across BBS / MC / Ink)
-// All overloads delegate directly to the canonical Surface/Button/StateBlock primitives above
-// so every app shares identical elevation, press physics, typography, and haptics.
+// Unified Quiet Craft convenience components & overloads (shared across all apps)
 // =============================================================================
 
 @Composable
@@ -1176,6 +1387,10 @@ enum class IgngTone {
     DANGER,
 }
 
+/**
+ * Quiet Craft chip: crisp 8dp rounded rect (not inflated 999dp pill), subtle hairline border,
+ * and calm tonal hierarchy for filter bars and lightweight actions.
+ */
 @Composable
 fun IgngTagChip(
     text: String,
@@ -1186,6 +1401,7 @@ fun IgngTagChip(
 ) {
     val colors = IgngTheme.colors
     val intensity = IgngTheme.motionIntensity
+    val haptic = rememberIgngHaptics()
     val targetBg = when {
         selected && tone == IgngTone.DANGER -> colors.danger
         selected && tone == IgngTone.WARNING -> colors.warning
@@ -1207,28 +1423,36 @@ fun IgngTagChip(
     }
     val bg by animateColorAsState(targetBg, IgngMotion.microTween(intensity), label = "chipBg")
     val fg by animateColorAsState(targetFg, IgngMotion.microTween(intensity), label = "chipFg")
-    val shape = IgngTheme.radii.pill
-    val mod = if (onClick != null) {
-        modifier.igngPressScale(haptic = true, hapticKind = IgngHapticKind.Tick, onClick = onClick)
+    val shape = RoundedCornerShape(8.dp)
+    val needsBorder = !selected && tone == IgngTone.NEUTRAL
+    val clickMod = if (onClick != null) {
+        modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = {
+                haptic(IgngHapticKind.Tick)
+                onClick()
+            },
+        )
     } else {
         modifier
     }
 
     Box(
-        modifier = mod
+        modifier = clickMod
             .clip(shape)
             .background(bg)
-            .border(
-                width = 1.dp,
-                color = if (selected) Color.Transparent else colors.line,
-                shape = shape,
+            .then(
+                if (needsBorder) Modifier.border(IgngStroke.hairline, colors.line, shape) else Modifier,
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            style = IgngTheme.type.badge,
+            style = IgngTheme.type.badge.copy(
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            ),
             color = fg,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1245,7 +1469,7 @@ fun IgngAvatar(
     onClick: (() -> Unit)? = null,
 ) {
     val mod = if (onClick != null) {
-        modifier.igngPressScale(haptic = true, onClick = onClick)
+        modifier.clickable(onClick = onClick)
     } else {
         modifier
     }
@@ -1343,7 +1567,7 @@ fun IgngStatTile(
     IgngTile(modifier = modifier, padding = PaddingValues(14.dp)) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
+            style = IgngTheme.type.meta,
             color = colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1360,7 +1584,7 @@ fun IgngStatTile(
             Spacer(Modifier.height(4.dp))
             Text(
                 text = hint,
-                style = MaterialTheme.typography.bodySmall,
+                style = IgngTheme.type.meta,
                 color = colors.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1386,27 +1610,27 @@ fun IgngInfoBanner(
         IgngTone.DANGER -> colors.dangerLow to colors.danger
         IgngTone.NEUTRAL -> colors.tileSoft to colors.textPrimary
     }
-    val shape = RoundedCornerShape(IgngRadius.card)
+    val shape = IgngTheme.radii.md
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = shape,
         color = bg,
-        border = BorderStroke(1.dp, fg.copy(alpha = 0.25f)),
+        border = BorderStroke(IgngStroke.hairline, fg.copy(alpha = 0.22f)),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleSmall, color = fg)
+            Text(text = title, style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = fg)
             Spacer(Modifier.height(4.dp))
-            Text(text = message, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
+            Text(text = message, style = IgngTheme.type.caption, color = colors.textPrimary)
             if (!actionLabel.isNullOrBlank() && onAction != null) {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = actionLabel,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
                     color = fg,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(IgngRadius.pill))
+                        .clip(IgngTheme.radii.xs)
                         .clickable(onClick = onAction)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
             }
         }

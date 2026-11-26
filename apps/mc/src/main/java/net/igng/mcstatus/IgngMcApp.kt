@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Forum
@@ -269,10 +273,10 @@ fun IgngMcApp(
 
         val navItems = remember {
             listOf(
-                IgngNavTabItem("explore", "探索", Icons.Rounded.Explore),
-                IgngNavTabItem("chat", "聊天", Icons.Rounded.Forum),
-                IgngNavTabItem("wiki", "百科", Icons.Rounded.AutoStories),
-                IgngNavTabItem("player", "我的", Icons.Rounded.Person),
+                IgngNavTabItem("explore", "探索", Icons.Rounded.Explore, Icons.Outlined.Explore),
+                IgngNavTabItem("chat", "聊天", Icons.Rounded.Forum, Icons.Outlined.Forum),
+                IgngNavTabItem("wiki", "百科", Icons.Rounded.AutoStories, Icons.Outlined.AutoStories),
+                IgngNavTabItem("player", "我的", Icons.Rounded.Person, Icons.Outlined.Person),
             )
         }
 

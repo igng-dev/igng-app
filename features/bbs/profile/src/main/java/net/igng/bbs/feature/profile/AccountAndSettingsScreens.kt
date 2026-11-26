@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +60,8 @@ import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngAppUpdateCard
 import net.igng.core.designsystem.IgngAppUpdateSheet
 import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngCacheCard
 import net.igng.core.designsystem.IgngConfirmDialog
@@ -160,7 +161,7 @@ fun AccountSecurityScreen(
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(title = "账户与设备安全", subtitle = "多账户、跨应用共享登录与设备会话管理", onBack = onBack)
+            IgngTopBar(title = "账户与设备安全", onBack = onBack)
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -361,9 +362,9 @@ fun PrivacyPreferencesScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text("个人简介", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                    Text("个人简介", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
                                     settings?.bioStatus?.let { st ->
-                                        if (st == 1) IgngTagChip("简介审核中", tone = IgngTone.WARNING)
+                                        if (st == 1) IgngBadge(text = "简介审核中", tone = IgngBadgeTone.Warning)
                                     }
                                 }
                                 Spacer(Modifier.height(8.dp))
@@ -383,7 +384,7 @@ fun PrivacyPreferencesScreen(
                         }
                         item {
                             IgngTile {
-                                Text("排除的分区与标签", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                Text("排除的分区与标签", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
                                 Spacer(Modifier.height(8.dp))
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     bootstrap?.categories.orEmpty().forEach { cat ->
@@ -455,7 +456,7 @@ fun PrivacyPreferencesScreen(
                                     ) {
                                         Text(
                                             "${rule.targetUser.displayName} (@${rule.targetUser.username})",
-                                            style = MaterialTheme.typography.titleSmall,
+                                            style = IgngTheme.type.bodyMedium,
                                             color = colors.textPrimary,
                                         )
                                         IgngTagChip("解除屏蔽", tone = IgngTone.DANGER, onClick = { unblockTarget = rule })
@@ -516,7 +517,7 @@ fun AppSettingsScreen(
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(title = "应用设置", subtitle = "外观画布、动效触感、通知、缓存与更新", onBack = onBack)
+            IgngTopBar(title = "应用设置", onBack = onBack)
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -546,6 +547,7 @@ fun AppSettingsScreen(
                         IgngSectionHeader(
                             title = "社区与后台同步",
                             subtitle = "IGNG BBS 专属浏览与通知偏好",
+                            prominent = true,
                         )
                         Spacer(Modifier.height(10.dp))
                         IgngSwitchRow(

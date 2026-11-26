@@ -14,25 +14,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
-import androidx.compose.material.icons.rounded.AdminPanelSettings
-import androidx.compose.material.icons.rounded.BookmarkBorder
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Create
-import androidx.compose.material.icons.rounded.Gavel
-import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.ManageAccounts
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.outlined.AdminPanelSettings
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Create
+import androidx.compose.material.icons.outlined.Gavel
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.ManageAccounts
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -44,13 +40,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.launch
 import net.igng.bbs.common.BbsContinueReadingCard
-import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.common.BbsPostRow
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.data.BbsCacheKeys
 import net.igng.bbs.core.data.BbsCachePolicies
@@ -74,12 +69,14 @@ import net.igng.core.designsystem.IgngConfirmDialog
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngFamilySsoBanner
+import net.igng.core.designsystem.IgngGroupedSection
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngInfoBanner
+import net.igng.core.designsystem.IgngListRow
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngSecondaryButton
-import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
@@ -103,7 +100,7 @@ fun ProfileCenterScreen(
     onOpenPrivacyPreferences: () -> Unit,
     onOpenAppSettings: () -> Unit,
     onOpenRules: () -> Unit,
-    bottomInsetPadding: PaddingValues = PaddingValues(bottom = 96.dp),
+    bottomInsetPadding: PaddingValues = PaddingValues(bottom = 64.dp),
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
@@ -128,11 +125,7 @@ fun ProfileCenterScreen(
     ) {
         IgngTopBar(
             title = "我的",
-            subtitle = when {
-                sessionExpired -> "登录会话已失效 · 仅展示本地缓存与公开入口"
-                activeAccount != null -> "IGNG BBS 创作者与账户中心"
-                else -> "登录以解锁互动、创作与跨端同步"
-            },
+            subtitle = if (sessionExpired) "登录会话已失效 · 仅展示本地缓存" else null,
         )
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
@@ -150,10 +143,10 @@ fun ProfileCenterScreen(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = 4.dp,
-                    bottom = bottomInsetPadding.calculateBottomPadding() + 16.dp,
+                    top = 6.dp,
+                    bottom = bottomInsetPadding.calculateBottomPadding() + 20.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 // Cross-app family SSO discovery card when signed out
                 if (activeAccount == null && familyAccounts.isNotEmpty()) {
@@ -165,12 +158,12 @@ fun ProfileCenterScreen(
                     }
                 }
 
-                // Non-destructive session expired banner (aligned with IGNGmc)
+                // Non-destructive session expired banner
                 if (sessionExpired) {
                     item(key = "session_expired") {
                         val isLegacy = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
                         IgngTile(
-                            borderColor = colors.warning.copy(alpha = 0.55f),
+                            borderColor = colors.warning.copy(alpha = 0.45f),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             IgngBadge(
@@ -180,9 +173,9 @@ fun ProfileCenterScreen(
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 text = if (isLegacy) {
-                                    "当前账户仍保留旧版登录凭证，新版本需通过 IGNG SSO 重新授权以恢复收藏、私信与云端草稿同步。"
+                                    "旧版凭证已停用，重新通过 IGNG SSO 授权即可恢复收藏、消息与草稿同步。"
                                 } else {
-                                    "当前仅展示本地缓存的账户标识；互动、创作同步与通知需重新授权后恢复。"
+                                    "当前仅展示本地缓存标识，重新授权后恢复互动、创作同步与通知。"
                                 },
                                 style = IgngTheme.type.caption,
                                 color = colors.textSecondary,
@@ -200,17 +193,17 @@ fun ProfileCenterScreen(
                     }
                 }
 
-                // Identity Bento Hero
+                // Identity card
                 item(key = "identity") {
                     if (activeAccount == null) {
                         IgngTile {
-                            IgngBadge("OAuth 2.1 · PKCE 安全登录", tone = IgngBadgeTone.Accent)
+                            IgngBadge("IGNG SSO 安全登录", tone = IgngBadgeTone.Accent)
                             Spacer(Modifier.height(10.dp))
-                            Text("登录你的 IGNG 账户", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
+                            Text("登录你的 IGNG 账户", style = IgngTheme.type.pageTitle, color = colors.textPrimary)
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "通过官方安全授权登录，解锁点赞收藏、关注互动、多账户切换、云端草稿创作与实时通知。",
-                                style = MaterialTheme.typography.bodyMedium,
+                                "登录后解锁点赞收藏、关注互动、云端草稿创作与实时通知。",
+                                style = IgngTheme.type.body,
                                 color = colors.textSecondary,
                             )
                             Spacer(Modifier.height(14.dp))
@@ -227,22 +220,26 @@ fun ProfileCenterScreen(
                         val viewer = bootstrap?.viewer
                         IgngTile(onClick = { onOpenMyProfile(acc.publicUserId) }) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                IgngAvatar(avatarUrl = viewer?.user?.avatarUrl ?: acc.avatarUrl, displayName = acc.displayName, size = 56.dp)
+                                IgngAvatar(avatarUrl = viewer?.user?.avatarUrl ?: acc.avatarUrl, displayName = acc.displayName, size = 54.dp)
                                 Column(modifier = Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(acc.displayName, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = colors.textPrimary)
+                                        Text(acc.displayName, style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
                                         if (sessionExpired) {
                                             IgngBadge("已失效", tone = IgngBadgeTone.Warning)
                                         }
                                     }
-                                    Text("@${acc.username} · 账户编号 #${acc.userId}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                                    Spacer(Modifier.height(6.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        viewer?.level?.let { lvl ->
-                                            IgngTagChip("Lv.$lvl · ${viewer.exp ?: 0} EXP", tone = IgngTone.ACCENT)
-                                        }
-                                        if (viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true) {
-                                            IgngTagChip("风控观察中", tone = IgngTone.WARNING)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text("@${acc.username} · #${acc.userId}", style = IgngTheme.type.meta, color = colors.textMuted)
+                                    val hasBadges = viewer?.level != null || viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true
+                                    if (hasBadges) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            viewer?.level?.let { lvl ->
+                                                IgngBadge("Lv.$lvl · ${viewer.exp ?: 0} EXP", tone = IgngBadgeTone.Accent)
+                                            }
+                                            if (viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true) {
+                                                IgngBadge("风控观察中", tone = IgngBadgeTone.Warning)
+                                            }
                                         }
                                     }
                                 }
@@ -251,96 +248,98 @@ fun ProfileCenterScreen(
                     }
                 }
 
+                // Group 1: Content & Creation (consolidated grouped list, zero card clutter)
                 if (activeAccount != null) {
+                    val isAdmin = bootstrap?.viewer?.admin?.isBbsAdmin == true
                     item(key = "social_shortcuts") {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ProfileRowItem("我的收藏", "收藏夹里的精选文章", Icons.Rounded.BookmarkBorder, onOpenFavorites)
-                            ProfileRowItem("关注与粉丝", "查看关注列表与互动关系", Icons.Rounded.Group, onOpenFollowing)
-                            ProfileRowItem("阅读记录", "本地阅读进度与断点续读", Icons.Rounded.History, onOpenHistory)
-                            ProfileRowItem("创作中心", "文章编辑器、专栏与数据趋势", Icons.Rounded.Create, onOpenCreator)
-                        }
-                    }
-
-                    // Real-time RBAC-gated Pocket Admin Entry (ONLY visible to BBS admins)
-                    if (bootstrap?.viewer?.admin?.isBbsAdmin == true) {
-                        item(key = "admin_entry") {
-                            ProfileRowItem(
-                                title = "社区治理控制台",
-                                subtitle = "帖子治理 · 人工审核 · 举报处理 · 双域风控",
-                                icon = Icons.Rounded.AdminPanelSettings,
-                                onClick = onOpenAdmin,
-                                accentTint = true,
+                        IgngGroupedSection(title = "内容与创作") {
+                            IgngListRow(
+                                title = "我的收藏",
+                                icon = Icons.Outlined.BookmarkBorder,
+                                onClick = onOpenFavorites,
+                                showDivider = true,
                             )
+                            IgngListRow(
+                                title = "关注与粉丝",
+                                icon = Icons.Outlined.Group,
+                                onClick = onOpenFollowing,
+                                showDivider = true,
+                            )
+                            IgngListRow(
+                                title = "阅读记录",
+                                icon = Icons.Outlined.History,
+                                onClick = onOpenHistory,
+                                showDivider = true,
+                            )
+                            IgngListRow(
+                                title = "创作中心",
+                                icon = Icons.Outlined.Create,
+                                onClick = onOpenCreator,
+                                showDivider = isAdmin,
+                            )
+                            if (isAdmin) {
+                                IgngListRow(
+                                    title = "社区治理控制台",
+                                    icon = Icons.Outlined.AdminPanelSettings,
+                                    iconTint = colors.warning,
+                                    onClick = onOpenAdmin,
+                                )
+                            }
                         }
                     }
 
+                    // Group 2: Account & Privacy
                     item(key = "account_shortcuts") {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            IgngSectionHeader("账户与隐私")
-                            ProfileRowItem("账户与安全", "多账户切换、头像修改与登录设备管理", Icons.Rounded.ManageAccounts, onOpenAccountSecurity)
-                            ProfileRowItem("隐私与内容过滤", "个人简介、屏蔽规则与排除偏好", Icons.Rounded.Lock, onOpenPrivacyPreferences)
+                        IgngGroupedSection(title = "账户与隐私") {
+                            IgngListRow(
+                                title = "账户与安全",
+                                icon = Icons.Outlined.ManageAccounts,
+                                onClick = onOpenAccountSecurity,
+                                showDivider = true,
+                            )
+                            IgngListRow(
+                                title = "隐私与内容过滤",
+                                icon = Icons.Outlined.Lock,
+                                onClick = onOpenPrivacyPreferences,
+                            )
                         }
                     }
                 } else {
                     item(key = "guest_history") {
-                        ProfileRowItem("本地阅读记录", "查看近期浏览与阅读进度", Icons.Rounded.History, onOpenHistory)
+                        IgngGroupedSection(title = "阅读") {
+                            IgngListRow(
+                                title = "本地阅读记录",
+                                icon = Icons.Outlined.History,
+                                onClick = onOpenHistory,
+                            )
+                        }
                     }
                 }
 
+                // Group 3: App
                 item(key = "app_shortcuts") {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        IgngSectionHeader("应用")
-                        ProfileRowItem(
-                            title = "外观、动效与阅读设置",
-                            subtitle = "主题、三档动效强度、更新、通知与缓存",
-                            icon = Icons.Rounded.Settings,
+                    IgngGroupedSection(title = "应用") {
+                        IgngListRow(
+                            title = "应用设置",
+                            icon = Icons.Outlined.Settings,
                             onClick = onOpenAppSettings,
                             trailing = if (updateSnapshot.hasBadgeAlert) {
-                                {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        IgngUpdateDotBadge()
-                                        Icon(
-                                            imageVector = Icons.Rounded.ChevronRight,
-                                            contentDescription = null,
-                                            tint = colors.textMuted,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
+                                { IgngUpdateDotBadge() }
                             } else {
                                 null
                             },
+                            showDivider = true,
                         )
-                        ProfileRowItem("社区规范与申诉准则", "查看现行 IGNG BBS 社区条款", Icons.Rounded.Gavel, onOpenRules)
+                        IgngListRow(
+                            title = "社区规范与申诉准则",
+                            icon = Icons.Outlined.Gavel,
+                            onClick = onOpenRules,
+                        )
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun ProfileRowItem(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    accentTint: Boolean = false,
-    trailing: (@Composable () -> Unit)? = null,
-) {
-    val colors = IgngTheme.colors
-    net.igng.core.designsystem.IgngNavRowTile(
-        title = title,
-        subtitle = subtitle,
-        icon = icon,
-        iconTint = if (accentTint) colors.warning else colors.accent,
-        trailing = trailing,
-        accentBorder = if (accentTint) colors.warning else null,
-        onClick = onClick,
-    )
 }
 
 private class UserProfileUiHolder {
@@ -392,80 +391,91 @@ fun UserProfileScreen(
                     val p = profile
                     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                     LazyColumn(
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp + navBottom),
                     ) {
-                        notice?.let { item { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-                        item {
-                            IgngTile {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                    IgngAvatar(p.user.avatarUrl, p.user.displayName, size = 56.dp)
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(p.user.displayName, style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                                        Text("@${p.user.username} · Lv.${p.level}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                        notice?.let { msg ->
+                            item(key = "notice") {
+                                Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+                                    IgngInfoBanner("提示", msg, IgngTone.ACCENT)
+                                }
+                            }
+                        }
+                        item(key = "profile_card") {
+                            Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) {
+                                IgngTile {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        IgngAvatar(p.user.avatarUrl, p.user.displayName, size = 54.dp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(p.user.displayName, style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
+                                            Spacer(Modifier.height(2.dp))
+                                            Text("@${p.user.username} · Lv.${p.level}", style = IgngTheme.type.meta, color = colors.textMuted)
+                                        }
                                     }
-                                }
-                                p.user.bio?.takeIf { it.isNotBlank() }?.let { bio ->
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(bio, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                    Text("${p.stats.posts} 文章", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
-                                    Text("${p.stats.followers} 粉丝", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
-                                    Text("${p.stats.following} 关注", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
-                                    Text("${BbsFormatters.compactCount(p.stats.totalLikes)} 获赞", style = MaterialTheme.typography.labelMedium, color = colors.textMuted)
-                                }
-                                if (!p.viewerState.isSelf) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        IgngPrimaryButton(
-                                            text = if (p.viewerState.isFollowing) "已关注" else "关注",
-                                            onClick = {
-                                                if (activeAccount == null) { onRequireLogin(); return@IgngPrimaryButton }
-                                                scope.launch {
-                                                    when (val r = container.profileRepository.toggleFollow(p.user.id)) {
-                                                        is ApiResult.Success -> {
-                                                            profileHandle.mutateLocal { cur ->
-                                                                cur.copy(
-                                                                    viewerState = cur.viewerState.copy(isFollowing = r.data.following),
-                                                                    stats = cur.stats.copy(followers = r.data.followerCount),
-                                                                )
+                                    p.user.bio?.takeIf { it.isNotBlank() }?.let { bio ->
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(bio, style = IgngTheme.type.body, color = colors.textSecondary)
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        Text("${p.stats.posts} 文章", style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium), color = colors.textPrimary)
+                                        Text("${p.stats.followers} 粉丝", style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium), color = colors.textPrimary)
+                                        Text("${p.stats.following} 关注", style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium), color = colors.textPrimary)
+                                        Text("${BbsFormatters.compactCount(p.stats.totalLikes)} 获赞", style = IgngTheme.type.meta, color = colors.textMuted)
+                                    }
+                                    if (!p.viewerState.isSelf) {
+                                        Spacer(Modifier.height(12.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            IgngPrimaryButton(
+                                                text = if (p.viewerState.isFollowing) "已关注" else "关注",
+                                                onClick = {
+                                                    if (activeAccount == null) { onRequireLogin(); return@IgngPrimaryButton }
+                                                    scope.launch {
+                                                        when (val r = container.profileRepository.toggleFollow(p.user.id)) {
+                                                            is ApiResult.Success -> {
+                                                                profileHandle.mutateLocal { cur ->
+                                                                    cur.copy(
+                                                                        viewerState = cur.viewerState.copy(isFollowing = r.data.following),
+                                                                        stats = cur.stats.copy(followers = r.data.followerCount),
+                                                                    )
+                                                                }
+                                                                profileHandle.silentRefresh()
                                                             }
-                                                            profileHandle.silentRefresh()
+                                                            is ApiResult.Failure -> notice = r.error.message
                                                         }
-                                                        is ApiResult.Failure -> notice = r.error.message
                                                     }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        IgngSecondaryButton(
-                                            text = if (p.viewerState.blockFollow || p.viewerState.blockView) "取消屏蔽" else "屏蔽",
-                                            onClick = {
-                                                if (activeAccount == null) { onRequireLogin(); return@IgngSecondaryButton }
-                                                scope.launch {
-                                                    val res = if (p.viewerState.blockFollow || p.viewerState.blockView) {
-                                                        container.profileRepository.deleteBlockRule(p.user.id)
-                                                    } else {
-                                                        container.profileRepository.upsertBlockRule(UpsertBlockRuleRequest(p.user.id, blockFollow = true, blockView = true))
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            IgngSecondaryButton(
+                                                text = if (p.viewerState.blockFollow || p.viewerState.blockView) "取消屏蔽" else "屏蔽",
+                                                onClick = {
+                                                    if (activeAccount == null) { onRequireLogin(); return@IgngSecondaryButton }
+                                                    scope.launch {
+                                                        val res = if (p.viewerState.blockFollow || p.viewerState.blockView) {
+                                                            container.profileRepository.deleteBlockRule(p.user.id)
+                                                        } else {
+                                                            container.profileRepository.upsertBlockRule(UpsertBlockRuleRequest(p.user.id, blockFollow = true, blockView = true))
+                                                        }
+                                                        when (res) {
+                                                            is ApiResult.Success -> { notice = "屏蔽设置已更新"; profileHandle.silentRefresh() }
+                                                            is ApiResult.Failure -> notice = res.error.message
+                                                        }
                                                     }
-                                                    when (res) {
-                                                        is ApiResult.Success -> { notice = "屏蔽设置已更新"; profileHandle.silentRefresh() }
-                                                        is ApiResult.Failure -> notice = res.error.message
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        // Pure BBS 3-tab strip (zero Ink)
-                        item {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Pure BBS 3-tab strip
+                        item(key = "tabs") {
+                            Row(
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 IgngTagChip("已发布（${p.posts.size}）", selected = tab == 0, onClick = { tab = 0 })
                                 IgngTagChip("参与协作（${p.collaboratedPosts.size}）", selected = tab == 1, onClick = { tab = 1 })
                                 IgngTagChip("近7天动态（${p.recentActivities.size}）", selected = tab == 2, onClick = { tab = 2 })
@@ -474,42 +484,58 @@ fun UserProfileScreen(
 
                         when (tab) {
                             0 -> if (p.posts.isEmpty()) {
-                                item { IgngEmptyTile("暂无公开文章", "这位作者还没有发布公开的 BBS 文章。") }
+                                item { Box(Modifier.padding(horizontal = 16.dp)) { IgngEmptyTile("暂无公开文章", "这位作者还没有发布公开的 BBS 文章。") } }
                             } else {
-                                items(p.posts, key = { it.id }) { post ->
-                                    BbsPostRowCard(post = post, onClick = { onOpenPost(post.id) })
+                                item(key = "posts_top") { IgngHairlineDivider() }
+                                itemsIndexed(p.posts, key = { _, it -> it.id }) { idx, post ->
+                                    BbsPostRow(
+                                        post = post,
+                                        onClick = { onOpenPost(post.id) },
+                                        showDivider = idx < p.posts.lastIndex,
+                                    )
                                 }
+                                item(key = "posts_bottom") { IgngHairlineDivider() }
                             }
                             1 -> if (p.collaboratedPosts.isEmpty()) {
-                                item { IgngEmptyTile("暂无协作文章", "暂无公开的协作署名记录。") }
+                                item { Box(Modifier.padding(horizontal = 16.dp)) { IgngEmptyTile("暂无协作文章", "暂无公开的协作署名记录。") } }
                             } else {
-                                items(p.collaboratedPosts, key = { "${it.post.id}_${it.roleTitle}" }) { item ->
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        IgngTagChip("署名角色：${item.roleTitle}", tone = IgngTone.ACCENT)
-                                        BbsPostRowCard(post = item.post, onClick = { onOpenPost(item.post.id) })
+                                item(key = "collab_top") { IgngHairlineDivider() }
+                                itemsIndexed(p.collaboratedPosts, key = { _, it -> "${it.post.id}_${it.roleTitle}" }) { idx, item ->
+                                    Column(modifier = Modifier.fillMaxWidth().background(colors.tile)) {
+                                        Box(modifier = Modifier.padding(start = 16.dp, top = 12.dp)) {
+                                            IgngBadge("署名角色：${item.roleTitle}", tone = IgngBadgeTone.Accent)
+                                        }
+                                        BbsPostRow(
+                                            post = item.post,
+                                            onClick = { onOpenPost(item.post.id) },
+                                            showDivider = idx < p.collaboratedPosts.lastIndex,
+                                        )
                                     }
                                 }
+                                item(key = "collab_bottom") { IgngHairlineDivider() }
                             }
                             else -> if (p.recentActivities.isEmpty()) {
-                                item { IgngEmptyTile("近 7 天暂无动态", "近期没有新的发布、评论或点赞互动。") }
+                                item { Box(Modifier.padding(horizontal = 16.dp)) { IgngEmptyTile("近 7 天暂无动态", "近期没有新的发布、评论或点赞互动。") } }
                             } else {
-                                items(p.recentActivities, key = { "${it.kind}_${it.targetId}_${it.createdAt}" }) { act ->
-                                    IgngTile(padding = PaddingValues(14.dp), onClick = act.targetId?.let { pid -> { onOpenPost(pid) } }) {
-                                        Text(
-                                            text = when (act.kind) {
-                                                "post" -> "发布了文章《${act.title}》"
-                                                "comment" -> "评论了《${act.title}》"
-                                                else -> "赞了文章《${act.title}》"
-                                            },
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = colors.textPrimary,
-                                        )
-                                        act.excerpt?.takeIf { it.isNotBlank() }?.let {
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 2)
+                                item(key = "act_group") {
+                                    Box(Modifier.padding(horizontal = 16.dp)) {
+                                        IgngGroupedSection {
+                                            p.recentActivities.forEachIndexed { idx, act ->
+                                                val headline = when (act.kind) {
+                                                    "post" -> "发布了文章《${act.title}》"
+                                                    "comment" -> "评论了《${act.title}》"
+                                                    else -> "赞了文章《${act.title}》"
+                                                }
+                                                IgngListRow(
+                                                    title = headline,
+                                                    subtitle = act.excerpt?.takeIf { it.isNotBlank() } ?: BbsFormatters.relativeTime(act.createdAt),
+                                                    value = if (!act.excerpt.isNullOrBlank()) BbsFormatters.relativeTime(act.createdAt) else null,
+                                                    showChevron = act.targetId != null,
+                                                    showDivider = idx < p.recentActivities.lastIndex,
+                                                    onClick = { act.targetId?.let(onOpenPost) },
+                                                )
+                                            }
                                         }
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(BbsFormatters.relativeTime(act.createdAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
                                     }
                                 }
                             }
@@ -561,12 +587,17 @@ fun FavoritesScreen(
                 else -> {
                     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                     LazyColumn(
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp + navBottom),
                     ) {
-                        items(items, key = { it.post.id }) { fav ->
-                            BbsPostRowCard(post = fav.post, onClick = { onOpenPost(fav.post.id) })
+                        item(key = "fav_top") { IgngHairlineDivider() }
+                        itemsIndexed(items, key = { _, it -> it.post.id }) { idx, fav ->
+                            BbsPostRow(
+                                post = fav.post,
+                                onClick = { onOpenPost(fav.post.id) },
+                                showDivider = idx < items.lastIndex,
+                            )
                         }
+                        item(key = "fav_bottom") { IgngHairlineDivider() }
                     }
                 }
             }
@@ -629,28 +660,43 @@ fun FollowingScreen(
                 else -> {
                     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                     LazyColumn(
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + navBottom),
                     ) {
-                        items(list, key = { it.user.id }) { row ->
-                            IgngTile(padding = PaddingValues(14.dp), onClick = { onOpenUser(row.user.id) }) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    IgngAvatar(row.user.avatarUrl, row.user.displayName, size = 40.dp)
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(row.user.displayName, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        Text("@${row.user.username}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                        item(key = "following_group") {
+                            IgngGroupedSection {
+                                list.forEachIndexed { idx, row ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        IgngAvatar(
+                                            avatarUrl = row.user.avatarUrl,
+                                            displayName = row.user.displayName,
+                                            size = 38.dp,
+                                            onClick = { onOpenUser(row.user.id) },
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(row.user.displayName, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                            Text("@${row.user.username}", style = IgngTheme.type.meta, color = colors.textMuted)
+                                        }
+                                        IgngTagChip(
+                                            text = if (row.isFollowing) "已关注" else "+ 回关",
+                                            selected = row.isFollowing,
+                                            tone = IgngTone.ACCENT,
+                                            onClick = {
+                                                scope.launch {
+                                                    container.profileRepository.toggleFollow(row.user.id)
+                                                    followingHandle.silentRefresh()
+                                                }
+                                            },
+                                        )
                                     }
-                                    IgngTagChip(
-                                        text = if (row.isFollowing) "已关注" else "+ 回关",
-                                        selected = row.isFollowing,
-                                        tone = IgngTone.ACCENT,
-                                        onClick = {
-                                            scope.launch {
-                                                container.profileRepository.toggleFollow(row.user.id)
-                                                followingHandle.silentRefresh()
-                                            }
-                                        },
-                                    )
+                                    if (idx < list.lastIndex) {
+                                        IgngHairlineDivider(startIndent = 66.dp, endIndent = 16.dp)
+                                    }
                                 }
                             }
                         }
@@ -675,7 +721,7 @@ fun ReadingHistoryScreen(
 
     Column(modifier = Modifier.fillMaxSize().background(colors.canvas).statusBarsPadding()) {
         IgngTopBar(
-            title = "本地阅读记录",
+            title = "阅读记录",
             onBack = onBack,
             actions = {
                 if (history.isNotEmpty()) {
@@ -687,10 +733,10 @@ fun ReadingHistoryScreen(
             Box(Modifier.padding(16.dp)) { IgngEmptyTile("暂无阅读记录", "你浏览过的文章进度会自动保存在本机，方便下次继续阅读。") }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp + navBottom),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + navBottom),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(history, key = { it.postId }) { entry ->
+                itemsIndexed(history, key = { _, it -> it.postId }) { _, entry ->
                     BbsContinueReadingCard(entry = entry, onResume = { onOpenPost(entry.postId) })
                 }
             }

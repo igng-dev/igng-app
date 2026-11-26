@@ -26,15 +26,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material.icons.rounded.Explore
-import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Timeline
-import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,8 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +52,28 @@ import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.runSuspendCatching
+import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngAnimatedCounter
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
+import net.igng.core.designsystem.IgngCopyPill
+import net.igng.core.designsystem.IgngGroupedSection
+import net.igng.core.designsystem.IgngHairlineDivider
+import net.igng.core.designsystem.IgngHapticKind
+import net.igng.core.designsystem.IgngListRow
+import net.igng.core.designsystem.IgngLoadingBlock
+import net.igng.core.designsystem.IgngMotion
+import net.igng.core.designsystem.IgngPullToRefreshBox
+import net.igng.core.designsystem.IgngStateBlock
+import net.igng.core.designsystem.IgngStroke
+import net.igng.core.designsystem.IgngTheme
+import net.igng.core.designsystem.rememberIgngHaptics
+import net.igng.core.model.SavedAccount
+import net.igng.core.model.SessionAuthStatus
+import net.igng.mcstatus.common.IgngServerBackdropCanvas
+import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.data.ExploreRepository
 import net.igng.mcstatus.core.data.McCacheKeys
 import net.igng.mcstatus.core.data.McCachePolicies
@@ -63,29 +84,8 @@ import net.igng.mcstatus.core.data.PublicStatusResponse
 import net.igng.mcstatus.core.data.ServerFamilyDto
 import net.igng.mcstatus.core.data.ServerSeasonDto
 import net.igng.mcstatus.core.data.StatusRepository
-import net.igng.core.designsystem.IgngAmbientCanvas
-import net.igng.core.designsystem.IgngAnimatedCounter
-import net.igng.core.designsystem.IgngBadge
-import net.igng.core.designsystem.IgngBadgeTone
-import net.igng.core.designsystem.IgngButton
-import net.igng.core.designsystem.IgngButtonStyle
-import net.igng.core.designsystem.IgngCopyPill
-import net.igng.core.designsystem.IgngHapticKind
-import net.igng.core.designsystem.IgngInteractiveTile
-import net.igng.core.designsystem.IgngLoadingBlock
-import net.igng.core.designsystem.IgngMotion
-import net.igng.core.designsystem.IgngPullToRefreshBox
-import net.igng.core.designsystem.IgngSectionHeader
-import net.igng.mcstatus.common.IgngServerBackdropCanvas
-import net.igng.core.designsystem.IgngStateBlock
-import net.igng.core.designsystem.IgngTheme
-import net.igng.core.designsystem.igngStaggeredReveal
-import net.igng.core.designsystem.rememberIgngHaptics
-import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.model.IgngFormatters
-import net.igng.core.model.SavedAccount
 import net.igng.mcstatus.core.model.ServerThemeKey
-import net.igng.core.model.SessionAuthStatus
 
 private class ExploreSelectionHolder {
     var selectedFamilySlug by mutableStateOf<String?>(null)
@@ -159,14 +159,13 @@ fun ExploreScreen(
     val activeThemeKey = remember(selectedFamily, selectedSeason) {
         ServerThemeKey.resolve(selectedSeason?.backgroundKey ?: selectedFamily?.themeKey)
     }
-    val activeVisual = serverFamilyVisual(activeThemeKey, colors.isDark)
 
     val statusByServerId = remember(statuses) { statuses.associateBy { it.id } }
     val selectedServerStatus = selectedSeason?.serverId?.let { statusByServerId[it] }
     val totalOnline = remember(statuses) { statuses.sumOf { it.onlinePlayers ?: 0 } }
     val onlineServers = remember(statuses) { statuses.count { it.online } }
 
-    IgngAmbientCanvas(accentOverride = activeVisual.accent) {
+    IgngAmbientCanvas {
         IgngPullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = {
@@ -182,45 +181,61 @@ fun ExploreScreen(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = 12.dp,
+                    top = 10.dp,
                     bottom = bottomPadding.calculateBottomPadding() + 20.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // 1. Brand header + quick search + account entry
+                // 1. Quiet Craft brand header + search icon action + account entry
                 item(key = "header") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "IGNG Minecraft",
-                                style = IgngTheme.type.heroTitle,
+                                style = IgngTheme.type.pageTitle,
                                 color = colors.textPrimary,
                             )
-                            Text(
-                                text = if (statuses.isNotEmpty()) {
-                                    "$onlineServers/${statuses.size} 台存活周目在线 · $totalOnline 名玩家在线"
-                                } else {
-                                    "官方服务器与社区平台"
-                                },
-                                style = IgngTheme.type.caption,
-                                color = colors.textSecondary,
+                            if (statuses.isNotEmpty()) {
+                                Text(
+                                    text = "$onlineServers/${statuses.size} 台周目在线 · $totalOnline 名玩家",
+                                    style = IgngTheme.type.meta,
+                                    color = colors.textSecondary,
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                haptic(IgngHapticKind.Tap)
+                                onOpenSearch()
+                            },
+                            modifier = Modifier.size(38.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Search,
+                                contentDescription = "全局搜索",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(21.dp),
                             )
                         }
                         val needsReauth = activeAccount != null && sessionAuthStatus.requiresReauth
                         Box(
                             modifier = Modifier
-                                .clip(CircleShape)
+                                .clip(IgngTheme.radii.sm)
                                 .background(if (needsReauth) colors.warningBg else colors.tile)
-                                .border(1.dp, if (needsReauth) colors.warning else colors.lineStrong, CircleShape)
+                                .border(
+                                    IgngStroke.hairline,
+                                    if (needsReauth) colors.warning.copy(alpha = 0.55f) else colors.lineStrong,
+                                    IgngTheme.radii.sm,
+                                )
                                 .clickable {
                                     haptic(IgngHapticKind.Tap)
                                     onOpenMyProfile()
                                 }
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                         ) {
                             Text(
                                 text = when {
@@ -228,7 +243,7 @@ fun ExploreScreen(
                                     activeAccount != null -> activeAccount.displayName
                                     else -> "登录"
                                 },
-                                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium),
                                 color = when {
                                     needsReauth -> colors.warning
                                     activeAccount != null -> colors.textPrimary
@@ -240,34 +255,7 @@ fun ExploreScreen(
                     }
                 }
 
-                // 2. Global search entry pill
-                item(key = "searchBar") {
-                    IgngInteractiveTile(
-                        onClick = onOpenSearch,
-                        shape = IgngTheme.radii.md,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = null,
-                                tint = colors.textSecondary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Text(
-                                text = "搜索玩家、MC 角色名或公开档案…",
-                                style = IgngTheme.type.body,
-                                color = colors.textMuted,
-                            )
-                        }
-                    }
-                }
-
-                // 3. Server Family Switcher + Immersive Hero Showcase
+                // 2. Server Family Switcher + Quiet Craft Hero Card
                 item(key = "hero") {
                     when {
                         loading && families.isEmpty() -> IgngLoadingBlock()
@@ -282,8 +270,8 @@ fun ExploreScreen(
                             },
                         )
                         selectedFamily != null -> {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                // Family horizontal pills
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                // Compact family selector strip
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -301,42 +289,42 @@ fun ExploreScreen(
                                             label = "famPillBg",
                                         )
                                         val pillBorder by animateColorAsState(
-                                            targetValue = if (isSelected) visual.accent else colors.line,
+                                            targetValue = if (isSelected) visual.accent.copy(alpha = 0.45f) else colors.line,
                                             animationSpec = IgngMotion.microTween(intensity),
                                             label = "famPillBorder",
                                         )
                                         Row(
                                             modifier = Modifier
-                                                .clip(IgngTheme.radii.pill)
+                                                .clip(IgngTheme.radii.sm)
                                                 .background(pillBg)
-                                                .border(1.dp, pillBorder, IgngTheme.radii.pill)
+                                                .border(IgngStroke.hairline, pillBorder, IgngTheme.radii.sm)
                                                 .clickable {
                                                     haptic(IgngHapticKind.Tick)
                                                     selection.selectedFamilySlug = family.slug
                                                     selection.selectedSeasonSlug = null
                                                 }
-                                                .padding(horizontal = 13.dp, vertical = 8.dp),
+                                                .padding(horizontal = 12.dp, vertical = 7.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(7.dp)
+                                                    .size(6.dp)
                                                     .clip(CircleShape)
                                                     .background(visual.accent),
                                             )
                                             Text(
                                                 text = family.name,
                                                 style = IgngTheme.type.caption.copy(
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                                                 ),
-                                                color = if (isSelected) visual.accent else colors.textPrimary,
+                                                color = if (isSelected) visual.accent else colors.textSecondary,
                                             )
                                         }
                                     }
                                 }
 
-                                // Immersive Family Hero Card
+                                // Quiet Craft Server Family Hero Card
                                 ServerFamilyHeroCard(
                                     family = selectedFamily,
                                     season = selectedSeason,
@@ -351,111 +339,45 @@ fun ExploreScreen(
                     }
                 }
 
-                // 4. Live Status Summary Banner
-                item(key = "statusStrip") {
-                    IgngInteractiveTile(
-                        onClick = onOpenStatusWall,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .igngStaggeredReveal(1),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(IgngTheme.radii.sm)
-                                        .background(colors.successBg),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Timeline,
-                                        contentDescription = null,
-                                        tint = colors.success,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                }
-                                Column {
-                                    Text("服务器运行状态墙", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                    Text(
-                                        text = if (statuses.isNotEmpty()) {
-                                            "实时 TPS、延迟趋势曲线与 90 格健康记录"
-                                        } else {
-                                            "查看全服运行状态与历史波动"
-                                        },
-                                        style = IgngTheme.type.caption,
-                                        color = colors.textSecondary,
-                                    )
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                if (statuses.isNotEmpty()) {
-                                    IgngAnimatedCounter(
-                                        text = "$totalOnline 人",
-                                        style = IgngTheme.type.metricMedium,
-                                        color = colors.accent,
-                                    )
-                                }
-                                Icon(Icons.Rounded.ChevronRight, null, tint = colors.textSecondary)
-                            }
-                        }
-                    }
-                }
-
-                // 5. Bento Quick Discovery Grid
-                item(key = "bentoGrid") {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        IgngSectionHeader(title = "发现与社区")
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            ExploreBentoTile(
-                                title = "世界地图",
-                                subtitle = "实时在线与历史快照",
-                                icon = Icons.Rounded.Map,
-                                tint = Color(0xFF06B6D4),
-                                onClick = { onOpenMap(selectedFamily?.slug, selectedSeason?.slug) },
-                                modifier = Modifier.weight(1f).igngStaggeredReveal(2),
-                            )
-                            ExploreBentoTile(
-                                title = "社区大厅",
-                                subtitle = "领地、假人与公开工单",
-                                icon = Icons.Rounded.Groups,
-                                tint = Color(0xFF10B981),
-                                onClick = onOpenCommunityHall,
-                                modifier = Modifier.weight(1f).igngStaggeredReveal(3),
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            ExploreBentoTile(
-                                title = "完美之人",
-                                subtitle = "荣誉成员名录与权益",
-                                icon = Icons.Rounded.WorkspacePremium,
-                                tint = Color(0xFFF59E0B),
-                                onClick = onOpenPerfectWall,
-                                modifier = Modifier.weight(1f).igngStaggeredReveal(4),
-                            )
-                            ExploreBentoTile(
-                                title = "全服目录",
-                                subtitle = "${families.size} 个服务器家族档案",
-                                icon = Icons.Rounded.Dns,
-                                tint = colors.accent,
-                                onClick = { selectedFamily?.let(onOpenFamilyDetail) ?: onOpenStatusWall() },
-                                modifier = Modifier.weight(1f).igngStaggeredReveal(5),
-                            )
-                        }
+                // 3. Quiet Craft Grouped Discovery & Services List (replacing status box + 4 rainbow tiles)
+                item(key = "discoveryGroup") {
+                    IgngGroupedSection(title = "发现与服务") {
+                        IgngListRow(
+                            title = "服务器运行状态墙",
+                            subtitle = "实时 TPS、延迟趋势曲线与 90 格健康记录",
+                            icon = Icons.Outlined.Timeline,
+                            value = if (statuses.isNotEmpty()) "$totalOnline 人在线" else null,
+                            onClick = onOpenStatusWall,
+                            showDivider = true,
+                        )
+                        IgngListRow(
+                            title = "世界地图",
+                            subtitle = "实时在线与历史快照",
+                            icon = Icons.Outlined.Map,
+                            onClick = { onOpenMap(selectedFamily?.slug, selectedSeason?.slug) },
+                            showDivider = true,
+                        )
+                        IgngListRow(
+                            title = "社区大厅",
+                            subtitle = "领地、假人与公开工单",
+                            icon = Icons.Outlined.Groups,
+                            onClick = onOpenCommunityHall,
+                            showDivider = true,
+                        )
+                        IgngListRow(
+                            title = "完美之人",
+                            subtitle = "荣誉成员名录与权益",
+                            icon = Icons.Outlined.WorkspacePremium,
+                            onClick = onOpenPerfectWall,
+                            showDivider = true,
+                        )
+                        IgngListRow(
+                            title = "全服目录",
+                            subtitle = "${families.size} 个服务器家族档案",
+                            icon = Icons.Outlined.Dns,
+                            onClick = { selectedFamily?.let(onOpenFamilyDetail) ?: onOpenStatusWall() },
+                            showDivider = false,
+                        )
                     }
                 }
             }
@@ -474,7 +396,6 @@ private fun ServerFamilyHeroCard(
     onOpenFamilyDetail: () -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val motionReduced = IgngTheme.motionReduced
     val visual = serverFamilyVisual(themeKey, colors.isDark)
     val haptic = rememberIgngHaptics()
 
@@ -483,7 +404,7 @@ private fun ServerFamilyHeroCard(
             .fillMaxWidth()
             .clip(IgngTheme.radii.hero)
             .background(colors.tile)
-            .border(1.dp, visual.borderGlow, IgngTheme.radii.hero),
+            .border(IgngStroke.hairline, colors.line, IgngTheme.radii.hero),
     ) {
         IgngServerBackdropCanvas(themeKey = themeKey, modifier = Modifier.matchParentSize())
 
@@ -511,7 +432,7 @@ private fun ServerFamilyHeroCard(
                         text = season?.label?.ifBlank { themeKey.badge } ?: themeKey.badge,
                         customColor = visual.accent,
                         leadingDot = true,
-                        pulse = status?.online == true,
+                        pulse = false,
                     )
                     val statusText = when {
                         status == null -> IgngFormatters.seasonStateLabel(season?.state)
@@ -531,18 +452,32 @@ private fun ServerFamilyHeroCard(
                     )
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = buildString {
-                            append(family.name)
-                            if (!season?.label.isNullOrBlank()) {
-                                append(" · ")
-                                append(season?.label)
-                            }
-                        },
-                        style = IgngTheme.type.pageTitle,
-                        color = colors.textPrimary,
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(3.dp)
+                                .height(20.dp)
+                                .clip(IgngTheme.radii.pill)
+                                .background(visual.accent),
+                        )
+                        Text(
+                            text = buildString {
+                                append(family.name)
+                                if (!season?.label.isNullOrBlank()) {
+                                    append(" · ")
+                                    append(season?.label)
+                                }
+                            },
+                            style = IgngTheme.type.pageTitle,
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     val desc = season?.cardDescription?.ifBlank { season.description }
                         ?.ifBlank { family.tagline }
                         ?.ifBlank { family.description }
@@ -568,9 +503,13 @@ private fun ServerFamilyHeroCard(
                             val picked = s.slug == season?.slug
                             Box(
                                 modifier = Modifier
-                                    .clip(IgngTheme.radii.sm)
-                                    .background(if (picked) visual.accent else colors.tileSoft)
-                                    .border(1.dp, if (picked) visual.accent else colors.line, IgngTheme.radii.sm)
+                                    .clip(IgngTheme.radii.badge)
+                                    .background(if (picked) visual.softTint else colors.tileSoft)
+                                    .border(
+                                        IgngStroke.hairline,
+                                        if (picked) visual.accent.copy(alpha = 0.45f) else colors.line,
+                                        IgngTheme.radii.badge,
+                                    )
                                     .clickable {
                                         haptic(IgngHapticKind.Tick)
                                         onSelectSeason(s)
@@ -579,42 +518,56 @@ private fun ServerFamilyHeroCard(
                             ) {
                                 Text(
                                     text = s.label.ifBlank { s.slug },
-                                    style = IgngTheme.type.badge,
-                                    color = if (picked) {
-                                        if (androidx.compose.ui.graphics.Color(visual.accent.value).run { (red * 0.299f + green * 0.587f + blue * 0.114f) > 0.62f }) {
-                                            Color(0xFF0D1117)
-                                        } else {
-                                            Color.White
-                                        }
-                                    } else {
-                                        colors.textSecondary
-                                    },
+                                    style = IgngTheme.type.badge.copy(
+                                        fontWeight = if (picked) FontWeight.SemiBold else FontWeight.Medium,
+                                    ),
+                                    color = if (picked) visual.accent else colors.textSecondary,
                                 )
                             }
                         }
                     }
                 }
 
-                // Live metrics strip
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    HeroMetricCell(
-                        label = "在线玩家",
-                        value = IgngFormatters.formatNumber(status?.onlinePlayers),
-                        modifier = Modifier.weight(1f),
-                    )
-                    HeroMetricCell(
-                        label = "TPS",
-                        value = IgngFormatters.formatDecimal(status?.tps, 1),
-                        modifier = Modifier.weight(1f),
-                    )
-                    HeroMetricCell(
-                        label = "版本",
-                        value = season?.version?.ifBlank { "—" } ?: "—",
-                        modifier = Modifier.weight(1.2f),
-                    )
+                // Flat hairline-separated live metrics strip (zero nested metric boxes)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    IgngHairlineDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        HeroMetricItem(
+                            label = "在线玩家",
+                            value = IgngFormatters.formatNumber(status?.onlinePlayers),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(IgngStroke.hairline)
+                                .height(30.dp)
+                                .background(colors.line),
+                        )
+                        HeroMetricItem(
+                            label = "TPS",
+                            value = IgngFormatters.formatDecimal(status?.tps, 1),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 12.dp),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(IgngStroke.hairline)
+                                .height(30.dp)
+                                .background(colors.line),
+                        )
+                        HeroMetricItem(
+                            label = "版本",
+                            value = season?.version?.ifBlank { "—" } ?: "—",
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .padding(start = 12.dp),
+                        )
+                    }
+                    IgngHairlineDivider()
                 }
 
                 // Address copy pill
@@ -654,62 +607,21 @@ private fun ServerFamilyHeroCard(
 }
 
 @Composable
-private fun HeroMetricCell(
+private fun HeroMetricItem(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
 ) {
     val colors = IgngTheme.colors
     Column(
-        modifier = modifier
-            .clip(IgngTheme.radii.sm)
-            .background(colors.tileSoft.copy(alpha = 0.85f))
-            .border(1.dp, colors.line, IgngTheme.radii.sm)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(label, style = IgngTheme.type.badge, color = colors.textSecondary)
+        Text(label, style = IgngTheme.type.meta, color = colors.textMuted)
         IgngAnimatedCounter(
             text = value,
             style = IgngTheme.type.metricMedium,
             color = colors.textPrimary,
-        )
-    }
-}
-
-@Composable
-private fun ExploreBentoTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    tint: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = IgngTheme.colors
-    IgngInteractiveTile(
-        onClick = onClick,
-        modifier = modifier,
-        contentPadding = PaddingValues(14.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(IgngTheme.radii.sm)
-                .background(tint.copy(alpha = if (colors.isDark) 0.18f else 0.11f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(19.dp))
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(title, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = subtitle,
-            style = IgngTheme.type.caption,
-            color = colors.textSecondary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }

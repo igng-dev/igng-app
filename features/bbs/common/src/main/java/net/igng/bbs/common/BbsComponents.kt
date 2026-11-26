@@ -1,9 +1,7 @@
 package net.igng.bbs.common
 
-import net.igng.core.designsystem.*
-import net.igng.core.model.MotionIntensity
-
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,6 +10,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,16 +32,16 @@ import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
-import androidx.compose.material.icons.rounded.RemoveRedEye
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.ThumbUpOffAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,14 +56,16 @@ import net.igng.bbs.core.model.LocalReadingHistoryEntry
 import net.igng.bbs.core.model.PostSummaryDto
 import net.igng.bbs.core.model.RecommendationSlotDto
 import net.igng.bbs.core.model.RiskSummaryDto
+import net.igng.core.designsystem.*
 
 /**
- * Forwarding wrapper onto the unified zero-jitter [IgngFloatingDockBar] in `:core:designsystem`.
+ * Forwarding wrapper onto the unified docked [IgngFloatingDockBar] in `:core:designsystem`.
  */
 data class BbsNavTabItem(
     val route: String,
     val label: String,
     val icon: ImageVector,
+    val unselectedIcon: ImageVector = icon,
     val badgeCount: Int = 0,
 )
 
@@ -75,7 +77,15 @@ fun BbsFloatingNavBar(
     modifier: Modifier = Modifier,
 ) {
     IgngFloatingDockBar(
-        items = tabs.map { IgngNavTabItem(id = it.route, label = it.label, icon = it.icon, badgeCount = it.badgeCount) },
+        items = tabs.map {
+            IgngNavTabItem(
+                id = it.route,
+                label = it.label,
+                icon = it.icon,
+                unselectedIcon = it.unselectedIcon,
+                badgeCount = it.badgeCount,
+            )
+        },
         selectedId = selectedRoute,
         onSelect = onSelect,
         modifier = modifier,
@@ -83,7 +93,8 @@ fun BbsFloatingNavBar(
 }
 
 /**
- * Horizontal Bento recommendations carousel ("推荐速览") with type badges and human-readable reasons.
+ * Calm editorial recommendations rail ("社区精选") aligned with IGNG Web's `RecommendSection`:
+ * plain-text kicker eyebrow (no inflated capsule badges), crisp 2-line title, quiet author byline.
  */
 @Composable
 fun BbsRecommendRail(
@@ -97,9 +108,9 @@ fun BbsRecommendRail(
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        itemsIndexed(slots, key = { _, slot -> "rec_${slot.post.id}_${slot.type}" }) { index, slot ->
+        itemsIndexed(slots, key = { _, slot -> "rec_${slot.post.id}_${slot.type}" }) { _, slot ->
             val typeLabel = when (slot.type) {
                 "hot" -> "社区热议"
                 "trending" -> "本周升温"
@@ -108,17 +119,15 @@ fun BbsRecommendRail(
                 "newcomer" -> "新作者首作"
                 else -> "最新发布"
             }
-            val tone = when (slot.type) {
-                "hot" -> IgngTone.ACCENT
-                "trending" -> IgngTone.SUCCESS
-                "discussed" -> IgngTone.WARNING
-                else -> IgngTone.NEUTRAL
+            val kickerColor = when (slot.type) {
+                "hot" -> colors.accent
+                "trending" -> colors.success
+                "discussed" -> colors.warning
+                else -> colors.textSecondary
             }
             IgngTile(
-                modifier = Modifier
-                    .width(268.dp)
-                    .igngBentoEnter(index),
-                padding = PaddingValues(15.dp),
+                modifier = Modifier.width(256.dp),
+                padding = PaddingValues(14.dp),
                 onClick = { onPostClick(slot.post) },
             ) {
                 Row(
@@ -126,37 +135,46 @@ fun BbsRecommendRail(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IgngTagChip(text = typeLabel, tone = tone)
                     Text(
-                        text = slot.reason,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.textMuted,
+                        text = typeLabel,
+                        style = IgngTheme.type.badge.copy(fontWeight = FontWeight.SemiBold),
+                        color = kickerColor,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
+                    if (slot.reason.isNotBlank()) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = slot.reason,
+                            style = IgngTheme.type.meta,
+                            color = colors.textMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = slot.post.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = IgngTheme.type.cardTitle,
                     color = colors.textPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.height(44.dp),
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     IgngAvatar(
                         avatarUrl = slot.post.author?.avatarUrl,
                         displayName = slot.post.author?.displayName ?: "作者",
-                        size = 22.dp,
+                        size = 18.dp,
                     )
                     Text(
                         text = slot.post.author?.displayName ?: "匿名用户",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = IgngTheme.type.meta,
                         color = colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -165,8 +183,9 @@ fun BbsRecommendRail(
                     slot.post.category?.let { cat ->
                         Text(
                             text = BbsFormatters.categoryDisplayName(cat),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = IgngTheme.type.meta,
                             color = colors.textMuted,
+                            maxLines = 1,
                         )
                     }
                 }
@@ -176,7 +195,7 @@ fun BbsRecommendRail(
 }
 
 /**
- * Compact "继续阅读" Bento card displaying local reading progress bar and 1-tap resume.
+ * Slim "继续阅读" resume strip with compact progress bar and 1-tap jump.
  */
 @Composable
 fun BbsContinueReadingCard(
@@ -187,44 +206,57 @@ fun BbsContinueReadingCard(
     val colors = IgngTheme.colors
     IgngTile(
         modifier = modifier.fillMaxWidth(),
-        soft = true,
-        padding = PaddingValues(14.dp),
+        padding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
         onClick = onResume,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.MenuBook,
                 contentDescription = null,
                 tint = colors.accent,
                 modifier = Modifier.size(18.dp),
             )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "继续阅读",
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.accent,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "${(entry.progressRatio * 100).toInt().coerceIn(0, 100)}%",
-                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                color = colors.textMuted,
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = "继续阅读",
+                        style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium),
+                        color = colors.accent,
+                    )
+                    Text(
+                        text = "· ${(entry.progressRatio * 100).toInt().coerceIn(0, 100)}%",
+                        style = IgngTheme.type.meta,
+                        color = colors.textMuted,
+                    )
+                }
+                Text(
+                    text = entry.title,
+                    style = IgngTheme.type.bodyMedium,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = colors.textMuted,
+                modifier = Modifier.size(18.dp),
             )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = entry.title,
-            style = MaterialTheme.typography.titleSmall,
-            color = colors.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         Spacer(Modifier.height(8.dp))
         LinearProgressIndicator(
             progress = { entry.progressRatio.coerceIn(0.03f, 1f) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(3.dp)
+                .height(2.5.dp)
                 .clip(RoundedCornerShape(IgngRadius.pill)),
             color = colors.accent,
             trackColor = colors.line,
@@ -233,7 +265,178 @@ fun BbsContinueReadingCard(
 }
 
 /**
- * Primary Bento post row card used across Home feed, Category, Tag, Column, Search, and Profile.
+ * Editorial hairline-separated post row aligned 1:1 with IGNG Web's `PostRow.js` / `feed.css` (Decision 2).
+ * Content-first visual hierarchy: Title -> 2-line excerpt -> single quiet plain-text metadata & stats row
+ * (no capsule-tag inflation, no card-per-item visual clutter).
+ */
+@Composable
+fun BbsPostRow(
+    post: PostSummaryDto,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onAuthorClick: (() -> Unit)? = null,
+    onTagClick: ((String) -> Unit)? = null,
+    showCategory: Boolean = true,
+    showModerationBadge: Boolean = false,
+    showSeriesBadge: Boolean = true,
+    showDivider: Boolean = false,
+) {
+    val colors = IgngTheme.colors
+    val intensity = IgngTheme.motionIntensity
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val rowBg by animateColorAsState(
+        targetValue = if (pressed) colors.tilePressed else colors.tile,
+        animationSpec = IgngMotion.microTween(intensity),
+        label = "postRowBg",
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(rowBg),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            // Optional status eyebrow (only rendered when pinned or showing moderation state)
+            if (post.isPinned || showModerationBadge) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 5.dp),
+                ) {
+                    if (post.isPinned) {
+                        IgngBadge(text = "置顶", tone = IgngBadgeTone.Accent)
+                    }
+                    if (showModerationBadge) {
+                        val badgeTone = when {
+                            post.status == 1 -> IgngBadgeTone.Neutral
+                            post.moderationStatus == "pending" -> IgngBadgeTone.Warning
+                            post.moderationStatus == "rejected" || post.banStatus in listOf(2, 4) -> IgngBadgeTone.Danger
+                            else -> IgngBadgeTone.Success
+                        }
+                        IgngBadge(
+                            text = BbsFormatters.postStatusLabel(post.status, post.banStatus, post.moderationStatus),
+                            tone = badgeTone,
+                        )
+                    }
+                }
+            }
+
+            // 1. Title first (primary focal anchor)
+            Text(
+                text = post.title,
+                style = IgngTheme.type.cardTitle,
+                color = colors.textPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            // 2. Quiet 2-line excerpt
+            val snippet = post.summary?.takeIf { it.isNotBlank() } ?: post.excerpt
+            if (snippet.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = snippet,
+                    style = IgngTheme.type.body,
+                    color = colors.textSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // 3. Single plain-text metadata + tabular stats footer (zero pill bloat)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    IgngAvatar(
+                        avatarUrl = post.author?.avatarUrl,
+                        displayName = post.author?.displayName ?: "作者",
+                        size = 18.dp,
+                        onClick = onAuthorClick,
+                    )
+                    Text(
+                        text = post.author?.displayName ?: "匿名用户",
+                        style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium),
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .let { if (onAuthorClick != null) it.clickable(onClick = onAuthorClick) else it },
+                    )
+                    Text(
+                        text = "· ${BbsFormatters.relativeTime(post.createdAt)}",
+                        style = IgngTheme.type.meta,
+                        color = colors.textMuted,
+                        maxLines = 1,
+                    )
+                    if (showCategory) {
+                        post.category?.let { cat ->
+                            Text(
+                                text = "· ${BbsFormatters.categoryDisplayName(cat)}",
+                                style = IgngTheme.type.meta,
+                                color = colors.textMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    val firstTag = BbsFormatters.visiblePostTags(post.tags, post.category).firstOrNull()
+                    if (firstTag != null && onTagClick != null) {
+                        Text(
+                            text = BbsFormatters.tagDisplayLabel(firstTag),
+                            style = IgngTheme.type.meta,
+                            color = colors.accent.copy(alpha = 0.85f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { onTagClick(firstTag) },
+                        )
+                    } else if (showSeriesBadge && post.series != null) {
+                        Text(
+                            text = "· ${post.series!!.name}",
+                            style = IgngTheme.type.meta,
+                            color = colors.accent.copy(alpha = 0.85f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                // Compact tabular stats (likes + comments; matching web mobile row density)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    MetricMini(icon = Icons.Rounded.ThumbUpOffAlt, count = post.likeCount)
+                    MetricMini(icon = Icons.AutoMirrored.Rounded.Comment, count = post.commentCount)
+                }
+            }
+        }
+
+        if (showDivider) {
+            IgngHairlineDivider(startIndent = 16.dp, endIndent = 16.dp)
+        }
+    }
+}
+
+/**
+ * Compatibility entry point rendering [BbsPostRow] inside a clean hairline card or directly as a row.
  */
 @Composable
 fun BbsPostRowCard(
@@ -245,130 +448,19 @@ fun BbsPostRowCard(
     showModerationBadge: Boolean = false,
     showSeriesBadge: Boolean = true,
 ) {
-    val colors = IgngTheme.colors
     IgngTile(
         modifier = modifier.fillMaxWidth(),
-        padding = PaddingValues(16.dp),
-        onClick = onClick,
+        padding = PaddingValues(0.dp),
     ) {
-        // Top meta row: Author + relative time + pinned/status badges
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            IgngAvatar(
-                avatarUrl = post.author?.avatarUrl,
-                displayName = post.author?.displayName ?: "作者",
-                size = 24.dp,
-                onClick = onAuthorClick,
-            )
-            Text(
-                text = post.author?.displayName ?: "匿名用户",
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .let { if (onAuthorClick != null) it.clickable(onClick = onAuthorClick) else it },
-            )
-            Text(
-                text = "· ${BbsFormatters.relativeTime(post.createdAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textMuted,
-            )
-            Spacer(Modifier.weight(1f))
-            if (post.isPinned) {
-                IgngTagChip(text = "置顶", tone = IgngTone.ACCENT)
-            }
-            if (showModerationBadge) {
-                val badgeTone = when {
-                    post.status == 1 -> IgngTone.NEUTRAL
-                    post.moderationStatus == "pending" -> IgngTone.WARNING
-                    post.moderationStatus == "rejected" || post.banStatus in listOf(2, 4) -> IgngTone.DANGER
-                    else -> IgngTone.SUCCESS
-                }
-                IgngTagChip(
-                    text = BbsFormatters.postStatusLabel(post.status, post.banStatus, post.moderationStatus),
-                    tone = badgeTone,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        // Title
-        Text(
-            text = post.title,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.textPrimary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+        BbsPostRow(
+            post = post,
+            onClick = onClick,
+            onAuthorClick = onAuthorClick,
+            onTagClick = onTagClick,
+            showModerationBadge = showModerationBadge,
+            showSeriesBadge = showSeriesBadge,
+            showDivider = false,
         )
-
-        // Excerpt / Summary
-        val snippet = post.summary?.takeIf { it.isNotBlank() } ?: post.excerpt
-        if (snippet.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = snippet,
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        // Category / Column / Tags pill row
-        val shownTags = BbsFormatters.visiblePostTags(post.tags, post.category).take(2)
-        val hasMetaChips = post.category != null || post.column != null || shownTags.isNotEmpty()
-        if (hasMetaChips) {
-            Spacer(Modifier.height(10.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                post.category?.let { cat ->
-                    IgngTagChip(text = BbsFormatters.categoryDisplayName(cat), tone = IgngTone.ACCENT)
-                }
-                post.column?.let { col ->
-                    IgngTagChip(text = col.name, tone = IgngTone.NEUTRAL)
-                }
-                shownTags.forEach { tag ->
-                    IgngTagChip(
-                        text = BbsFormatters.tagDisplayLabel(tag),
-                        tone = IgngTone.NEUTRAL,
-                        onClick = onTagClick?.let { fn -> { fn(tag) } },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Tabular metrics row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            MetricMini(icon = Icons.Rounded.RemoveRedEye, count = post.views)
-            MetricMini(icon = Icons.Rounded.ThumbUpOffAlt, count = post.likeCount)
-            MetricMini(icon = Icons.AutoMirrored.Rounded.Comment, count = post.commentCount)
-            Spacer(Modifier.weight(1f))
-            if (showSeriesBadge) {
-                post.series?.let { ser ->
-                    Text(
-                        text = "系列 · ${ser.name}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.accent,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -377,12 +469,12 @@ private fun MetricMini(icon: ImageVector, count: Int) {
     val colors = IgngTheme.colors
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = colors.textMuted, modifier = Modifier.size(15.dp))
+        Icon(icon, contentDescription = null, tint = colors.textMuted, modifier = Modifier.size(13.dp))
         Text(
             text = BbsFormatters.compactCount(count),
-            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+            style = IgngTheme.type.meta,
             color = colors.textMuted,
         )
     }
@@ -425,7 +517,7 @@ fun BbsFloatingArticleBar(
                 modifier = Modifier
                     .clip(shape)
                     .background(colors.glassBar)
-                    .border(1.dp, colors.lineStrong, shape)
+                    .border(IgngStroke.hairline, colors.lineStrong, shape)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -501,7 +593,7 @@ private fun ActionPillItem(
         )
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+            style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium),
             color = tint,
         )
     }
@@ -519,7 +611,7 @@ fun BbsRiskMeterCard(
     IgngTile(modifier = modifier.fillMaxWidth()) {
         Text(
             text = "双域内容风控状态",
-            style = MaterialTheme.typography.titleMedium,
+            style = IgngTheme.type.sectionTitle,
             color = colors.textPrimary,
         )
         Spacer(Modifier.height(10.dp))
@@ -530,10 +622,10 @@ fun BbsRiskMeterCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = "文章域（近 ${risk.article.windowDays} 天）", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-            IgngTagChip(
+            Text(text = "文章域（近 ${risk.article.windowDays} 天）", style = IgngTheme.type.body, color = colors.textSecondary)
+            IgngBadge(
                 text = if (risk.article.active) "风控中（先审后发）" else "正常（先发后审）",
-                tone = if (risk.article.active) IgngTone.WARNING else IgngTone.SUCCESS,
+                tone = if (risk.article.active) IgngBadgeTone.Warning else IgngBadgeTone.Success,
             )
         }
         Spacer(Modifier.height(6.dp))
@@ -541,7 +633,7 @@ fun BbsRiskMeterCard(
             progress = { risk.article.rejectionRate.toFloat().coerceIn(0f, 1f) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(6.dp)
+                .height(5.dp)
                 .clip(RoundedCornerShape(IgngRadius.pill)),
             color = if (risk.article.active) colors.warning else colors.success,
             trackColor = colors.line,
@@ -549,7 +641,7 @@ fun BbsRiskMeterCard(
         Spacer(Modifier.height(4.dp))
         Text(
             text = "通过 ${risk.article.approved} · 未通过 ${risk.article.rejected} · 拒绝率 ${(risk.article.rejectionRate * 100).toInt()}%（≥30% 且样本≥3 触发）",
-            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+            style = IgngTheme.type.meta,
             color = colors.textMuted,
         )
 
@@ -561,10 +653,10 @@ fun BbsRiskMeterCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = "评论域（近 ${risk.comment.windowDays} 天）", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
-            IgngTagChip(
+            Text(text = "评论域（近 ${risk.comment.windowDays} 天）", style = IgngTheme.type.body, color = colors.textSecondary)
+            IgngBadge(
                 text = if (risk.comment.active) "风控中（先审后发）" else "正常（即发即显）",
-                tone = if (risk.comment.active) IgngTone.WARNING else IgngTone.SUCCESS,
+                tone = if (risk.comment.active) IgngBadgeTone.Warning else IgngBadgeTone.Success,
             )
         }
         Spacer(Modifier.height(6.dp))
@@ -572,7 +664,7 @@ fun BbsRiskMeterCard(
             progress = { (risk.comment.strikes / 3f).coerceIn(0f, 1f) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(6.dp)
+                .height(5.dp)
                 .clip(RoundedCornerShape(IgngRadius.pill)),
             color = if (risk.comment.active) colors.warning else colors.success,
             trackColor = colors.line,
@@ -580,7 +672,7 @@ fun BbsRiskMeterCard(
         Spacer(Modifier.height(4.dp))
         Text(
             text = "近 30 天举报成立：${risk.comment.strikes} / 3 次",
-            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+            style = IgngTheme.type.meta,
             color = colors.textMuted,
         )
     }

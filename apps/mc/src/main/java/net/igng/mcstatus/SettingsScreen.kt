@@ -136,7 +136,7 @@ fun SettingsScreen(
 
     IgngAmbientCanvas {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(title = "设置", subtitle = "账户安全、外观画布与动效偏好", onBack = onBack)
+            IgngTopBar(title = "设置", onBack = onBack)
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,

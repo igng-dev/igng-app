@@ -101,7 +101,6 @@ import net.igng.core.designsystem.IgngTextField
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.SiteEndpoints
 import net.igng.core.model.V1Id
@@ -225,11 +224,11 @@ fun TicketsScreen(
                         )
                     }
                     else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        itemsIndexed(tickets, key = { _, t -> t.id }) { idx, t ->
+                        itemsIndexed(tickets, key = { _, t -> t.id }) { _, t ->
                             val isClosed = t.status.equals("CLOSED", ignoreCase = true)
                             IgngInteractiveTile(
                                 onClick = { onOpenDetail(t.id) },
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Text("#${t.id} ${t.title}", style = IgngTheme.type.cardTitle, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -238,7 +237,7 @@ fun TicketsScreen(
                                         text = t.statusLabel.ifBlank { if (isClosed) "已结单" else "处理中" },
                                         tone = if (isClosed) IgngBadgeTone.Neutral else IgngBadgeTone.Success,
                                         leadingDot = !isClosed,
-                                        pulse = !isClosed,
+                                        pulse = false,
                                     )
                                 }
                                 Spacer(Modifier.height(4.dp))
@@ -399,10 +398,10 @@ fun TicketDetailScreen(
                             }
                         }
 
-                        itemsIndexed(ticket.messages, key = { _, m -> m.id }) { idx, msg ->
+                        itemsIndexed(ticket.messages, key = { _, m -> m.id }) { _, msg ->
                             IgngTile(
                                 soft = !msg.isInitial,
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                modifier = Modifier.fillMaxWidth(),
                                 contentPadding = PaddingValues(14.dp),
                             ) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

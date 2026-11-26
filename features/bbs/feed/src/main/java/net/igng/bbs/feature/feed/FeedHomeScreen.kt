@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -28,11 +27,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.NotificationsNone
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,7 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.igng.bbs.common.BbsContinueReadingCard
-import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.common.BbsPostRow
 import net.igng.bbs.common.BbsRecommendRail
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.data.BbsCacheKeys
@@ -70,16 +68,15 @@ import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngFoldedCoreGlyph
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngHapticKind
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSectionHeader
-import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
-import net.igng.core.designsystem.igngBentoEnter
-import net.igng.core.designsystem.igngPressScale
+import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.rememberIgngHaptics
 import net.igng.core.network.ApiResult
 
@@ -112,10 +109,11 @@ fun FeedHomeScreen(
     onOpenSearch: () -> Unit,
     onOpenInbox: () -> Unit,
     onOpenRules: () -> Unit,
-    bottomInsetPadding: PaddingValues = PaddingValues(bottom = 96.dp),
+    bottomInsetPadding: PaddingValues = PaddingValues(bottom = 64.dp),
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
+    val haptic = rememberIgngHaptics()
     val bootstrap by container.bootstrap.collectAsState()
     val history by container.settingsRepository.readingHistory.collectAsState(initial = emptyList())
 
@@ -250,65 +248,52 @@ fun FeedHomeScreen(
             .background(colors.canvas)
             .statusBarsPadding(),
     ) {
-        // Brand Header + Search Pill + Inbox Bell
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "IGNG BBS",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = colors.textPrimary,
-            )
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(IgngRadius.pill))
-                    .background(colors.tile)
-                    .border(1.dp, colors.line, RoundedCornerShape(IgngRadius.pill))
-                    .igngPressScale(onClick = onOpenSearch)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = "搜索",
-                    tint = colors.textMuted,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    text = "搜索文章、专栏、作者…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textMuted,
-                    maxLines = 1,
-                )
-            }
-            Box {
-                IconButton(onClick = onOpenInbox) {
+        // Unified quiet top bar: Brand title + lightweight Search & Inbox icon buttons
+        IgngTopBar(
+            title = "IGNG BBS",
+            actions = {
+                IconButton(
+                    onClick = {
+                        haptic(IgngHapticKind.Tap)
+                        onOpenSearch()
+                    },
+                ) {
                     Icon(
-                        imageVector = Icons.Rounded.NotificationsNone,
-                        contentDescription = "消息收件箱",
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = "搜索",
                         tint = colors.textPrimary,
+                        modifier = Modifier.size(22.dp),
                     )
                 }
-                if (unreadCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 8.dp, end = 8.dp)
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(colors.danger),
-                    )
+                Box {
+                    IconButton(
+                        onClick = {
+                            haptic(IgngHapticKind.Tap)
+                            onOpenInbox()
+                        },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Notifications,
+                            contentDescription = "消息收件箱",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    if (unreadCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 10.dp, end = 10.dp)
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(colors.danger),
+                        )
+                    }
                 }
-            }
-        }
+            },
+        )
 
-        // Fixed Top Category Navigation Bar (directly beneath search bar)
+        // Fixed Top Category Navigation Bar
         if (categories.isNotEmpty()) {
             BbsCategoryTabBar(
                 categories = categories,
@@ -320,6 +305,7 @@ fun FeedHomeScreen(
                     }
                 },
             )
+            IgngHairlineDivider()
         }
 
         IgngPullToRefreshBox(
@@ -352,15 +338,14 @@ fun FeedHomeScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        top = 12.dp,
+                        top = 10.dp,
                         bottom = bottomInsetPadding.calculateBottomPadding() + 16.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    // Continue Reading Card
+                    // Slim Continue Reading Strip
                     if (continueEntry != null) {
                         item(key = "continue_reading") {
-                            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
                                 BbsContinueReadingCard(
                                     entry = continueEntry,
                                     onResume = { onOpenPost(continueEntry.postId) },
@@ -369,10 +354,10 @@ fun FeedHomeScreen(
                         }
                     }
 
-                    // Recommendations Rail (only on All view, series-free)
+                    // Editorial Recommendations Rail (only on All view)
                     if (selectedCategory == null && recs.isNotEmpty()) {
                         item(key = "rec_header") {
-                            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Box(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
                                 IgngSectionHeader(
                                     title = "社区精选",
                                     actionLabel = "社区规范",
@@ -381,48 +366,54 @@ fun FeedHomeScreen(
                             }
                         }
                         item(key = "rec_rail") {
-                            BbsRecommendRail(
-                                slots = recs,
-                                onPostClick = { onOpenPost(it.id) },
-                            )
+                            Box(modifier = Modifier.padding(bottom = 14.dp)) {
+                                BbsRecommendRail(
+                                    slots = recs,
+                                    onPostClick = { onOpenPost(it.id) },
+                                )
+                            }
                         }
                     }
 
-                    // Sort Bar
-                    item(key = "sort_bar") {
-                        Row(
+                    // Editorial Feed Header (matches Web `.bbs-feed-head` directly atop the row stream)
+                    item(key = "feed_header") {
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                .background(colors.tile),
                         ) {
-                            IgngTagChip(
-                                text = "最新",
-                                selected = sort == "latest",
-                                onClick = {
-                                    if (sort != "latest") {
-                                        sort = "latest"
-                                        scope.launch { listState.scrollToItem(0) }
-                                    }
-                                },
-                            )
-                            IgngTagChip(
-                                text = "热门",
-                                selected = sort == "hot",
-                                onClick = {
-                                    if (sort != "hot") {
-                                        sort = "hot"
-                                        scope.launch { listState.scrollToItem(0) }
-                                    }
-                                },
-                            )
+                            IgngHairlineDivider()
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = selectedCategory?.let { BbsFormatters.categoryDisplayName(it) }
+                                        ?: if (sort == "hot") "最热文章" else "最新发布",
+                                    style = IgngTheme.type.sectionLabel,
+                                    color = colors.textSecondary,
+                                )
+                                FeedSortToggle(
+                                    sort = sort,
+                                    onSelect = { next ->
+                                        if (sort != next) {
+                                            haptic(IgngHapticKind.Tick)
+                                            sort = next
+                                            scope.launch { listState.scrollToItem(0) }
+                                        }
+                                    },
+                                )
+                            }
+                            IgngHairlineDivider()
                         }
                     }
 
                     if (posts.isEmpty()) {
                         item(key = "empty_feed") {
-                            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Box(modifier = Modifier.padding(16.dp)) {
                                 IgngEmptyTile(
                                     title = "这里还没有文章",
                                     subtitle = "换个分类看看，或者去创作中心发布第一篇内容。",
@@ -434,19 +425,18 @@ fun FeedHomeScreen(
                             items = posts,
                             key = { _, post -> "post_${post.id}" },
                         ) { index, post ->
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 16.dp)
-                                    .igngBentoEnter(index),
-                            ) {
-                                BbsPostRowCard(
-                                    post = post,
-                                    onClick = { onOpenPost(post.id) },
-                                    onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
-                                    onTagClick = onOpenTag,
-                                    showSeriesBadge = selectedCategory != null,
-                                )
-                            }
+                            BbsPostRow(
+                                post = post,
+                                onClick = { onOpenPost(post.id) },
+                                onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
+                                onTagClick = onOpenTag,
+                                showCategory = selectedCategory == null,
+                                showSeriesBadge = selectedCategory != null,
+                                showDivider = index < posts.lastIndex,
+                            )
+                        }
+                        item(key = "feed_bottom_rule") {
+                            IgngHairlineDivider()
                         }
                     }
 
@@ -470,18 +460,58 @@ fun FeedHomeScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
+                                    .padding(vertical = 16.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
                                     text = "已浏览全部内容",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = IgngTheme.type.meta,
                                     color = colors.textMuted,
                                 )
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedSortToggle(
+    sort: String,
+    onSelect: (String) -> Unit,
+) {
+    val colors = IgngTheme.colors
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.tileSoft)
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf("latest" to "最新", "hot" to "热门").forEach { (key, label) ->
+            val picked = sort == key
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (picked) colors.tile else androidx.compose.ui.graphics.Color.Transparent)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelect(key) },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = IgngTheme.type.meta.copy(
+                        fontWeight = if (picked) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    color = if (picked) colors.accent else colors.textSecondary,
+                )
             }
         }
     }
@@ -544,7 +574,7 @@ private fun CategoryTabItem(
         label = "catTabText",
     )
     val indicatorWidth by animateDpAsState(
-        targetValue = if (selected) 20.dp else 0.dp,
+        targetValue = if (selected) 18.dp else 0.dp,
         animationSpec = IgngMotion.dockSpring(intensity),
         label = "catTabIndicatorWidth",
     )
@@ -565,8 +595,8 @@ private fun CategoryTabItem(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            style = IgngTheme.type.bodyMedium.copy(
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             ),
             color = textColor,
             maxLines = 1,
@@ -575,7 +605,7 @@ private fun CategoryTabItem(
         Box(
             modifier = Modifier
                 .width(indicatorWidth)
-                .height(3.dp)
+                .height(2.dp)
                 .clip(RoundedCornerShape(IgngRadius.pill))
                 .background(colors.accent),
         )

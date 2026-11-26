@@ -75,7 +75,6 @@ import net.igng.core.designsystem.IgngTextField
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.core.model.IgngFormatters
 import net.igng.mcstatus.core.model.McAdminRole
@@ -248,7 +247,7 @@ fun AdminPocketConsoleScreen(
                                             inspectedTicket = runCatching { adminRepository.fetchAdminTicketDetail(t.id) }.getOrNull()
                                         }
                                     },
-                                    modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                    modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("#${t.id} ${t.title}", style = IgngTheme.type.cardTitle, color = colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -311,8 +310,8 @@ fun AdminPocketConsoleScreen(
                         if (recs.isEmpty()) {
                             item { IgngStateBlock(title = "没有匹配的处罚记录") }
                         } else {
-                            itemsIndexed(recs, key = { i, r -> "${r.id}:$i" }) { idx, r ->
-                                IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                            itemsIndexed(recs, key = { i, r -> "${r.id}:$i" }) { _, r ->
+                                IgngTile(modifier = Modifier.fillMaxWidth()) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text(r.player_name ?: "未知玩家", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
                                         IgngBadge(r.type ?: "处罚", tone = IgngBadgeTone.Warning)
@@ -339,7 +338,7 @@ fun AdminPocketConsoleScreen(
                                             loadingHistorianDetail = false
                                         }
                                     },
-                                    modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                    modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text(

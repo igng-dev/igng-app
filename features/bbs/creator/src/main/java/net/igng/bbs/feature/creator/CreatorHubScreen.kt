@@ -13,19 +13,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Article
-import androidx.compose.material.icons.automirrored.rounded.Comment
+import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.Comment
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.FolderShared
+import androidx.compose.material.icons.outlined.Gavel
+import androidx.compose.material.icons.outlined.PermMedia
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.AutoStories
-import androidx.compose.material.icons.rounded.FolderShared
-import androidx.compose.material.icons.rounded.Gavel
-import androidx.compose.material.icons.rounded.PermMedia
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -33,9 +30,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.common.BbsPostRow
 import net.igng.bbs.common.BbsRiskMeterCard
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.data.BbsCacheKeys
@@ -47,14 +44,16 @@ import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.ChartPoint
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngGroupedSection
 import net.igng.core.designsystem.IgngLineChart
+import net.igng.core.designsystem.IgngListRow
 import net.igng.core.designsystem.IgngLoadingCenter
-import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
-import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngStatTile
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
@@ -103,9 +102,11 @@ fun CreatorHubScreen(
             title = "创作中心",
             actions = {
                 if (activeAccount != null) {
-                    IgngPrimaryButton(
+                    IgngButton(
                         text = "写文章",
                         icon = Icons.Rounded.Add,
+                        style = IgngButtonStyle.Primary,
+                        compact = true,
                         onClick = onNewArticle,
                     )
                 }
@@ -144,9 +145,9 @@ fun CreatorHubScreen(
                             top = 4.dp,
                             bottom = bottomInsetPadding.calculateBottomPadding() + 16.dp,
                         ),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        // Bento Totals 2x2 Grid
+                        // Totals 2-column summary
                         item(key = "stats_row_1") {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                 IgngStatTile(
@@ -175,10 +176,10 @@ fun CreatorHubScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text("今日投稿额度（Lv.${budget.level}）", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
+                                    Text("今日投稿额度（Lv.${budget.level}）", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
                                     Text(
                                         text = "${budget.used} / ${budget.limit}",
-                                        style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                        style = IgngTheme.type.meta.copy(fontWeight = FontWeight.SemiBold),
                                         color = if (budget.allowed) colors.accent else colors.danger,
                                     )
                                 }
@@ -187,7 +188,7 @@ fun CreatorHubScreen(
                                     progress = { ratio },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(6.dp)
+                                        .height(5.dp)
                                         .clip(RoundedCornerShape(IgngRadius.pill)),
                                     color = if (budget.allowed) colors.accent else colors.danger,
                                     trackColor = colors.line,
@@ -201,7 +202,7 @@ fun CreatorHubScreen(
                         if (totalTodos > 0) {
                             item(key = "todos") {
                                 IgngTile(soft = true) {
-                                    Text("待处理事项（$totalTodos）", style = MaterialTheme.typography.titleSmall, color = colors.warning)
+                                    Text("待处理事项（$totalTodos）", style = IgngTheme.type.bodyMedium, color = colors.warning)
                                     Spacer(Modifier.height(8.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         if (todos.pendingPostInvites > 0) {
@@ -221,7 +222,7 @@ fun CreatorHubScreen(
                         // 30-day Views Trend
                         item(key = "views_chart") {
                             IgngTile {
-                                Text("近 30 天阅读趋势", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                Text("近 30 天阅读趋势", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
                                 Spacer(Modifier.height(10.dp))
                                 IgngLineChart(
                                     points = data.viewsTrend.map { ChartPoint(it.date, it.views) },
@@ -229,22 +230,51 @@ fun CreatorHubScreen(
                             }
                         }
 
-                        // Quick Management Bento Grid
+                        // Quiet Craft grouped management list (replacing 6 boxed tiles)
                         item(key = "quick_grid") {
-                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                IgngSectionHeader(title = "创作管理工具")
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                                    CreatorShortcutTile("文章与草稿", "版本 · 协作 · 数据", Icons.AutoMirrored.Rounded.Article, onOpenPosts, Modifier.weight(1f))
-                                    CreatorShortcutTile("专栏管理", "成员 · 订阅 · 置顶", Icons.Rounded.FolderShared, onOpenColumns, Modifier.weight(1f))
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                                    CreatorShortcutTile("系列合集", "章节编排 · 趋势", Icons.Rounded.AutoStories, onOpenSeries, Modifier.weight(1f))
-                                    CreatorShortcutTile("评论管理", "收到的文章讨论", Icons.AutoMirrored.Rounded.Comment, onOpenComments, Modifier.weight(1f))
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                                    CreatorShortcutTile("审核与申诉", "进度 · 复核申诉", Icons.Rounded.Gavel, onOpenReviews, Modifier.weight(1f))
-                                    CreatorShortcutTile("媒体资产", "配额 · 图床上传", Icons.Rounded.PermMedia, onOpenMedia, Modifier.weight(1f))
-                                }
+                            IgngGroupedSection(title = "创作管理工具") {
+                                IgngListRow(
+                                    title = "文章与草稿",
+                                    subtitle = "版本 · 协作 · 数据",
+                                    icon = Icons.AutoMirrored.Outlined.Article,
+                                    onClick = onOpenPosts,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "专栏管理",
+                                    subtitle = "成员 · 订阅 · 置顶",
+                                    icon = Icons.Outlined.FolderShared,
+                                    onClick = onOpenColumns,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "系列合集",
+                                    subtitle = "章节编排 · 趋势",
+                                    icon = Icons.Outlined.AutoStories,
+                                    onClick = onOpenSeries,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "评论管理",
+                                    subtitle = "收到的文章讨论",
+                                    icon = Icons.AutoMirrored.Outlined.Comment,
+                                    onClick = onOpenComments,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "审核与申诉",
+                                    subtitle = "进度 · 复核申诉",
+                                    icon = Icons.Outlined.Gavel,
+                                    onClick = onOpenReviews,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "媒体资产",
+                                    subtitle = "配额 · 图床上传",
+                                    icon = Icons.Outlined.PermMedia,
+                                    onClick = onOpenMedia,
+                                    showDivider = false,
+                                )
                             }
                         }
 
@@ -253,40 +283,28 @@ fun CreatorHubScreen(
                             BbsRiskMeterCard(risk = data.risk)
                         }
 
-                        // Continue Writing
+                        // Continue Writing (hairline rows inside one clean surface)
                         if (data.continueWriting.isNotEmpty()) {
-                            item(key = "continue_header") {
-                                IgngSectionHeader(title = "最近编辑", actionLabel = "全部文章", onAction = onOpenPosts)
-                            }
-                            items(data.continueWriting, key = { "cw_${it.id}" }) { post ->
-                                BbsPostRowCard(
-                                    post = post,
-                                    onClick = { onEditPost(post.id) },
-                                    showModerationBadge = true,
-                                )
+                            item(key = "continue_group") {
+                                IgngGroupedSection(
+                                    title = "最近编辑",
+                                    actionLabel = "全部文章",
+                                    onAction = onOpenPosts,
+                                ) {
+                                    data.continueWriting.forEachIndexed { idx, post ->
+                                        BbsPostRow(
+                                            post = post,
+                                            onClick = { onEditPost(post.id) },
+                                            showModerationBadge = true,
+                                            showDivider = idx < data.continueWriting.lastIndex,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun CreatorShortcutTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = IgngTheme.colors
-    IgngTile(modifier = modifier, padding = PaddingValues(14.dp), onClick = onClick) {
-        Icon(icon, contentDescription = null, tint = colors.accent)
-        Spacer(Modifier.height(8.dp))
-        Text(title, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-        Spacer(Modifier.height(2.dp))
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
     }
 }

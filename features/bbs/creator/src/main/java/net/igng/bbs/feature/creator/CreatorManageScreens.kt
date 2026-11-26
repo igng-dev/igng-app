@@ -33,7 +33,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -86,6 +85,8 @@ import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.ChartPoint
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngHorizontalBarList
@@ -198,8 +199,8 @@ fun CreatorPostsScreen(
                         item { IgngSectionHeader(title = "收到的协作邀请（${pendingReceived.size}）") }
                         items(pendingReceived, key = { it.id }) { inv ->
                             IgngTile(soft = true) {
-                                Text("《${inv.postTitle}》 · ${inv.roleTitle}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                Text("来自 ${inv.counterparty?.displayName ?: "作者"} · 权限：${inv.permission}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                Text("《${inv.postTitle}》 · ${inv.roleTitle}", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                Text("来自 ${inv.counterparty?.displayName ?: "作者"} · 权限：${inv.permission}", style = IgngTheme.type.caption, color = colors.textSecondary)
                                 Spacer(Modifier.height(8.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     IgngTagChip(text = "接受邀请", tone = IgngTone.SUCCESS, onClick = {
@@ -229,25 +230,25 @@ fun CreatorPostsScreen(
                         items(posts, key = { it.id }) { post ->
                             IgngTile {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text(post.title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
-                                    IgngTagChip(
+                                    Text(post.title, style = IgngTheme.type.cardTitle, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                    IgngBadge(
                                         text = BbsFormatters.postStatusLabel(post.status, post.banStatus, post.moderationStatus),
                                         tone = when (post.moderationStatus) {
-                                            "pending" -> IgngTone.WARNING
-                                            "rejected" -> IgngTone.DANGER
-                                            else -> IgngTone.NEUTRAL
+                                            "pending" -> IgngBadgeTone.Warning
+                                            "rejected" -> IgngBadgeTone.Danger
+                                            else -> IgngBadgeTone.Neutral
                                         },
                                     )
                                 }
                                 Spacer(Modifier.height(6.dp))
                                 Text(
                                     "${BbsFormatters.compactCount(post.views)} 阅读 · ${post.likeCount} 赞 · ${post.commentCount} 评论 · ${BbsFormatters.relativeTime(post.updatedAt)}",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = IgngTheme.type.meta,
                                     color = colors.textMuted,
                                 )
                                 post.rejectionReason?.takeIf { it.isNotBlank() }?.let { reason ->
                                     Spacer(Modifier.height(4.dp))
-                                    Text("审核意见：$reason", style = MaterialTheme.typography.bodySmall, color = colors.danger)
+                                    Text("审核意见：$reason", style = IgngTheme.type.caption, color = colors.danger)
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -308,8 +309,8 @@ fun CreatorPostsScreen(
     analyticsData?.let { stat ->
         ModalBottomSheet(onDismissRequest = { analyticsData = null }, containerColor = colors.tile) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("数据透视 · ${stat.title}", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                Text("累计阅读 ${stat.lifetimeViews} · 近 ${stat.windowDays} 天 ${stat.totals.views}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                Text("数据透视 · ${stat.title}", style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
+                Text("累计阅读 ${stat.lifetimeViews} · 近 ${stat.windowDays} 天 ${stat.totals.views}", style = IgngTheme.type.caption, color = colors.textSecondary)
                 IgngLineChart(points = stat.daily.map { ChartPoint(it.date, it.totalViews) })
                 IgngHorizontalBarList(
                     items = listOf(
@@ -326,16 +327,16 @@ fun CreatorPostsScreen(
     versionsPostId?.let { pid ->
         ModalBottomSheet(onDismissRequest = { versionsPostId = null }, containerColor = colors.tile) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("历史已发布版本（${versionsList.size}）", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
+                Text("历史已发布版本（${versionsList.size}）", style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
                 if (versionsList.isEmpty()) {
-                    Text("这篇文章尚无历史发布快照。", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                    Text("这篇文章尚无历史发布快照。", style = IgngTheme.type.caption, color = colors.textSecondary)
                 } else {
                     versionsList.forEach { rev ->
                         IgngTile(soft = true, padding = PaddingValues(12.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("v${rev.revisionNo} · ${rev.title}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                    Text(BbsFormatters.fullDateTime(rev.publishedAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                    Text("v${rev.revisionNo} · ${rev.title}", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                    Text(BbsFormatters.fullDateTime(rev.publishedAt), style = IgngTheme.type.meta, color = colors.textMuted)
                                 }
                                 IgngTagChip("恢复到草稿", tone = IgngTone.ACCENT, onClick = {
                                     scope.launch {
@@ -456,8 +457,8 @@ fun CreatorColumnsScreen(
                         item { IgngSectionHeader("待回应专栏申请与邀请（${pendingEvents.size}）") }
                         items(pendingEvents, key = { it.id }) { ev ->
                             IgngTile(soft = true) {
-                                Text("${ev.column?.name ?: "专栏"} · ${ev.type}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                ev.message?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary) }
+                                Text("${ev.column?.name ?: "专栏"} · ${ev.type}", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                ev.message?.takeIf { it.isNotBlank() }?.let { Text(it, style = IgngTheme.type.caption, color = colors.textSecondary) }
                                 Spacer(Modifier.height(8.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     IgngTagChip("同意", tone = IgngTone.SUCCESS, onClick = {
@@ -487,12 +488,12 @@ fun CreatorColumnsScreen(
                     } else {
                         items(columns, key = { it.id }) { col ->
                             IgngTile {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(col.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                                    IgngTagChip(text = col.myRole ?: "member", tone = IgngTone.ACCENT)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text(col.name, style = IgngTheme.type.cardTitle, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                    IgngBadge(text = col.myRole ?: "member", tone = IgngBadgeTone.Accent)
                                 }
                                 Spacer(Modifier.height(4.dp))
-                                Text("${col.postCount} 篇 · ${col.memberCount} 成员 · ${col.subscriberCount} 订阅", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                Text("${col.postCount} 篇 · ${col.memberCount} 成员 · ${col.subscriberCount} 订阅", style = IgngTheme.type.meta, color = colors.textMuted)
                                 Spacer(Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     IgngTagChip("查看专栏", onClick = { onOpenColumn(col.id) })
@@ -528,14 +529,14 @@ fun CreatorColumnsScreen(
     manageDetail?.let { detail ->
         ModalBottomSheet(onDismissRequest = { manageDetail = null }, containerColor = colors.tile) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("专栏管理 · ${detail.name}", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                Text("成员 ${detail.members.size} 人 · 管理员 ${detail.managers.size} 人 · 订阅记录 ${detail.subscriptions.size} 条", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                Text("专栏管理 · ${detail.name}", style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
+                Text("成员 ${detail.members.size} 人 · 管理员 ${detail.managers.size} 人 · 订阅记录 ${detail.subscriptions.size} 条", style = IgngTheme.type.caption, color = colors.textSecondary)
                 val pendingSubs = detail.subscriptions.filter { it.status == "pending" }
                 if (pendingSubs.isNotEmpty()) {
-                    Text("待审订阅", style = MaterialTheme.typography.titleSmall, color = colors.warning)
+                    Text("待审订阅", style = IgngTheme.type.bodyMedium, color = colors.warning)
                     pendingSubs.forEach { sub ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(sub.user.displayName, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                            Text(sub.user.displayName, style = IgngTheme.type.body, color = colors.textPrimary)
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 IgngTagChip("批准", tone = IgngTone.SUCCESS, onClick = {
                                     scope.launch {
@@ -554,10 +555,10 @@ fun CreatorColumnsScreen(
                     }
                 }
                 if (detail.blacklist.isNotEmpty()) {
-                    Text("专栏黑名单", style = MaterialTheme.typography.titleSmall, color = colors.danger)
+                    Text("专栏黑名单", style = IgngTheme.type.bodyMedium, color = colors.danger)
                     detail.blacklist.forEach { b ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(b.user.displayName, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
+                            Text(b.user.displayName, style = IgngTheme.type.caption, color = colors.textPrimary)
                             IgngTagChip("移出黑名单", onClick = {
                                 scope.launch {
                                     container.creatorRepository.performColumnAction(detail.id, CreatorColumnActionRequest("unblacklist", targetUserId = b.user.id))
@@ -651,8 +652,8 @@ fun CreatorSeriesScreen(
                     } else {
                         items(seriesList, key = { it.id }) { ser ->
                             IgngTile {
-                                Text(ser.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                                Text("${ser.postCount} 篇章节 · ${ser.views} 次浏览", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                Text(ser.name, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                                Text("${ser.postCount} 篇章节 · ${ser.views} 次浏览", style = IgngTheme.type.meta, color = colors.textMuted)
                                 Spacer(Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     IgngTagChip("章节排序与趋势", tone = IgngTone.ACCENT, onClick = {
@@ -683,16 +684,16 @@ fun CreatorSeriesScreen(
     activeSeries?.let { detail ->
         ModalBottomSheet(onDismissRequest = { activeSeries = null }, containerColor = colors.tile) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("章节编排 · ${detail.name}", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
+                Text("章节编排 · ${detail.name}", style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
                 if (detail.viewsTrend.isNotEmpty()) {
                     IgngLineChart(points = detail.viewsTrend.map { ChartPoint(it.date, it.views) })
                 }
                 if (detail.posts.isEmpty()) {
-                    Text("当前系列暂无收录文章。", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                    Text("当前系列暂无收录文章。", style = IgngTheme.type.caption, color = colors.textSecondary)
                 } else {
                     detail.posts.forEachIndexed { idx, entry ->
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${idx + 1}. ${entry.post.title}", style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                            Text("${idx + 1}. ${entry.post.title}", style = IgngTheme.type.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
                             IconButton(enabled = idx > 0, onClick = {
                                 val ids = detail.posts.map { it.post.id }.toMutableList()
                                 val item = ids.removeAt(idx)
@@ -794,7 +795,7 @@ fun CreatorCommentsScreen(
                         items(comments, key = { it.id }) { c ->
                             IgngTile(onClick = { c.postId?.let(onOpenPost) }) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("${c.author?.displayName ?: "用户"} 评论了《${c.postTitle}》", style = MaterialTheme.typography.labelLarge, color = colors.accent, modifier = Modifier.weight(1f))
+                                    Text("${c.author?.displayName ?: "用户"} 评论了《${c.postTitle}》", style = IgngTheme.type.caption, color = colors.accent, modifier = Modifier.weight(1f))
                                     IconButton(onClick = {
                                         scope.launch {
                                             when (val r = container.postRepository.deleteComment(c.id)) {
@@ -811,9 +812,9 @@ fun CreatorCommentsScreen(
                                     }
                                 }
                                 Spacer(Modifier.height(4.dp))
-                                Text(c.content, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                                Text(c.content, style = IgngTheme.type.body, color = colors.textPrimary)
                                 Spacer(Modifier.height(4.dp))
-                                Text(BbsFormatters.relativeTime(c.createdAt), style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                Text(BbsFormatters.relativeTime(c.createdAt), style = IgngTheme.type.meta, color = colors.textMuted)
                             }
                         }
                     }
@@ -885,20 +886,20 @@ fun CreatorReviewsScreen(
                         } else {
                             items(data.reviews, key = { it.id }) { rev ->
                                 IgngTile {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(rev.targetTitle, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, modifier = Modifier.weight(1f))
-                                        IgngTagChip(
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text(rev.targetTitle, style = IgngTheme.type.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                        IgngBadge(
                                             text = rev.outcome ?: rev.status,
-                                            tone = if (rev.outcome == "rejected") IgngTone.DANGER else if (rev.outcome == "approved") IgngTone.SUCCESS else IgngTone.WARNING,
+                                            tone = if (rev.outcome == "rejected") IgngBadgeTone.Danger else if (rev.outcome == "approved") IgngBadgeTone.Success else IgngBadgeTone.Warning,
                                         )
                                     }
                                     rev.rejectionReason?.takeIf { it.isNotBlank() }?.let {
                                         Spacer(Modifier.height(4.dp))
-                                        Text("原因：$it", style = MaterialTheme.typography.bodySmall, color = colors.danger)
+                                        Text("原因：$it", style = IgngTheme.type.caption, color = colors.danger)
                                     }
                                     rev.suggestion?.takeIf { it.isNotBlank() }?.let {
                                         Spacer(Modifier.height(2.dp))
-                                        Text("修改建议：$it", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                        Text("修改建议：$it", style = IgngTheme.type.caption, color = colors.textSecondary)
                                     }
                                     if (rev.outcome == "rejected" && !rev.hasPendingAppeal) {
                                         Spacer(Modifier.height(8.dp))
@@ -911,18 +912,18 @@ fun CreatorReviewsScreen(
                             item { IgngSectionHeader("我的申诉记录（${data.appeals.size}）") }
                             items(data.appeals, key = { it.id }) { apl ->
                                 IgngTile(soft = true) {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("第 ${apl.round}/${apl.maxRounds} 轮申诉 · ${apl.targetId}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        IgngTagChip(text = apl.status, tone = if (apl.status == "approved") IgngTone.SUCCESS else if (apl.status == "rejected") IgngTone.DANGER else IgngTone.WARNING)
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("第 ${apl.round}/${apl.maxRounds} 轮申诉 · ${apl.targetId}", style = IgngTheme.type.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                        IgngBadge(text = apl.status, tone = if (apl.status == "approved") IgngBadgeTone.Success else if (apl.status == "rejected") IgngBadgeTone.Danger else IgngBadgeTone.Warning)
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    Text("申诉陈述：${apl.reason}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                    Text("申诉陈述：${apl.reason}", style = IgngTheme.type.caption, color = colors.textSecondary)
                                     apl.reply?.takeIf { it.isNotBlank() }?.let {
                                         Spacer(Modifier.height(4.dp))
-                                        Text("复核答复：$it", style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
+                                        Text("复核答复：$it", style = IgngTheme.type.caption, color = colors.textPrimary)
                                     }
                                     apl.arguments.forEach { arg ->
-                                        Text("· [${if (arg.accepted) "采纳" else "未采纳"}] ${arg.point}：${arg.reply}", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                                        Text("· [${if (arg.accepted) "采纳" else "未采纳"}] ${arg.point}：${arg.reply}", style = IgngTheme.type.meta, color = colors.textMuted)
                                     }
                                 }
                             }
@@ -1049,11 +1050,11 @@ fun CreatorMediaScreen(
                         item {
                             IgngTile(padding = PaddingValues(14.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("媒体空间配额", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                    Text("${BbsFormatters.formatBytes(quota.usedBytes)} / ${BbsFormatters.formatBytes(quota.limitBytes)}", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                                    Text("媒体空间配额", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                    Text("${BbsFormatters.formatBytes(quota.usedBytes)} / ${BbsFormatters.formatBytes(quota.limitBytes)}", style = IgngTheme.type.meta, color = colors.textSecondary)
                                 }
                                 Spacer(Modifier.height(8.dp))
-                                LinearProgressIndicator(progress = { ratio }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(IgngRadius.pill)), color = colors.accent, trackColor = colors.line)
+                                LinearProgressIndicator(progress = { ratio }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(IgngRadius.pill)), color = colors.accent, trackColor = colors.line)
                             }
                         }
                         if (mediaList.data.isEmpty()) {
@@ -1069,8 +1070,8 @@ fun CreatorMediaScreen(
                                             modifier = Modifier.size(64.dp).clip(RoundedCornerShape(IgngRadius.control)).background(colors.tileSoft),
                                         )
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(file.originalName ?: file.id, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, maxLines = 1)
-                                            Text("${BbsFormatters.formatBytes(file.sizeBytes)} · ${file.width}×${file.height}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                            Text(file.originalName ?: file.id, style = IgngTheme.type.bodyMedium, color = colors.textPrimary, maxLines = 1)
+                                            Text("${BbsFormatters.formatBytes(file.sizeBytes)} · ${file.width}×${file.height}", style = IgngTheme.type.meta, color = colors.textMuted)
                                             Spacer(Modifier.height(6.dp))
                                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 IgngTagChip(

@@ -115,6 +115,7 @@ fun IgngAppUpdateCard(
         IgngSectionHeader(
             title = "应用更新",
             subtitle = "当前 v${snapshot.currentVersionName} (${snapshot.currentVersionCode}) · $lastCheckedText",
+            prominent = true,
             trailing = {
                 when (state) {
                     is AppUpdateState.Available -> IgngBadge(
@@ -475,10 +476,10 @@ private fun IgngUpdateProgressTile(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(7.dp)
+                .height(6.dp)
                 .clip(IgngTheme.radii.pill)
                 .background(colors.tile)
-                .border(1.dp, colors.line, IgngTheme.radii.pill),
+                .border(IgngStroke.hairline, colors.line, IgngTheme.radii.pill),
         ) {
             Box(
                 modifier = Modifier

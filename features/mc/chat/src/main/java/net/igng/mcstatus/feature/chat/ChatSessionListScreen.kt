@@ -65,6 +65,7 @@ import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSkeletonRows
 import net.igng.core.designsystem.IgngStateBlock
+import net.igng.core.designsystem.IgngStroke
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.rememberIgngHaptics
@@ -139,17 +140,13 @@ fun ChatSessionListScreen(
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             IgngTopBar(
                 title = "聊天",
-                subtitle = when {
-                    allSessions.isNotEmpty() -> "${allSessions.size} 个同步会话 · QQ / 微信 / MC"
-                    activeAccount == null -> "公开群聊与 MC 服务器实时档案"
-                    else -> "社区跨平台实时聊天档案"
-                },
+                subtitle = if (allSessions.isNotEmpty()) "${allSessions.size} 个同步会话 · QQ / 微信 / MC" else null,
                 actions = {
                     Row(
                         modifier = Modifier
-                            .clip(IgngTheme.radii.pill)
+                            .clip(IgngTheme.radii.sm)
                             .background(colors.tile)
-                            .border(1.dp, colors.lineStrong, IgngTheme.radii.pill)
+                            .border(IgngStroke.hairline, colors.lineStrong, IgngTheme.radii.sm)
                             .clickable {
                                 haptic(IgngHapticKind.Tap)
                                 onOpenCommunityChannels()
@@ -294,7 +291,7 @@ fun ChatSessionListScreen(
                                         .clip(IgngTheme.radii.md)
                                         .background(if (sessionExpired) colors.warningBg else colors.accentSoft)
                                         .border(
-                                            0.8.dp,
+                                            IgngStroke.hairline,
                                             (if (sessionExpired) colors.warning else colors.accent).copy(alpha = 0.35f),
                                             IgngTheme.radii.md,
                                         )
@@ -330,7 +327,7 @@ fun ChatSessionListScreen(
                                     .fillMaxWidth()
                                     .clip(IgngTheme.radii.lg)
                                     .background(colors.tile)
-                                    .border(1.dp, colors.line, IgngTheme.radii.lg),
+                                    .border(IgngStroke.hairline, colors.line, IgngTheme.radii.lg),
                             ) {
                                 filteredSessions.forEachIndexed { idx, session ->
                                     if (idx > 0) {
@@ -369,11 +366,11 @@ private fun SessionTabPill(
     val colors = IgngTheme.colors
     Row(
         modifier = Modifier
-            .clip(IgngTheme.radii.pill)
+            .clip(IgngTheme.radii.sm)
             .background(if (selected) colors.accent else colors.tile)
-            .border(1.dp, if (selected) colors.accent else colors.line, IgngTheme.radii.pill)
+            .border(IgngStroke.hairline, if (selected) colors.accent else colors.line, IgngTheme.radii.sm)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {

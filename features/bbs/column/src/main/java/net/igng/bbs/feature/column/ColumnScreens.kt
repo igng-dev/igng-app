@@ -15,15 +15,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,11 +29,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.common.BbsPostRow
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.data.BbsCacheKeys
 import net.igng.bbs.core.data.BbsCachePolicies
@@ -55,13 +47,18 @@ import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngGroupedSection
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
-import net.igng.core.designsystem.IgngRadius
+import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSecondaryButton
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
@@ -69,7 +66,6 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngBentoEnter
 import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.network.ApiResult
 
@@ -139,6 +135,14 @@ fun ColumnSquareScreen(
             },
         )
         // Search + All / Mine tabs
+        val submitColumnSearch = {
+            val trimmed = search.trim()
+            if (trimmed == submittedSearch) {
+                colHandle.refresh()
+            } else {
+                submittedSearch = trimmed
+            }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -146,32 +150,22 @@ fun ColumnSquareScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            IgngSearchField(
                 value = search,
                 onValueChange = { search = it },
-                placeholder = { Text("搜索专栏名称或简介", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(IgngRadius.pill),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = colors.tile,
-                    unfocusedContainerColor = colors.tile,
-                    focusedBorderColor = colors.accent,
-                    unfocusedBorderColor = colors.line,
-                ),
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.textMuted) },
-            )
-            IgngTagChip(
-                text = "筛选",
-                tone = IgngTone.ACCENT,
-                onClick = {
-                    val trimmed = search.trim()
-                    if (trimmed == submittedSearch) {
-                        colHandle.refresh()
-                    } else {
-                        submittedSearch = trimmed
-                    }
+                placeholder = "搜索专栏名称或简介",
+                onSubmit = submitColumnSearch,
+                onClear = {
+                    search = ""
+                    submittedSearch = ""
                 },
+                modifier = Modifier.weight(1f),
+            )
+            IgngButton(
+                text = "筛选",
+                style = IgngButtonStyle.Secondary,
+                compact = true,
+                onClick = submitColumnSearch,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -219,11 +213,10 @@ fun ColumnSquareScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    itemsIndexed(columns, key = { _, c -> c.id }) { idx, col ->
+                    items(columns, key = { it.id }) { col ->
                         ColumnSummaryCard(
                             column = col,
                             onClick = { onOpenColumn(col.id) },
-                            modifier = Modifier.igngBentoEnter(idx),
                         )
                     }
                 }
@@ -243,24 +236,24 @@ private fun ColumnSummaryCard(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = column.name,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                style = IgngTheme.type.cardTitle,
                 color = colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            IgngTagChip(
+            IgngBadge(
                 text = when (column.joinMode) {
                     "open" -> "开放加入"
                     "apply" -> "申请加入"
                     else -> "仅受邀"
                 },
-                tone = if (column.joinMode == "open") IgngTone.SUCCESS else IgngTone.NEUTRAL,
+                tone = if (column.joinMode == "open") IgngBadgeTone.Success else IgngBadgeTone.Neutral,
             )
         }
         column.description?.takeIf { it.isNotBlank() }?.let { desc ->
             Spacer(Modifier.height(6.dp))
-            Text(desc, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(desc, style = IgngTheme.type.body, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.height(10.dp))
         Row(
@@ -269,13 +262,13 @@ private fun ColumnSummaryCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             column.creator?.let { creator ->
-                IgngAvatar(creator.avatarUrl, creator.displayName, size = 22.dp)
-                Text(creator.displayName, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                IgngAvatar(creator.avatarUrl, creator.displayName, size = 20.dp)
+                Text(creator.displayName, style = IgngTheme.type.meta, color = colors.textSecondary)
             }
             Spacer(Modifier.weight(1f))
             Text(
                 text = "${column.postCount} 篇 · ${column.memberCount} 成员 · ${column.subscriberCount} 订阅",
-                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                style = IgngTheme.type.meta,
                 color = colors.textMuted,
             )
         }
@@ -375,26 +368,26 @@ fun ColumnDetailScreen(
                             }
                         }
 
-                        // Hero Bento tile
+                        // Hero tile
                         item(key = "hero") {
                             IgngTile {
-                                Text(col.name, style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
+                                Text(col.name, style = IgngTheme.type.pageTitle, color = colors.textPrimary)
                                 col.description?.takeIf { it.isNotBlank() }?.let { desc ->
                                     Spacer(Modifier.height(6.dp))
-                                    Text(desc, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                                    Text(desc, style = IgngTheme.type.body, color = colors.textSecondary)
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text("${col.postCount} 篇文章", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-                                    Text("${col.memberCount} 位成员", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-                                    Text("${col.subscriberCount} 位订阅者", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                                    Text("${col.postCount} 篇文章", style = IgngTheme.type.meta, color = colors.textSecondary)
+                                    Text("${col.memberCount} 位成员", style = IgngTheme.type.meta, color = colors.textSecondary)
+                                    Text("${col.subscriberCount} 位订阅者", style = IgngTheme.type.meta, color = colors.textSecondary)
                                 }
                                 Spacer(Modifier.height(12.dp))
                                 // Membership & Subscription action buttons
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                                     if (!vs.isCreator) {
                                         when {
-                                            vs.isBlacklisted -> IgngTagChip(text = "已被专栏限制", tone = IgngTone.DANGER)
+                                            vs.isBlacklisted -> IgngBadge(text = "已被专栏限制", tone = IgngBadgeTone.Danger)
                                             vs.isMember -> IgngSecondaryButton(
                                                 text = "退出专栏",
                                                 onClick = {
@@ -407,7 +400,7 @@ fun ColumnDetailScreen(
                                                 },
                                                 modifier = Modifier.weight(1f),
                                             )
-                                            vs.pendingApply -> IgngTagChip(text = "加入申请审核中", tone = IgngTone.WARNING)
+                                            vs.pendingApply -> IgngBadge(text = "加入申请审核中", tone = IgngBadgeTone.Warning)
                                             col.joinMode == "open" -> IgngPrimaryButton(
                                                 text = "加入专栏",
                                                 onClick = {
@@ -479,21 +472,25 @@ fun ColumnDetailScreen(
                             }
                         }
 
-                        // Pinned posts
+                        // Pinned posts (hairline editorial rows)
                         if (col.pinnedPosts.isNotEmpty()) {
-                            item(key = "pin_header") { IgngSectionHeader(title = "置顶文章") }
-                            items(col.pinnedPosts, key = { "pin_${it.id}" }) { post ->
-                                BbsPostRowCard(
-                                    post = post,
-                                    onClick = { onOpenPost(post.id) },
-                                    onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
-                                )
+                            item(key = "pinned_group") {
+                                IgngGroupedSection(title = "置顶文章") {
+                                    col.pinnedPosts.forEachIndexed { idx, post ->
+                                        BbsPostRow(
+                                            post = post,
+                                            onClick = { onOpenPost(post.id) },
+                                            onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
+                                            showDivider = idx < col.pinnedPosts.lastIndex,
+                                        )
+                                    }
+                                }
                             }
                         }
 
-                        // Regular posts
-                        item(key = "posts_header") { IgngSectionHeader(title = "专栏文章") }
+                        // Regular posts (hairline editorial rows)
                         if (!vs.canViewPosts) {
+                            item(key = "posts_header") { IgngSectionHeader(title = "专栏文章") }
                             item(key = "restricted") {
                                 IgngEmptyTile(
                                     title = "仅限成员或订阅者查看",
@@ -501,16 +498,22 @@ fun ColumnDetailScreen(
                                 )
                             }
                         } else if (col.posts.isEmpty()) {
+                            item(key = "posts_header") { IgngSectionHeader(title = "专栏文章") }
                             item(key = "no_posts") {
                                 IgngEmptyTile(title = "暂无专栏文章", subtitle = "这个专栏还没有发布文章。")
                             }
                         } else {
-                            items(col.posts, key = { "post_${it.id}" }) { post ->
-                                BbsPostRowCard(
-                                    post = post,
-                                    onClick = { onOpenPost(post.id) },
-                                    onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
-                                )
+                            item(key = "posts_group") {
+                                IgngGroupedSection(title = "专栏文章") {
+                                    col.posts.forEachIndexed { idx, post ->
+                                        BbsPostRow(
+                                            post = post,
+                                            onClick = { onOpenPost(post.id) },
+                                            onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
+                                            showDivider = idx < col.posts.lastIndex,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

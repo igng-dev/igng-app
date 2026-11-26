@@ -146,7 +146,7 @@ fun IgngNavRowTile(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     icon: ImageVector? = null,
-    iconTint: Color = IgngTheme.colors.accent,
+    iconTint: Color = IgngTheme.colors.textSecondary,
     trailing: (@Composable () -> Unit)? = null,
     accentBorder: Color? = null,
 ) {
@@ -167,13 +167,13 @@ fun IgngNavRowTile(
                     imageVector = icon,
                     contentDescription = null,
                     tint = iconTint,
-                    modifier = Modifier.size(21.dp),
+                    modifier = Modifier.size(20.dp),
                 )
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
+                Text(title, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
                 if (!subtitle.isNullOrBlank()) {
-                    Text(subtitle, style = IgngTheme.type.caption, color = colors.textSecondary)
+                    Text(subtitle, style = IgngTheme.type.meta, color = colors.textSecondary)
                 }
             }
             if (trailing != null) {
@@ -191,7 +191,7 @@ fun IgngNavRowTile(
 }
 
 /**
- * Unified appearance, 3-tier motion, and haptics settings card shared by BBS, MC, and Ink.
+ * Unified appearance, 3-tier motion, and haptics settings card shared across IGNG apps.
  */
 @Composable
 fun IgngAppearanceMotionSettingsCard(
@@ -208,12 +208,12 @@ fun IgngAppearanceMotionSettingsCard(
     val colors = IgngTheme.colors
     IgngTile(modifier = modifier.fillMaxWidth()) {
         IgngSectionHeader(
-            title = "画布、动效与触感",
-            subtitle = "IGNG 全系应用统一的主题、三档物理动效与微触感反馈",
+            title = "外观与动效",
+            prominent = true,
         )
         Spacer(Modifier.height(14.dp))
 
-        Text("界面主题", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
+        Text("界面主题", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
         Spacer(Modifier.height(6.dp))
         IgngSegmentedTabs(
             items = ThemeMode.entries,
@@ -223,7 +223,7 @@ fun IgngAppearanceMotionSettingsCard(
         )
 
         Spacer(Modifier.height(14.dp))
-        Text("动效强度", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
+        Text("动效强度", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
         Spacer(Modifier.height(6.dp))
         IgngSegmentedTabs(
             items = MotionIntensity.entries,
@@ -234,7 +234,7 @@ fun IgngAppearanceMotionSettingsCard(
 
         if (readerTypography != null && onReaderToneChange != null) {
             Spacer(Modifier.height(14.dp))
-            Text("阅读画布", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
+            Text("阅读画布", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
             Spacer(Modifier.height(6.dp))
             IgngSegmentedTabs(
                 items = ReaderCanvasTone.entries,
@@ -253,7 +253,7 @@ fun IgngAppearanceMotionSettingsCard(
         Spacer(Modifier.height(10.dp))
         IgngSwitchRow(
             title = "交互触感反馈",
-            subtitle = "Dock 切换、分段控件、下拉折角刷新、按钮与复制微震动",
+            subtitle = "切换标签、按钮、下拉刷新与复制时的轻触感",
             checked = hapticsEnabled,
             onCheckedChange = onHapticsEnabledChange,
         )
