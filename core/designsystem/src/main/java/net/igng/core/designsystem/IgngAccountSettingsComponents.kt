@@ -155,7 +155,8 @@ fun IgngAccountVaultCard(
     IgngTile(modifier = modifier.fillMaxWidth()) {
         IgngSectionHeader(
             title = "IGNG 账户与多端切换",
-            subtitle = "令牌由 Android Keystore AES-256-GCM 硬件加密保护 · 支持家族应用共享登录发现",
+            subtitle = "本机安全存储 · 支持家族应用共享登录",
+            prominent = true,
         )
         Spacer(Modifier.height(12.dp))
 
@@ -433,7 +434,8 @@ fun IgngProfileIdentityCard(
     IgngTile(modifier = modifier.fillMaxWidth()) {
         IgngSectionHeader(
             title = "头像与用户名",
-            subtitle = "修改后将同步至 IGNG 全系站点与客户端",
+            subtitle = "同步至 IGNG 全系站点与客户端",
+            prominent = true,
         )
         Spacer(Modifier.height(12.dp))
         Row(
@@ -502,7 +504,8 @@ fun IgngDevicesSecurityCard(
     IgngTile(modifier = modifier.fillMaxWidth()) {
         IgngSectionHeader(
             title = "登录设备管理（${devices.size}）",
-            subtitle = "查看并远程吊销各端 IGNG 登录会话",
+            subtitle = "查看并远程吊销活跃会话",
+            prominent = true,
             trailing = {
                 IgngButton(
                     text = "刷新",
@@ -663,6 +666,7 @@ fun IgngCacheCard(
         IgngSectionHeader(
             title = "本地离线与图片缓存",
             subtitle = "$subtitlePrefix：${IgngCoreFormatters.formatBytes(cacheBytes)}",
+            prominent = true,
         )
         Spacer(Modifier.height(10.dp))
         IgngButton(

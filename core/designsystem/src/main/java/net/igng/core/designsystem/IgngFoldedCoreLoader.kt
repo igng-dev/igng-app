@@ -578,7 +578,7 @@ fun IgngLoadingCenter(
             androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
             androidx.compose.material3.Text(
                 text = label,
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                style = IgngTheme.type.caption,
                 color = IgngTheme.colors.textSecondary,
             )
         }

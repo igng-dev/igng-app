@@ -98,7 +98,6 @@ import net.igng.core.designsystem.IgngTextField
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.mcstatus.core.model.BootstrapResponse
 import net.igng.mcstatus.core.model.CustomMedalValidator
 import net.igng.mcstatus.core.model.IgngFormatters
@@ -189,9 +188,9 @@ fun CharactersScreen(
                     )
                 }
                 else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    itemsIndexed(accounts, key = { _, a -> a.id }) { idx, acc ->
+                    itemsIndexed(accounts, key = { _, a -> a.id }) { _, acc ->
                         val isPub = acc.isPublic
-                        IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                        IgngTile(modifier = Modifier.fillMaxWidth()) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(acc.resolvedName, style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
@@ -621,10 +620,10 @@ fun VaultScreen(
                                 } else if (groups.isEmpty()) {
                                     item { IgngStateBlock(title = "仓库里还没有匹配的物品") }
                                 } else {
-                                    itemsIndexed(groups, key = { i, g -> "${g.groupKey ?: g.material}:${g.displayName}:$i" }) { idx, item ->
+                                    itemsIndexed(groups, key = { i, g -> "${g.groupKey ?: g.material}:${g.displayName}:$i" }) { _, item ->
                                         IgngInteractiveTile(
                                             onClick = { selectedItem = item },
-                                            modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                            modifier = Modifier.fillMaxWidth(),
                                         ) {
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                                 Column(Modifier.weight(1f)) {
@@ -662,7 +661,7 @@ fun VaultScreen(
                                                     traceLoading = false
                                                 }
                                             },
-                                            modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                            modifier = Modifier.fillMaxWidth(),
                                         ) {
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                                 Text(op.material ?: op.kind, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
@@ -793,10 +792,10 @@ fun MyLandsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                     error != null -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "读取失败", description = error, isError = true, actionLabel = "重试", onAction = { landsHandle.refresh() }) }
                     lands.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有领地记录") }
                     else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        itemsIndexed(lands, key = { _, l -> l.id }) { idx, land ->
+                        itemsIndexed(lands, key = { _, l -> l.id }) { _, land ->
                             IgngInteractiveTile(
                                 onClick = { editingLand = land; descDraft = land.description },
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Text(land.land_name ?: "未命名领地", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
@@ -905,8 +904,8 @@ fun MyTeleportsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                     }
                     list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "还没有传送点") }
                     else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        itemsIndexed(list, key = { _, tp -> tp.id }) { idx, tp ->
-                            IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                        itemsIndexed(list, key = { _, tp -> tp.id }) { _, tp ->
+                            IgngTile(modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Text(tp.point_name ?: "未命名传送点", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
                                     IgngBadge(tp.server_name ?: "服务器 ${tp.server_id}")
@@ -957,11 +956,11 @@ fun MyFakePlayersScreen(playerRepository: PlayerRepository, onBack: () -> Unit) 
                     }
                     list.isEmpty() -> Box(Modifier.padding(16.dp)) { IgngStateBlock(title = "当前没有在线假人") }
                     else -> LazyColumn(contentPadding = rememberIgngPageContentPadding(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        itemsIndexed(list, key = { _, fp -> fp.id }) { idx, fp ->
-                            IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                        itemsIndexed(list, key = { _, fp -> fp.id }) { _, fp ->
+                            IgngTile(modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text(fp.fake_name ?: "假人", style = IgngTheme.type.cardTitle, color = colors.textPrimary)
-                                    IgngBadge(fp.server_name ?: "服务器 ${fp.server_id}", tone = IgngBadgeTone.Success, leadingDot = true, pulse = true)
+                                    IgngBadge(fp.server_name ?: "服务器 ${fp.server_id}", tone = IgngBadgeTone.Success, leadingDot = true, pulse = false)
                                 }
                                 Spacer(Modifier.height(6.dp))
                                 Text(
@@ -1138,8 +1137,8 @@ fun LoginActivityScreen(
                                     )
                                 }
                             } else {
-                                itemsIndexed(records, key = { i, r -> "${r.recordId}:$i" }) { idx, rec ->
-                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                itemsIndexed(records, key = { i, r -> "${r.recordId}:$i" }) { _, rec ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                             Column(Modifier.weight(1f)) {
                                                 Text(rec.username, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
@@ -1386,8 +1385,8 @@ fun MyMedalsScreen(playerRepository: PlayerRepository, onBack: () -> Unit) {
                             if (data.allActiveMedals.isEmpty()) {
                                 item { IgngStateBlock(title = "还没有获得勋章", description = "参与服务器活动与周目建设可解锁专属勋章。") }
                             } else {
-                                itemsIndexed(data.allActiveMedals, key = { i, m -> "${m.id}:${m.medalId}:$i" }) { idx, medal ->
-                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                itemsIndexed(data.allActiveMedals, key = { i, m -> "${m.id}:${m.medalId}:$i" }) { _, medal ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                             Text(medal.displayName ?: medal.name, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
                                             medal.account?.let { IgngBadge(it, tone = IgngBadgeTone.Accent) }
@@ -1524,8 +1523,8 @@ fun PersonalPerfectScreen(playerRepository: PlayerRepository, onBack: () -> Unit
                             }
                             if (info.benefits.isNotEmpty()) {
                                 item { IgngSectionHeader(title = "权益与额度") }
-                                itemsIndexed(info.benefits, key = { i, b -> "${b.key}:$i" }) { idx, b ->
-                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                itemsIndexed(info.benefits, key = { i, b -> "${b.key}:$i" }) { _, b ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
                                         Text(b.title, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
                                         val benefitDesc = b.summary.ifBlank { b.description }
                                         if (benefitDesc.isNotBlank()) {

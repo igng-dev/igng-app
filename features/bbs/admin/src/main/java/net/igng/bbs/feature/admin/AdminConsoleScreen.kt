@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,12 +52,17 @@ import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
+import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
@@ -282,29 +286,32 @@ fun AdminConsoleScreen(
         Spacer(Modifier.height(8.dp))
 
         if (selectedTab in listOf(AdminTab.POSTS, AdminTab.USERS, AdminTab.COLLECTIONS)) {
+            val submitAdminSearch = {
+                val trimmed = search.trim()
+                if (trimmed == submittedSearch) {
+                    refreshCurrent(userInitiated = true)
+                } else {
+                    submittedSearch = trimmed
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                IgngSearchField(
                     value = search,
                     onValueChange = { search = it },
-                    placeholder = { Text("搜索关键词或编号", style = MaterialTheme.typography.bodySmall) },
-                    singleLine = true,
+                    placeholder = "搜索关键词或编号",
+                    onSubmit = submitAdminSearch,
+                    onClear = { search = ""; submittedSearch = "" },
                     modifier = Modifier.weight(1f),
                 )
-                IgngTagChip(
-                    "查询",
-                    tone = IgngTone.ACCENT,
-                    onClick = {
-                        val trimmed = search.trim()
-                        if (trimmed == submittedSearch) {
-                            refreshCurrent(userInitiated = true)
-                        } else {
-                            submittedSearch = trimmed
-                        }
-                    },
+                IgngButton(
+                    text = "查询",
+                    style = IgngButtonStyle.Secondary,
+                    compact = true,
+                    onClick = submitAdminSearch,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -329,8 +336,8 @@ fun AdminConsoleScreen(
                             if (posts.isEmpty()) item { IgngEmptyTile("无匹配文章", "调整筛选关键词再试。") }
                             items(posts, key = { it.id }) { p ->
                                 IgngTile {
-                                    Text("${p.title}（${p.id}）", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                    Text("作者 ${p.author?.displayName ?: "—"} · 状态：${BbsFormatters.postStatusLabel(p.status, p.banStatus, p.moderationStatus)}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                    Text("${p.title}（${p.id}）", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                    Text("作者 ${p.author?.displayName ?: "—"} · 状态：${BbsFormatters.postStatusLabel(p.status, p.banStatus, p.moderationStatus)}", style = IgngTheme.type.meta, color = colors.textMuted)
                                     Spacer(Modifier.height(8.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         item { IgngTagChip("查看", onClick = { onOpenPost(p.id) }) }
@@ -348,13 +355,13 @@ fun AdminConsoleScreen(
                             if (reviews.isEmpty()) item { IgngEmptyTile("审核队列已清空", "当前没有待人工复核的任务。") }
                             items(reviews, key = { it.id }) { rev ->
                                 IgngTile {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${rev.targetType} · ${rev.targetId} (${rev.reviewType})", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        IgngTagChip("优先级 ${rev.priority}", tone = IgngTone.WARNING)
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${rev.targetType} · ${rev.targetId} (${rev.reviewType})", style = IgngTheme.type.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                        IgngBadge("优先级 ${rev.priority}", tone = IgngBadgeTone.Warning)
                                     }
-                                    rev.titleSnapshot?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary) }
-                                    rev.contentSnapshot?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 4) }
-                                    rev.reason?.let { Text("备注：$it", style = MaterialTheme.typography.labelSmall, color = colors.textMuted) }
+                                    rev.titleSnapshot?.let { Text(it, style = IgngTheme.type.body, color = colors.textPrimary) }
+                                    rev.contentSnapshot?.let { Text(it, style = IgngTheme.type.caption, color = colors.textSecondary, maxLines = 4) }
+                                    rev.reason?.let { Text("备注：$it", style = IgngTheme.type.meta, color = colors.textMuted) }
                                     Spacer(Modifier.height(10.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         IgngTagChip("通过", tone = IgngTone.SUCCESS, onClick = {
@@ -378,12 +385,12 @@ fun AdminConsoleScreen(
                             if (reports.isEmpty()) item { IgngEmptyTile("举报队列为空", "当前没有待处理的社区举报。") }
                             items(reports, key = { it.id }) { rep ->
                                 IgngTile {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${rep.targetType} · ${rep.targetId}", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        IgngTagChip(rep.reasonCode ?: "举报", tone = IgngTone.DANGER)
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${rep.targetType} · ${rep.targetId}", style = IgngTheme.type.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                        IgngBadge(rep.reasonCode ?: "举报", tone = IgngBadgeTone.Danger)
                                     }
-                                    rep.reason?.let { Text("举报说明：$it", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary) }
-                                    rep.contentSnapshot?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textMuted, maxLines = 3) }
+                                    rep.reason?.let { Text("举报说明：$it", style = IgngTheme.type.caption, color = colors.textSecondary) }
+                                    rep.contentSnapshot?.let { Text(it, style = IgngTheme.type.caption, color = colors.textMuted, maxLines = 3) }
                                     Spacer(Modifier.height(10.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         IgngTagChip("举报成立（处置）", tone = IgngTone.DANGER, onClick = {
@@ -412,9 +419,9 @@ fun AdminConsoleScreen(
                                 IgngTile {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("${entry.user.displayName} (${entry.user.id})", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                            Text("域：${entry.scope} · 触发：${entry.triggerKind} · 截止 ${BbsFormatters.fullDateTime(entry.activeUntil)}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
-                                            entry.reason?.let { Text("原因：$it", style = MaterialTheme.typography.labelSmall, color = colors.textMuted) }
+                                            Text("${entry.user.displayName} (${entry.user.id})", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                            Text("域：${entry.scope} · 触发：${entry.triggerKind} · 截止 ${BbsFormatters.fullDateTime(entry.activeUntil)}", style = IgngTheme.type.caption, color = colors.textSecondary)
+                                            entry.reason?.let { Text("原因：$it", style = IgngTheme.type.meta, color = colors.textMuted) }
                                         }
                                         IgngTagChip("解除", tone = IgngTone.SUCCESS, onClick = {
                                             scope.launch {
@@ -433,11 +440,11 @@ fun AdminConsoleScreen(
                             if (users.isEmpty()) item { IgngEmptyTile("未检索到用户", "输入用户名、昵称或账户编号进行查询。") }
                             items(users, key = { it.id }) { u ->
                                 IgngTile(onClick = { onOpenUser(u.id) }) {
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("${u.nickname.ifBlank { u.username }} (@${u.username})", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        IgngTagChip(u.status, tone = if (u.status == "normal") IgngTone.SUCCESS else IgngTone.DANGER)
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${u.nickname.ifBlank { u.username }} (@${u.username})", style = IgngTheme.type.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                        IgngBadge(u.status, tone = if (u.status == "normal") IgngBadgeTone.Success else IgngBadgeTone.Danger)
                                     }
-                                    Text("${u.id} · ${u.postCount} 篇文章 · ${u.commentCount} 条评论", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                    Text("${u.id} · ${u.postCount} 篇文章 · ${u.commentCount} 条评论", style = IgngTheme.type.meta, color = colors.textMuted)
                                     Spacer(Modifier.height(6.dp))
                                     IgngTagChip("设置风控", tone = IgngTone.WARNING, onClick = { riskUserId = u.id; showRiskDialog = true })
                                 }
@@ -448,8 +455,8 @@ fun AdminConsoleScreen(
                             item { IgngSectionHeader("专栏列表（${columns.size}）") }
                             items(columns, key = { it.id }) { c ->
                                 IgngTile {
-                                    Text("${c.name} (/${c.slug})", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                    Text("${c.postCount} 篇 · ${c.memberCount} 成员 · join=${c.joinMode}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                    Text("${c.name} (/${c.slug})", style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                    Text("${c.postCount} 篇 · ${c.memberCount} 成员 · join=${c.joinMode}", style = IgngTheme.type.meta, color = colors.textMuted)
                                     Spacer(Modifier.height(6.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         IgngTagChip("恢复简介状态", onClick = {
@@ -466,8 +473,8 @@ fun AdminConsoleScreen(
                                 IgngTile {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(s.name, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                            Text("${s.postCount} 篇 · 作者 ${s.creator?.displayName ?: "—"}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                                            Text(s.name, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                            Text("${s.postCount} 篇 · 作者 ${s.creator?.displayName ?: "—"}", style = IgngTheme.type.meta, color = colors.textMuted)
                                         }
                                         IgngTagChip("删除", tone = IgngTone.DANGER, onClick = {
                                             scope.launch { container.adminRepository.deleteSeries(s.id); notice = "已删除系列"; refreshCurrent(false) }

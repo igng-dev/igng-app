@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Groups
@@ -43,7 +43,6 @@ import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.mcstatus.core.model.IgngSocialChannels
 
 /**
@@ -90,11 +89,9 @@ fun CommunityChannelsScreen(
                     )
                 }
 
-                itemsIndexed(IgngSocialChannels.qqGroups, key = { _, g -> g.key }) { idx, group ->
+                items(IgngSocialChannels.qqGroups, key = { it.key }) { group ->
                     IgngTile(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .igngStaggeredReveal(idx),
+                        modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(16.dp),
                     ) {
                         Row(
@@ -168,7 +165,7 @@ fun CommunityChannelsScreen(
                     )
                 }
 
-                itemsIndexed(IgngSocialChannels.externalChannels, key = { _, ch -> ch.key }) { idx, ch ->
+                items(IgngSocialChannels.externalChannels, key = { it.key }) { ch ->
                     val (icon, tint) = when (ch.key) {
                         "mc-discord" -> Icons.Rounded.HeadsetMic to Color(0xFF5865F2)
                         "bilibili-official" -> Icons.Rounded.PlayCircle to Color(0xFFFB7299)
@@ -185,9 +182,7 @@ fun CommunityChannelsScreen(
                                 IgngBrowserLauncher.openExternalUrl(context, url, colors.isDark)
                             }
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .igngStaggeredReveal(IgngSocialChannels.qqGroups.size + idx),
+                        modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(16.dp),
                     ) {
                         Row(

@@ -29,10 +29,8 @@ import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,6 +69,7 @@ import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngImageGalleryLightbox
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLazyColumnScrollbar
@@ -261,12 +260,12 @@ fun PostReaderScreen(
                         if (d.restrictedWarning && !acknowledgedRestriction) {
                             Box(modifier = Modifier.padding(16.dp)) {
                                 IgngTile {
-                                    Text("内容受限提示", style = MaterialTheme.typography.titleLarge, color = colors.warning)
+                                    Text("内容受限提示", style = IgngTheme.type.sectionTitle, color = colors.warning)
                                     Spacer(Modifier.height(8.dp))
                                     Text(
                                         text = d.restrictedReason?.ifBlank { null }
                                             ?: "本文被标记为受限制内容，仅限通过链接访问并确认后浏览。",
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        style = IgngTheme.type.body,
                                         color = colors.textSecondary,
                                     )
                                     Spacer(Modifier.height(16.dp))
@@ -320,7 +319,7 @@ fun PostReaderScreen(
                                             }
                                             Text(
                                                 text = d.title,
-                                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                                                style = IgngTheme.type.pageTitle.copy(fontWeight = FontWeight.Bold),
                                                 color = readerPrimary,
                                             )
                                             // Author row
@@ -342,12 +341,12 @@ fun PostReaderScreen(
                                                 ) {
                                                     Text(
                                                         text = d.author?.displayName ?: "匿名用户",
-                                                        style = MaterialTheme.typography.titleSmall,
+                                                        style = IgngTheme.type.bodyMedium,
                                                         color = readerPrimary,
                                                     )
                                                     Text(
                                                         text = "${BbsFormatters.relativeTime(d.createdAt)} · ${BbsFormatters.readingMinutesLabel(d.readingMinutes)} · ${BbsFormatters.compactCount(d.views)} 阅读",
-                                                        style = MaterialTheme.typography.bodySmall,
+                                                        style = IgngTheme.type.meta,
                                                         color = readerSecondary,
                                                     )
                                                 }
@@ -416,9 +415,9 @@ fun PostReaderScreen(
                                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             d.summary?.takeIf { it.isNotBlank() }?.let { summary ->
                                                 IgngTile(soft = true, padding = PaddingValues(14.dp)) {
-                                                    Text("摘要", style = MaterialTheme.typography.labelLarge, color = colors.accent)
+                                                    Text("摘要", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                                                     Spacer(Modifier.height(4.dp))
-                                                    Text(summary, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                                                    Text(summary, style = IgngTheme.type.body, color = colors.textSecondary)
                                                 }
                                             }
                                             d.column?.let { col ->
@@ -427,14 +426,14 @@ fun PostReaderScreen(
                                                     padding = PaddingValues(14.dp),
                                                     onClick = { onOpenColumn(col.id) },
                                                 ) {
-                                                    Text("收录于专栏 · ${col.name}", style = MaterialTheme.typography.titleSmall, color = colors.accent)
+                                                    Text("收录于专栏 · ${col.name}", style = IgngTheme.type.bodyMedium, color = colors.accent)
                                                     col.description?.takeIf { it.isNotBlank() }?.let {
                                                         Spacer(Modifier.height(2.dp))
-                                                        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+                                                        Text(it, style = IgngTheme.type.caption, color = colors.textSecondary, maxLines = 1)
                                                     }
                                                 }
                                             }
-                                            HorizontalDivider(color = colors.line)
+                                            IgngHairlineDivider()
                                         }
                                     }
 
@@ -459,7 +458,7 @@ fun PostReaderScreen(
                                             IgngTile(soft = true) {
                                                 Text(
                                                     text = "系列合集 · ${ser.name}（第 ${ser.currentIndex + 1} / ${ser.totalChapters} 篇）",
-                                                    style = MaterialTheme.typography.titleSmall,
+                                                    style = IgngTheme.type.bodyMedium,
                                                     color = colors.accent,
                                                 )
                                                 Spacer(Modifier.height(10.dp))

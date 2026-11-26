@@ -49,7 +49,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -96,6 +95,7 @@ import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSecondaryButton
+import net.igng.core.designsystem.IgngStroke
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
@@ -494,7 +494,7 @@ fun NativeWysiwygEditorScreen(
                             BasicTextField(
                                 value = title,
                                 onValueChange = { title = it },
-                                textStyle = MaterialTheme.typography.headlineSmall.copy(
+                                textStyle = IgngTheme.type.pageTitle.copy(
                                     color = colors.textPrimary,
                                     fontWeight = FontWeight.Bold,
                                 ),
@@ -502,7 +502,7 @@ fun NativeWysiwygEditorScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 decorationBox = { inner ->
                                     if (title.isEmpty()) {
-                                        Text("输入吸引读者的文章标题…", style = MaterialTheme.typography.headlineSmall, color = colors.textMuted)
+                                        Text("输入吸引读者的文章标题…", style = IgngTheme.type.pageTitle, color = colors.textMuted)
                                     }
                                     inner()
                                 },
@@ -584,7 +584,7 @@ fun NativeWysiwygEditorScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colors.tile)
-                        .border(1.dp, colors.line)
+                        .border(IgngStroke.hairline, colors.line)
                         .navigationBarsPadding()
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -651,7 +651,7 @@ fun NativeWysiwygEditorScreen(
                     item {
                         Text(
                             text = title.ifBlank { "（未填写标题）" },
-                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                            style = IgngTheme.type.pageTitle.copy(fontWeight = FontWeight.Bold),
                             color = colors.textPrimary,
                         )
                         Spacer(Modifier.height(8.dp))
@@ -737,7 +737,7 @@ fun NativeWysiwygEditorScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("所属分区", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
+                Text("所属分区", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     bootstrap?.categories.orEmpty().forEach { cat ->
                         IgngTagChip(
@@ -749,7 +749,7 @@ fun NativeWysiwygEditorScreen(
                 }
 
                 if (myColumns.isNotEmpty()) {
-                    Text("投稿到专栏（可选）", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
+                    Text("投稿到专栏（可选）", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         IgngTagChip(text = "不投专栏", selected = selectedColumnId == null, onClick = { selectedColumnId = null })
                         myColumns.forEach { col ->
@@ -762,7 +762,7 @@ fun NativeWysiwygEditorScreen(
                     }
                 }
 
-                Text("可见范围", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
+                Text("可见范围", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium), color = colors.textSecondary)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("public" to "公开", "followers" to "仅粉丝", "following" to "仅关注", "private" to "私密").forEach { (k, label) ->
                         IgngTagChip(text = label, selected = visibility == k, onClick = { visibility = k })
@@ -841,7 +841,7 @@ private fun WysiwygBlockEditorCard(
             .fillMaxWidth()
             .clip(shape)
             .background(colors.tile)
-            .border(if (isActive) 1.5.dp else 1.dp, borderColor, shape)
+            .border(if (isActive) IgngStroke.focus else IgngStroke.hairline, borderColor, shape)
             .clickable(onClick = onActivate)
             .padding(14.dp),
     ) {
@@ -853,7 +853,7 @@ private fun WysiwygBlockEditorCard(
         ) {
             Text(
                 text = block.type.label,
-                style = MaterialTheme.typography.labelSmall,
+                style = IgngTheme.type.meta,
                 color = if (isActive) colors.accent else colors.textMuted,
             )
             val blkIntensity = IgngTheme.motionIntensity
@@ -888,11 +888,11 @@ private fun WysiwygBlockEditorCard(
             WysiwygBlockType.PARAGRAPH,
             -> {
                 val style = when (block.type) {
-                    WysiwygBlockType.HEADING_1 -> MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, color = colors.textPrimary)
-                    WysiwygBlockType.HEADING_2 -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = colors.textPrimary)
-                    WysiwygBlockType.HEADING_3 -> MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                    WysiwygBlockType.HEADING_4 -> MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                    else -> MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary)
+                    WysiwygBlockType.HEADING_1 -> IgngTheme.type.pageTitle.copy(fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                    WysiwygBlockType.HEADING_2 -> IgngTheme.type.sectionTitle.copy(fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                    WysiwygBlockType.HEADING_3 -> IgngTheme.type.cardTitle.copy(fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    WysiwygBlockType.HEADING_4 -> IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    else -> IgngTheme.type.body.copy(color = colors.textPrimary)
                 }
                 BasicTextField(
                     value = block.text,
@@ -920,11 +920,11 @@ private fun WysiwygBlockEditorCard(
                     BasicTextField(
                         value = block.text,
                         onValueChange = { onActivate(); onChange(block.copy(text = it)) },
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.textSecondary),
+                        textStyle = IgngTheme.type.body.copy(color = colors.textSecondary),
                         cursorBrush = SolidColor(colors.accent),
                         modifier = Modifier.weight(1f),
                         decorationBox = { inner ->
-                            if (block.text.isEmpty()) Text("输入引用内容…", style = MaterialTheme.typography.bodyMedium, color = colors.textMuted)
+                            if (block.text.isEmpty()) Text("输入引用内容…", style = IgngTheme.type.body, color = colors.textMuted)
                             inner()
                         },
                     )
@@ -970,7 +970,7 @@ private fun WysiwygBlockEditorCard(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = if (block.type == WysiwygBlockType.ORDERED_LIST) "${idx + 1}." else "•",
-                                style = MaterialTheme.typography.titleSmall,
+                                style = IgngTheme.type.bodyMedium,
                                 color = colors.accent,
                             )
                             BasicTextField(
@@ -981,11 +981,11 @@ private fun WysiwygBlockEditorCard(
                                     next[idx] = v
                                     onChange(block.copy(listItems = next))
                                 },
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary),
+                                textStyle = IgngTheme.type.body.copy(color = colors.textPrimary),
                                 cursorBrush = SolidColor(colors.accent),
                                 modifier = Modifier.weight(1f),
                                 decorationBox = { inner ->
-                                    if (itemText.isEmpty()) Text("列表条目…", style = MaterialTheme.typography.bodyMedium, color = colors.textMuted)
+                                    if (itemText.isEmpty()) Text("列表条目…", style = IgngTheme.type.body, color = colors.textMuted)
                                     inner()
                                 },
                             )
@@ -1027,11 +1027,11 @@ private fun WysiwygBlockEditorCard(
                                     next[idx] = item.copy(text = v)
                                     onChange(block.copy(taskItems = next))
                                 },
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary),
+                                textStyle = IgngTheme.type.body.copy(color = colors.textPrimary),
                                 cursorBrush = SolidColor(colors.accent),
                                 modifier = Modifier.weight(1f),
                                 decorationBox = { inner ->
-                                    if (item.text.isEmpty()) Text("待办事项…", style = MaterialTheme.typography.bodyMedium, color = colors.textMuted)
+                                    if (item.text.isEmpty()) Text("待办事项…", style = IgngTheme.type.body, color = colors.textMuted)
                                     inner()
                                 },
                             )

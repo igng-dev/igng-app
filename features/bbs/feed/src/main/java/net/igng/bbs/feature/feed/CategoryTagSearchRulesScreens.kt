@@ -13,24 +13,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Clear
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,10 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import net.igng.bbs.common.BbsPostRowCard
+import net.igng.bbs.common.BbsPostRow
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.data.BbsCacheKeys
 import net.igng.bbs.core.data.BbsCachePolicies
@@ -63,18 +57,23 @@ import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
+import net.igng.core.designsystem.IgngButton
+import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngGroupedSection
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPullToRefreshBox
-import net.igng.core.designsystem.IgngRadius
+import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngBentoEnter
 import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.core.network.ApiResult
 
@@ -265,32 +264,39 @@ private fun FilteredPostListScreen(
                 posts.isEmpty() -> Box(Modifier.padding(16.dp)) {
                     IgngEmptyTile(title = "暂无相关文章", subtitle = "这里暂时还没有符合条件的内容。")
                 }
-                else -> LazyColumn(
-                    contentPadding = rememberIgngPageContentPadding(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    itemsIndexed(posts, key = { _, p -> p.id }) { idx, post ->
-                        BbsPostRowCard(
-                            post = post,
-                            onClick = { onOpenPost(post.id) },
-                            onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
-                            onTagClick = onOpenTag,
-                            modifier = Modifier.igngBentoEnter(idx),
-                        )
-                    }
-                    if (page < totalPages) {
-                        item(key = "load_more") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                IgngTagChip(
-                                    text = if (holder.loadingMore) "加载中…" else "加载更多",
-                                    tone = IgngTone.ACCENT,
-                                    onClick = { scope.launch { loadMore() } },
-                                )
+                else -> {
+                    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    LazyColumn(
+                        contentPadding = PaddingValues(top = 0.dp, bottom = navBottom + 24.dp),
+                    ) {
+                        item(key = "top_rule") { IgngHairlineDivider() }
+                        itemsIndexed(posts, key = { _, p -> p.id }) { idx, post ->
+                            BbsPostRow(
+                                post = post,
+                                onClick = { onOpenPost(post.id) },
+                                onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
+                                onTagClick = onOpenTag,
+                                showCategory = categorySlug == null,
+                                showDivider = idx < posts.lastIndex,
+                            )
+                        }
+                        item(key = "bottom_rule") { IgngHairlineDivider() }
+                        if (page < totalPages) {
+                            item(key = "load_more") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 14.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    IgngButton(
+                                        text = if (holder.loadingMore) "加载中…" else "加载更多",
+                                        style = IgngButtonStyle.Secondary,
+                                        compact = true,
+                                        loading = holder.loadingMore,
+                                        onClick = { scope.launch { loadMore() } },
+                                    )
+                                }
                             }
                         }
                     }
@@ -368,39 +374,27 @@ fun SearchScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(start = 6.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回", tint = colors.textPrimary)
             }
-            OutlinedTextField(
+            IgngSearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("关键词 / 文章编号 / igngbbs 链接", style = MaterialTheme.typography.bodyMedium) },
-                singleLine = true,
+                placeholder = "关键词 / 文章编号 / igngbbs 链接",
+                onSubmit = { executeSearch(query) },
+                onClear = { query = ""; result = null; error = null },
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(IgngRadius.pill),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = colors.tile,
-                    unfocusedContainerColor = colors.tile,
-                    focusedBorderColor = colors.accent,
-                    unfocusedBorderColor = colors.line,
-                ),
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.textMuted) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = ""; result = null; error = null }) {
-                            Icon(Icons.Rounded.Clear, contentDescription = "清除", tint = colors.textMuted)
-                        }
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { executeSearch(query) }),
             )
-            IgngTagChip(text = "搜索", tone = IgngTone.ACCENT, onClick = { executeSearch(query) })
-            Spacer(Modifier.width(4.dp))
+            IgngButton(
+                text = "搜索",
+                style = IgngButtonStyle.Primary,
+                compact = true,
+                onClick = { executeSearch(query) },
+            )
         }
 
         when {
@@ -414,10 +408,10 @@ fun SearchScreen(
             ) {
                 item {
                     IgngTile {
-                        Text("热门标签", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                        Text("热门标签", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
                         Spacer(Modifier.height(10.dp))
                         if (hotTags.isEmpty()) {
-                            Text("输入关键词开始搜索文章、专栏或作者。", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                            Text("输入关键词开始搜索文章、专栏或作者。", style = IgngTheme.type.caption, color = colors.textSecondary)
                         } else {
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -438,49 +432,98 @@ fun SearchScreen(
                 val res = result!!
                 LazyColumn(
                     contentPadding = rememberIgngPageContentPadding(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     if (res.users.isNotEmpty()) {
-                        item { IgngSectionHeader(title = "相关用户") }
-                        items(res.users, key = { "u_${it.id}" }) { user ->
-                            IgngTile(onClick = { onOpenUser(user.id) }, padding = PaddingValues(12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    IgngAvatar(user.avatarUrl, user.displayName, size = 36.dp)
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(user.displayName, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                        Text("@${user.username}", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                        item(key = "users_group") {
+                            IgngGroupedSection(title = "相关用户") {
+                                res.users.forEachIndexed { idx, user ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        IgngAvatar(
+                                            avatarUrl = user.avatarUrl,
+                                            displayName = user.displayName,
+                                            size = 34.dp,
+                                            onClick = { onOpenUser(user.id) },
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(user.displayName, style = IgngTheme.type.bodyMedium, color = colors.textPrimary)
+                                            Text("@${user.username}", style = IgngTheme.type.meta, color = colors.textMuted)
+                                        }
+                                        IgngButton(
+                                            text = "主页",
+                                            style = IgngButtonStyle.Secondary,
+                                            compact = true,
+                                            onClick = { onOpenUser(user.id) },
+                                        )
+                                    }
+                                    if (idx < res.users.lastIndex) {
+                                        IgngHairlineDivider(startIndent = 60.dp, endIndent = 16.dp)
                                     }
                                 }
                             }
                         }
                     }
                     if (res.columns.isNotEmpty()) {
-                        item { IgngSectionHeader(title = "相关专栏") }
-                        items(res.columns, key = { "c_${it.id}" }) { col ->
-                            IgngTile(onClick = { onOpenColumn(col.id) }, padding = PaddingValues(14.dp)) {
-                                Text(col.name, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary)
-                                col.description?.takeIf { it.isNotBlank() }?.let { desc ->
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(desc, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 2)
+                        item(key = "columns_group") {
+                            IgngGroupedSection(title = "相关专栏") {
+                                res.columns.forEachIndexed { idx, col ->
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(col.name, style = IgngTheme.type.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                                            Spacer(Modifier.width(8.dp))
+                                            IgngButton(
+                                                text = "进入",
+                                                style = IgngButtonStyle.Ghost,
+                                                compact = true,
+                                                onClick = { onOpenColumn(col.id) },
+                                            )
+                                        }
+                                        col.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                                            Spacer(Modifier.height(3.dp))
+                                            Text(desc, style = IgngTheme.type.caption, color = colors.textSecondary, maxLines = 2)
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("${col.postCount} 篇文章 · ${col.memberCount} 位成员", style = IgngTheme.type.meta, color = colors.textMuted)
+                                    }
+                                    if (idx < res.columns.lastIndex) {
+                                        IgngHairlineDivider(startIndent = 16.dp, endIndent = 16.dp)
+                                    }
                                 }
-                                Spacer(Modifier.height(6.dp))
-                                Text("${col.postCount} 篇文章 · ${col.memberCount} 位成员", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
                             }
                         }
                     }
-                    item { IgngSectionHeader(title = "相关文章（${res.pagination.total}）") }
                     if (res.data.isEmpty()) {
+                        item { IgngSectionHeader(title = "相关文章（${res.pagination.total}）") }
                         item {
                             IgngEmptyTile(title = "没有匹配的文章", subtitle = "试试更换关键词，或直接输入文章编号跳转。")
                         }
                     } else {
-                        items(res.data, key = { "p_${it.id}" }) { post ->
-                            BbsPostRowCard(
-                                post = post,
-                                onClick = { onOpenPost(post.id) },
-                                onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
-                                onTagClick = onOpenTag,
-                            )
+                        item(key = "posts_group") {
+                            IgngGroupedSection(title = "相关文章（${res.pagination.total}）") {
+                                res.data.forEachIndexed { idx, post ->
+                                    BbsPostRow(
+                                        post = post,
+                                        onClick = { onOpenPost(post.id) },
+                                        onAuthorClick = post.author?.id?.let { uid -> { onOpenUser(uid) } },
+                                        onTagClick = onOpenTag,
+                                        showDivider = idx < res.data.lastIndex,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -545,11 +588,11 @@ fun RulesScreen(
                         if (rules.principles.isNotEmpty()) {
                             item {
                                 IgngTile {
-                                    Text("基本原则", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                    Text("基本原则", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
                                     Spacer(Modifier.height(8.dp))
                                     rules.principles.forEach { p ->
-                                        Text(p.title, style = MaterialTheme.typography.titleSmall, color = colors.accent)
-                                        Text(p.text, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                        Text(p.title, style = IgngTheme.type.bodyMedium, color = colors.accent)
+                                        Text(p.text, style = IgngTheme.type.caption, color = colors.textSecondary)
                                         Spacer(Modifier.height(8.dp))
                                     }
                                 }
@@ -566,17 +609,17 @@ fun RulesScreen(
                                 ) {
                                     Text(
                                         text = "${clause.code} · ${clause.title}",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = colors.textPrimary,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    IgngTagChip(
+                                    IgngBadge(
                                         text = "S${clause.severity}",
-                                        tone = if (clause.severity >= 3) IgngTone.DANGER else if (clause.severity == 2) IgngTone.WARNING else IgngTone.NEUTRAL,
+                                        tone = if (clause.severity >= 3) IgngBadgeTone.Danger else if (clause.severity == 2) IgngBadgeTone.Warning else IgngBadgeTone.Neutral,
                                     )
                                 }
                                 Spacer(Modifier.height(6.dp))
-                                Text(clause.description, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                Text(clause.description, style = IgngTheme.type.caption, color = colors.textSecondary)
                                 val ruleIntensity = IgngTheme.motionIntensity
                                 AnimatedVisibility(
                                     visible = isOpen,
@@ -587,27 +630,27 @@ fun RulesScreen(
                                 ) {
                                     Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         if (clause.elements.isNotEmpty()) {
-                                            Text("构成要件", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
+                                            Text("构成要件", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
                                             clause.elements.forEach { e ->
-                                                Text("• $e", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                                Text("• $e", style = IgngTheme.type.caption, color = colors.textSecondary)
                                             }
                                         }
                                         if (clause.excludes.isNotEmpty()) {
-                                            Text("例外情形", style = MaterialTheme.typography.labelLarge, color = colors.success)
+                                            Text("例外情形", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.success)
                                             clause.excludes.forEach { e ->
-                                                Text("• $e", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                                Text("• $e", style = IgngTheme.type.caption, color = colors.textSecondary)
                                             }
                                         }
                                         if (clause.examples.violate.isNotEmpty()) {
-                                            Text("违规示例", style = MaterialTheme.typography.labelLarge, color = colors.danger)
+                                            Text("违规示例", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.danger)
                                             clause.examples.violate.forEach { ex ->
-                                                Text("× $ex", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                                Text("× $ex", style = IgngTheme.type.caption, color = colors.textSecondary)
                                             }
                                         }
                                         if (clause.examples.allow.isNotEmpty()) {
-                                            Text("允许示例", style = MaterialTheme.typography.labelLarge, color = colors.success)
+                                            Text("允许示例", style = IgngTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.success)
                                             clause.examples.allow.forEach { ex ->
-                                                Text("✓ $ex", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                                Text("✓ $ex", style = IgngTheme.type.caption, color = colors.textSecondary)
                                             }
                                         }
                                     }
@@ -617,11 +660,11 @@ fun RulesScreen(
                         if (rules.appeal.isNotEmpty()) {
                             item {
                                 IgngTile(soft = true) {
-                                    Text("申诉与复核机制", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                                    Text("申诉与复核机制", style = IgngTheme.type.sectionTitle, color = colors.textPrimary)
                                     Spacer(Modifier.height(8.dp))
                                     rules.appeal.forEach { item ->
-                                        Text(item.title, style = MaterialTheme.typography.titleSmall, color = colors.accent)
-                                        Text(item.text, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                                        Text(item.title, style = IgngTheme.type.bodyMedium, color = colors.accent)
+                                        Text(item.text, style = IgngTheme.type.caption, color = colors.textSecondary)
                                         Spacer(Modifier.height(6.dp))
                                     }
                                 }

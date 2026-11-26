@@ -24,10 +24,8 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.ThumbUpOffAlt
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -61,11 +59,15 @@ import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
 import net.igng.core.designsystem.IgngAvatar
+import net.igng.core.designsystem.IgngBadge
+import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
+import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngRadius
+import net.igng.core.designsystem.IgngSearchField
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
@@ -168,7 +170,7 @@ fun PostCommentsSection(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        HorizontalDivider(color = colors.line)
+        IgngHairlineDivider()
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -214,7 +216,7 @@ fun PostCommentsSection(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("登录后参与讨论与 @提及互动", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                    Text("登录后参与讨论与 @提及互动", style = IgngTheme.type.caption, color = colors.textSecondary)
                     IgngTagChip(text = "去登录", tone = IgngTone.ACCENT, onClick = onRequireLogin)
                 }
             } else {
@@ -224,8 +226,8 @@ fun PostCommentsSection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("回复 ${target.author?.displayName ?: "评论"}", style = MaterialTheme.typography.labelMedium, color = colors.accent)
-                        Text("取消", style = MaterialTheme.typography.labelMedium, color = colors.textMuted, modifier = Modifier.clickable { replyTarget = null })
+                        Text("回复 ${target.author?.displayName ?: "评论"}", style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium), color = colors.accent)
+                        Text("取消", style = IgngTheme.type.meta, color = colors.textMuted, modifier = Modifier.clickable { replyTarget = null })
                     }
                     Spacer(Modifier.height(6.dp))
                 }
@@ -235,8 +237,8 @@ fun PostCommentsSection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("修改未通过的评论并重新送审", style = MaterialTheme.typography.labelMedium, color = colors.warning)
-                        Text("取消", style = MaterialTheme.typography.labelMedium, color = colors.textMuted, modifier = Modifier.clickable { reEditTarget = null; draftText = "" })
+                        Text("修改未通过的评论并重新送审", style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium), color = colors.warning)
+                        Text("取消", style = IgngTheme.type.meta, color = colors.textMuted, modifier = Modifier.clickable { reEditTarget = null; draftText = "" })
                     }
                     Spacer(Modifier.height(6.dp))
                 }
@@ -244,7 +246,7 @@ fun PostCommentsSection(
                 OutlinedTextField(
                     value = draftText,
                     onValueChange = { draftText = it },
-                    placeholder = { Text("写下你的看法，支持 @提及用户…", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text("写下你的看法，支持 @提及用户…", style = IgngTheme.type.caption) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 5,
@@ -312,11 +314,10 @@ fun PostCommentsSection(
                             .padding(top = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        OutlinedTextField(
+                        IgngSearchField(
                             value = mentionQuery,
                             onValueChange = { mentionQuery = it },
-                            placeholder = { Text("输入用户名或昵称搜索 @提及对象", style = MaterialTheme.typography.bodySmall) },
-                            singleLine = true,
+                            placeholder = "输入用户名或昵称搜索 @提及对象",
                             modifier = Modifier.fillMaxWidth(),
                         )
                         mentionCandidates.forEach { u ->
@@ -336,7 +337,7 @@ fun PostCommentsSection(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 IgngAvatar(u.avatarUrl, u.displayName, size = 24.dp)
-                                Text("${u.displayName} (@${u.username})", style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
+                                Text("${u.displayName} (@${u.username})", style = IgngTheme.type.caption, color = colors.textPrimary)
                             }
                         }
                     }
@@ -427,19 +428,19 @@ private fun CommentItemCard(
             )
             Text(
                 text = comment.author?.displayName ?: "匿名用户",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium),
                 color = colors.textPrimary,
             )
             Text(
                 text = BbsFormatters.relativeTime(comment.createdAt),
-                style = MaterialTheme.typography.labelSmall,
+                style = IgngTheme.type.meta,
                 color = colors.textMuted,
             )
             Spacer(Modifier.weight(1f))
             if (comment.status == 2) {
-                IgngTagChip(text = "审核中", tone = IgngTone.WARNING)
+                IgngBadge(text = "审核中", tone = IgngBadgeTone.Warning)
             } else if (comment.status == 1) {
-                IgngTagChip(text = "未通过", tone = IgngTone.DANGER)
+                IgngBadge(text = "未通过", tone = IgngBadgeTone.Danger)
             }
         }
 
@@ -456,18 +457,18 @@ private fun CommentItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("该评论已被社区规则折叠", style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                Text("展开查看", style = MaterialTheme.typography.labelMedium, color = colors.accent)
+                Text("该评论已被社区规则折叠", style = IgngTheme.type.caption, color = colors.textMuted)
+                Text("展开查看", style = IgngTheme.type.meta.copy(fontWeight = FontWeight.Medium), color = colors.accent)
             }
         } else {
             Text(
                 text = comment.content,
-                style = MaterialTheme.typography.bodyMedium,
+                style = IgngTheme.type.body,
                 color = colors.textPrimary,
             )
             comment.moderation?.summary?.takeIf { it.isNotBlank() }?.let { modSummary ->
                 Spacer(Modifier.height(4.dp))
-                Text("审核提示：$modSummary", style = MaterialTheme.typography.bodySmall, color = colors.warning)
+                Text("审核提示：$modSummary", style = IgngTheme.type.caption, color = colors.warning)
             }
         }
 
@@ -489,7 +490,7 @@ private fun CommentItemCard(
                 )
                 Text(
                     text = comment.likeCount.toString(),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                    style = IgngTheme.type.meta,
                     color = if (comment.isLiked) colors.accent else colors.textMuted,
                 )
             }
@@ -500,7 +501,7 @@ private fun CommentItemCard(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.Reply, contentDescription = "回复", tint = colors.textMuted, modifier = Modifier.size(16.dp))
-                    Text("回复", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
+                    Text("回复", style = IgngTheme.type.meta, color = colors.textMuted)
                 }
             }
             if (comment.canReEdit) {
@@ -510,7 +511,7 @@ private fun CommentItemCard(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Icon(Icons.Rounded.Edit, contentDescription = "修改重提", tint = colors.warning, modifier = Modifier.size(16.dp))
-                    Text("修改重提", style = MaterialTheme.typography.labelSmall, color = colors.warning)
+                    Text("修改重提", style = IgngTheme.type.meta, color = colors.warning)
                 }
             }
             Spacer(Modifier.weight(1f))

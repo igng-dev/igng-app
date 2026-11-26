@@ -82,8 +82,9 @@ fun serverFamilyVisual(key: ServerThemeKey, isDark: Boolean): ServerFamilyVisual
 }
 
 /**
- * Procedural Canvas texture matching `packages/minecraft/lib/server-backgrounds.js`
- * for all 5 IGNG server families. Zero bitmap bloat, crisp at every DPI.
+ * Quiet Craft server family Hero atmospheric wash (Decision 3):
+ * keeps a serene upper-right single-color radial wash per server family without dense geometric
+ * grids, stripes, or dot matrices that cause visual fatigue over long sessions.
  */
 @Composable
 fun IgngServerBackdropCanvas(
@@ -98,88 +99,20 @@ fun IgngServerBackdropCanvas(
         animationSpec = IgngMotion.ambientTween(intensity),
         label = "serverAccent",
     )
-    val secondary by animateColorAsState(
-        targetValue = visual.secondaryGlow,
-        animationSpec = IgngMotion.ambientTween(intensity),
-        label = "serverSecondary",
-    )
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        // Primary atmospheric glow in upper-right
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    accent.copy(alpha = if (isDark) 0.24f else 0.17f),
-                    secondary.copy(alpha = if (isDark) 0.10f else 0.08f),
+                    accent.copy(alpha = if (isDark) 0.13f else 0.07f),
                     Color.Transparent,
                 ),
-                center = Offset(size.width * 0.82f, size.height * 0.18f),
-                radius = size.maxDimension * 0.85f,
+                center = Offset(size.width * 0.88f, size.height * 0.14f),
+                radius = size.maxDimension * 0.72f,
             ),
-            center = Offset(size.width * 0.82f, size.height * 0.18f),
-            radius = size.maxDimension * 0.85f,
+            center = Offset(size.width * 0.88f, size.height * 0.14f),
+            radius = size.maxDimension * 0.72f,
         )
-
-        val patternAlpha = if (isDark) 0.09f else 0.07f
-        val strokeColor = accent.copy(alpha = patternAlpha)
-
-        when (themeKey) {
-            ServerThemeKey.CLEAR -> {
-                // Subtle diamond grid + warm sunlight halo
-                val step = 28.dp.toPx()
-                var x = -size.height
-                while (x < size.width + size.height) {
-                    drawLine(strokeColor, Offset(x, 0f), Offset(x + size.height, size.height), strokeWidth = 1f)
-                    drawLine(strokeColor, Offset(x, size.height), Offset(x + size.height, 0f), strokeWidth = 1f)
-                    x += step
-                }
-            }
-            ServerThemeKey.LITE_SERVER -> {
-                // Warm angled stripes
-                val step = 18.dp.toPx()
-                var x = -size.height
-                while (x < size.width + size.height) {
-                    drawLine(strokeColor, Offset(x, size.height), Offset(x + size.height * 0.7f, 0f), strokeWidth = 2f)
-                    x += step
-                }
-            }
-            ServerThemeKey.MODS -> {
-                // Engineering coordinate grid
-                val step = 24.dp.toPx()
-                var x = 0f
-                while (x < size.width) {
-                    drawLine(strokeColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-                    x += step
-                }
-                var y = 0f
-                while (y < size.height) {
-                    drawLine(strokeColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-                    y += step
-                }
-            }
-            ServerThemeKey.BAN -> {
-                // Bold diagonal hazard bands
-                val step = 22.dp.toPx()
-                var x = -size.height
-                while (x < size.width + size.height) {
-                    drawLine(strokeColor, Offset(x, 0f), Offset(x + size.height, size.height), strokeWidth = 6f)
-                    x += step
-                }
-            }
-            ServerThemeKey.MCSERVERS -> {
-                // Star atlas dot matrix
-                val step = 22.dp.toPx()
-                var y = step / 2f
-                while (y < size.height) {
-                    var x = step / 2f
-                    while (x < size.width) {
-                        drawCircle(accent.copy(alpha = patternAlpha * 1.4f), radius = 1.6f, center = Offset(x, y))
-                        x += step
-                    }
-                    y += step
-                }
-            }
-        }
     }
 }
 

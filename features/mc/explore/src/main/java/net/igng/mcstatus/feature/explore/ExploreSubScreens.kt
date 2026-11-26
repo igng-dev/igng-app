@@ -83,7 +83,6 @@ import net.igng.core.designsystem.IgngStateBlock
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.model.IgngFormatters
@@ -180,9 +179,9 @@ private fun ServerFamilyDetailContent(
                 item {
                     IgngSectionHeader(title = "周目档案", subtitle = "包含存活周目与历史归档")
                 }
-                itemsIndexed(family.allKnownSeasons, key = { _, s -> s.slug }) { idx, season ->
+                itemsIndexed(family.allKnownSeasons, key = { _, s -> s.slug }) { _, season ->
                     IgngTile(
-                        modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                        modifier = Modifier.fillMaxWidth(),
                         borderColor = if (season.primary) visual.borderGlow else colors.line,
                     ) {
                         Row(
@@ -401,7 +400,7 @@ fun GlobalSearchScreen(
                                     onOpenMcCharacter(item.mcUsername)
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -847,10 +846,10 @@ fun CommunityHallScreen(
                             if (filtered.isEmpty()) {
                                 item { IgngStateBlock(title = "还没有匹配的公开领地") }
                             } else {
-                                itemsIndexed(filtered, key = { _, l -> l.id }) { idx, land ->
+                                itemsIndexed(filtered, key = { _, l -> l.id }) { _, land ->
                                     IgngInteractiveTile(
                                         onClick = { selectedLand = land },
-                                        modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                        modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                             Text(land.name.ifBlank { "未命名领地" }, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
@@ -877,14 +876,14 @@ fun CommunityHallScreen(
                             if (filtered.isEmpty()) {
                                 item { IgngStateBlock(title = "当前没有在线假人") }
                             } else {
-                                itemsIndexed(filtered, key = { i, f -> "${f.serverName}:${f.name}:$i" }) { idx, fp ->
-                                    IgngTile(modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx)) {
+                                itemsIndexed(filtered, key = { i, f -> "${f.serverName}:${f.name}:$i" }) { _, fp ->
+                                    IgngTile(modifier = Modifier.fillMaxWidth()) {
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                             Column {
                                                 Text(fp.name, style = IgngTheme.type.cardTitle, color = colors.textPrimary)
                                                 Text("召唤者：${fp.ownerName} · 在线 ${IgngFormatters.formatPlaytimeSeconds(fp.onlineSeconds)}", style = IgngTheme.type.caption, color = colors.textSecondary)
                                             }
-                                            IgngBadge(fp.serverName, tone = IgngBadgeTone.Success, leadingDot = true, pulse = true)
+                                            IgngBadge(fp.serverName, tone = IgngBadgeTone.Success, leadingDot = true, pulse = false)
                                         }
                                     }
                                 }
@@ -906,7 +905,7 @@ fun CommunityHallScreen(
                                                 loadingTicketDetail = false
                                             }
                                         },
-                                        modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                        modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                             Text("#${t.id} ${t.title}", style = IgngTheme.type.cardTitle, color = colors.textPrimary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1105,10 +1104,10 @@ fun PerfectRosterScreen(
                             }
                         }
                         item { IgngSectionHeader(title = "公开名录", subtitle = "仅展示公开绑定的成员") }
-                        itemsIndexed(data.members, key = { i, m -> "${m.username}:$i" }) { idx, member ->
+                        itemsIndexed(data.members, key = { i, m -> "${m.username}:$i" }) { _, member ->
                             IgngInteractiveTile(
                                 onClick = { member.igngId?.let(onOpenPassport) },
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Column {

@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Create
+import androidx.compose.material.icons.outlined.FolderShared
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.rounded.Create
 import androidx.compose.material.icons.rounded.FolderShared
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -271,10 +274,10 @@ fun BbsAppRoot(
 
         val tabs = remember {
             listOf(
-                IgngNavTabItem("feed", "首页", Icons.Rounded.Home),
-                IgngNavTabItem("columns", "专栏", Icons.Rounded.FolderShared),
-                IgngNavTabItem("creator", "创作", Icons.Rounded.Create),
-                IgngNavTabItem("profile", "我的", Icons.Rounded.Person),
+                IgngNavTabItem("feed", "首页", Icons.Rounded.Home, Icons.Outlined.Home),
+                IgngNavTabItem("columns", "专栏", Icons.Rounded.FolderShared, Icons.Outlined.FolderShared),
+                IgngNavTabItem("creator", "创作", Icons.Rounded.Create, Icons.Outlined.Create),
+                IgngNavTabItem("profile", "我的", Icons.Rounded.Person, Icons.Outlined.Person),
             )
         }
 
@@ -590,14 +593,14 @@ fun BbsAppRoot(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(IgngRadius.pill))
                                 .background(colors.tile)
-                                .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(IgngRadius.pill))
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                .border(net.igng.core.designsystem.IgngStroke.hairline, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(IgngRadius.pill))
+                                .padding(horizontal = 16.dp, vertical = 9.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
                                 text = "每日签到已结算 · 当前 Lv.${reward.level ?: 1}（${reward.exp ?: 0} EXP）",
-                                style = MaterialTheme.typography.labelLarge,
+                                style = IgngTheme.type.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                                 color = colors.accent,
                             )
                         }

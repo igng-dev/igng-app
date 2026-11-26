@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -61,7 +61,6 @@ import net.igng.core.designsystem.IgngStatusHealthStrip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.designsystem.igngStaggeredReveal
 import net.igng.core.designsystem.rememberIgngPageContentPadding
 import net.igng.mcstatus.common.serverFamilyVisual
 import net.igng.mcstatus.core.model.IgngFormatters
@@ -165,14 +164,14 @@ fun StatusWallScreen(
                             )
                         }
 
-                        itemsIndexed(servers, key = { _, s -> s.id }) { idx, server ->
+                        items(servers, key = { it.id }) { server ->
                             val series = historyResponse?.seriesFor(server.id)
                             ServerStatusCard(
                                 server = server,
                                 series = series,
                                 preset = uiHolder.preset,
                                 onClick = { inspectedServer = server },
-                                modifier = Modifier.fillMaxWidth().igngStaggeredReveal(idx),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
@@ -216,7 +215,6 @@ private fun ServerStatusCard(
 
     IgngInteractiveTile(
         onClick = onClick,
-        accentBorder = visual.accent,
         modifier = modifier,
     ) {
         Row(
@@ -227,7 +225,7 @@ private fun ServerStatusCard(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                 Box(
                     modifier = Modifier
-                        .width(4.dp)
+                        .width(3.dp)
                         .height(22.dp)
                         .clip(IgngTheme.radii.pill)
                         .background(visual.accent),

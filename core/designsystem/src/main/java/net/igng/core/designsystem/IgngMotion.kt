@@ -307,7 +307,7 @@ fun rememberIgngHaptics(): (IgngHapticKind) -> Unit {
 
 fun Modifier.igngPressScale(
     interactionSource: InteractionSource,
-    pressedScale: Float = 0.982f,
+    pressedScale: Float = 0.99f,
 ): Modifier = composed {
     val intensity = IgngTheme.motionIntensity
     val pressed by interactionSource.collectIsPressedAsState()
@@ -329,7 +329,7 @@ fun Modifier.igngPressScale(
 
 fun Modifier.igngPressScale(
     enabled: Boolean = true,
-    scaleDown: Float = 0.982f,
+    scaleDown: Float = 0.99f,
     haptic: Boolean = false,
     hapticKind: IgngHapticKind = IgngHapticKind.Tap,
     role: Role? = null,
@@ -366,37 +366,15 @@ fun Modifier.igngPressScale(
 }
 
 /**
- * Unified first-screen staggered list entrance modifier.
- * Only animates indices 0..[IgngMotion.MaxStaggerIndex] once per [key], preventing scrolled-in
- * items from waiting invisible or replaying on LazyColumn recycling.
+ * Quiet Craft motion contract (synced with IGNG Web's data-surface contract):
+ * data lists and daily navigation surfaces render immediately without performative staggered
+ * slide/fade choreography. Retained as a source-compatible no-op for gradual cleanup.
  */
+@Suppress("UNUSED_PARAMETER")
 fun Modifier.igngStaggeredEnter(
     index: Int,
     key: Any? = Unit,
-): Modifier = composed {
-    val intensity = IgngTheme.motionIntensity
-    if (intensity == MotionIntensity.REDUCED || index > IgngMotion.MaxStaggerIndex) {
-        return@composed this
-    }
-    var played by rememberSaveable(key, index) { mutableStateOf(false) }
-    if (played) return@composed this
-
-    val startOffset = if (intensity == MotionIntensity.FULL) 16f else 8f
-    val alpha = remember(key, index) { Animatable(0f) }
-    val offsetY = remember(key, index) { Animatable(startOffset) }
-    LaunchedEffect(key, index, intensity) {
-        if (index > 0) delay(index * IgngMotion.StaggerStepMs.toLong())
-        val durAlpha = if (intensity == MotionIntensity.FULL) 220 else 160
-        val durMove = if (intensity == MotionIntensity.FULL) 260 else 180
-        launch { alpha.animateTo(1f, tween(durAlpha, easing = IgngMotion.Ease)) }
-        launch { offsetY.animateTo(0f, tween(durMove, easing = IgngMotion.Ease)) }.join()
-        played = true
-    }
-    graphicsLayer {
-        this.alpha = alpha.value
-        translationY = offsetY.value
-    }
-}
+): Modifier = this
 
 fun Modifier.igngStaggeredReveal(
     index: Int,
