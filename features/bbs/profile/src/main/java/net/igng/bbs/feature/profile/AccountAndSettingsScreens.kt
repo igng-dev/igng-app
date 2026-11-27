@@ -51,6 +51,7 @@ import net.igng.bbs.core.model.BbsFormatters
 import net.igng.bbs.core.model.BbsUserSettingsDto
 import net.igng.bbs.core.model.BlockRuleDto
 import net.igng.core.data.IgngCacheScope
+import net.igng.core.data.rememberIgngDevicesResource
 import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
@@ -65,7 +66,8 @@ import net.igng.core.designsystem.IgngBadgeTone
 import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngCacheCard
 import net.igng.core.designsystem.IgngConfirmDialog
-import net.igng.core.designsystem.IgngDevicesSecurityCard
+import net.igng.core.designsystem.IgngDevicesSecurityEntryCard
+import net.igng.core.designsystem.IgngDevicesSecurityScreen
 import net.igng.core.designsystem.IgngErrorTile
 import net.igng.core.designsystem.IgngInfoBanner
 import net.igng.core.designsystem.IgngLoadingCenter
@@ -80,7 +82,6 @@ import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.model.CoreDeviceSessionDto
 import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.network.ApiResult
 
@@ -310,6 +311,7 @@ fun PrivacyPreferencesScreen(
 fun AppSettingsScreen(
     container: BbsAppContainer,
     onBack: () -> Unit,
+    onOpenLoginDevices: () -> Unit,
     onSignIn: () -> Unit,
     onAddAccount: () -> Unit,
     onSyncFamilyAccount: (FamilySharedAccountHint) -> Unit,
@@ -335,17 +337,16 @@ fun AppSettingsScreen(
     var savingUsername by remember { mutableStateOf(false) }
 
     val authed = activeAccount != null && !sessionAuthStatus.requiresReauth
-    val (devicesState, devicesHandle) = rememberSwrResource<List<CoreDeviceSessionDto>>(
+    val devicesController = rememberIgngDevicesResource(
         cache = container.swrCache,
+        accountRepository = container.accountRepository,
         cacheKey = BbsCacheKeys.DEVICES,
-        scope = IgngCacheScope.USER_ONLY,
         policy = BbsCachePolicies.Standard,
         tags = setOf(BbsCacheTags.DEVICES),
         enabled = authed,
         slotKey = "bbs_devices_slot",
-    ) {
-        container.accountRepository.listDevices().toKotlinResult().map { it.data }
-    }
+        onShowMessage = onShowMessage,
+    )
 
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
@@ -460,33 +461,12 @@ fun AppSettingsScreen(
                     }
 
                     item(key = "devices") {
-                        IgngDevicesSecurityCard(
-                            devices = devicesState.data.orEmpty(),
-                            loading = devicesState.isInitialLoading,
-                            error = if (devicesState.data == null) devicesState.error else null,
-                            onRefresh = { devicesHandle.refresh() },
-                            onRenameDevice = { deviceId, newName ->
-                                scope.launch {
-                                    when (val r = container.accountRepository.renameDevice(deviceId, newName)) {
-                                        is ApiResult.Success -> {
-                                            onShowMessage("设备名称已更新")
-                                            devicesHandle.silentRefresh()
-                                        }
-                                        is ApiResult.Failure -> onShowMessage(r.error.message)
-                                    }
-                                }
-                            },
-                            onRevokeDevice = { deviceId ->
-                                scope.launch {
-                                    when (val r = container.accountRepository.revokeDevice(deviceId)) {
-                                        is ApiResult.Success -> {
-                                            onShowMessage("已吊销该设备会话")
-                                            devicesHandle.silentRefresh()
-                                        }
-                                        is ApiResult.Failure -> onShowMessage(r.error.message)
-                                    }
-                                }
-                            },
+                        IgngDevicesSecurityEntryCard(
+                            devices = devicesController.devices,
+                            totalCount = devicesController.totalCount,
+                            loading = devicesController.isInitialLoading,
+                            error = devicesController.error,
+                            onClick = onOpenLoginDevices,
                         )
                     }
                 }
@@ -589,4 +569,44 @@ fun AppSettingsScreen(
             )
         }
     }
+}
+
+@Composable
+fun BbsLoginDevicesScreen(
+    container: BbsAppContainer,
+    onBack: () -> Unit,
+    onShowMessage: (String) -> Unit = {},
+) {
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val authed = activeAccount != null && !sessionAuthStatus.requiresReauth
+
+    val devicesController = rememberIgngDevicesResource(
+        cache = container.swrCache,
+        accountRepository = container.accountRepository,
+        cacheKey = BbsCacheKeys.DEVICES,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.DEVICES),
+        enabled = authed,
+        slotKey = "bbs_login_devices",
+        onShowMessage = onShowMessage,
+    )
+
+    IgngDevicesSecurityScreen(
+        devices = devicesController.devices,
+        totalCount = devicesController.totalCount,
+        loading = devicesController.isInitialLoading,
+        refreshing = devicesController.isUserRefreshing,
+        revalidating = devicesController.isRevalidating,
+        error = devicesController.error,
+        authenticated = authed,
+        hasMore = devicesController.hasMore,
+        loadingMore = devicesController.loadingMore,
+        busyDeviceIds = devicesController.busyDeviceIds,
+        onBack = onBack,
+        onRefresh = { devicesController.refresh() },
+        onLoadMore = { devicesController.loadMore() },
+        onRenameDevice = { deviceId, newName -> devicesController.renameDevice(deviceId, newName) },
+        onRevokeDevice = { deviceId -> devicesController.revokeDevice(deviceId) },
+    )
 }

@@ -133,4 +133,19 @@ class McDesignContractTest {
         val markdown = File(root, "core/markdown/src/main/java/net/igng/core/markdown/IgngMarkdownCanvas.kt").readText()
         assertFalse("Shared markdown renderer must avoid MaterialTheme.typography splits", markdown.contains("MaterialTheme.typography"))
     }
+
+    @Test
+    fun settingsDelegatesLoginDevicesToCompactEntryAndSecondaryScreen() {
+        val root = repoRoot()
+        val settings = File(root, "apps/mc/src/main/java/net/igng/mcstatus/SettingsScreen.kt").readText()
+        assertTrue("MC SettingsScreen must render compact IgngDevicesSecurityEntryCard", settings.contains("IgngDevicesSecurityEntryCard("))
+        assertTrue("MC SettingsScreen.kt must provide secondary IgngDevicesSecurityScreen host", settings.contains("IgngDevicesSecurityScreen("))
+        assertFalse("MC SettingsScreen must not inline-expand legacy IgngDevicesSecurityCard", settings.contains("IgngDevicesSecurityCard("))
+
+        val routes = File(root, "apps/mc/src/main/java/net/igng/mcstatus/AppRoutes.kt").readText()
+        assertTrue("MC AppRoute must declare LoginDevices secondary route", routes.contains("data object LoginDevices : AppRoute"))
+
+        val mcApp = File(root, "apps/mc/src/main/java/net/igng/mcstatus/IgngMcApp.kt").readText()
+        assertTrue("MC NavHost must register AppRoute.LoginDevices", mcApp.contains("igngComposable<AppRoute.LoginDevices>"))
+    }
 }

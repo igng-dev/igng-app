@@ -634,6 +634,7 @@ fun IgngMcApp(
                             accounts = accounts,
                             familyAccounts = familyAccounts,
                             onBack = { navController.popBackStack() },
+                            onOpenLoginDevices = { navController.navigate(AppRoute.LoginDevices) },
                             onStartOAuthLogin = { force -> startOAuth(forceLogin = force) },
                             onSyncFamilyAccount = ::syncWithFamilyAccount,
                             onSwitchAccount = { uid -> container.switchAccount(uid) },
@@ -644,6 +645,16 @@ fun IgngMcApp(
                                     snackbarHostState.showSnackbar("已退出当前账户")
                                 }
                             },
+                            onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
+                        )
+                    }
+
+                    igngComposable<AppRoute.LoginDevices> {
+                        LoginDevicesScreen(
+                            container = container,
+                            activeAccount = activeAccount,
+                            sessionAuthStatus = sessionAuthStatus,
+                            onBack = { navController.popBackStack() },
                             onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
                         )
                     }

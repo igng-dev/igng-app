@@ -29,9 +29,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import net.igng.core.data.IgngCacheScope
-import net.igng.core.data.rememberSwrResource
-import net.igng.core.data.toKotlinResult
+import net.igng.core.data.rememberIgngDevicesResource
 import net.igng.core.designsystem.IgngAboutAppCard
 import net.igng.core.designsystem.IgngAccountVaultCard
 import net.igng.core.designsystem.IgngAmbientCanvas
@@ -40,11 +38,11 @@ import net.igng.core.designsystem.IgngAppUpdateSheet
 import net.igng.core.designsystem.IgngAppearanceMotionSettingsCard
 import net.igng.core.designsystem.IgngBrowserLauncher
 import net.igng.core.designsystem.IgngCacheCard
-import net.igng.core.designsystem.IgngDevicesSecurityCard
+import net.igng.core.designsystem.IgngDevicesSecurityEntryCard
+import net.igng.core.designsystem.IgngDevicesSecurityScreen
 import net.igng.core.designsystem.IgngProfileIdentityCard
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTopBar
-import net.igng.core.model.CoreDeviceSessionDto
 import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
@@ -64,6 +62,7 @@ fun SettingsScreen(
     accounts: List<SavedAccount>,
     familyAccounts: List<FamilySharedAccountHint> = emptyList(),
     onBack: () -> Unit,
+    onOpenLoginDevices: () -> Unit,
     onStartOAuthLogin: (forceLogin: Boolean) -> Unit,
     onSyncFamilyAccount: (FamilySharedAccountHint) -> Unit,
     onSwitchAccount: (Long) -> Unit,
@@ -85,17 +84,16 @@ fun SettingsScreen(
     var savingUsername by remember { mutableStateOf(false) }
 
     val canLoadDevices = activeAccount != null && !sessionAuthStatus.requiresReauth
-    val (devicesState, devicesHandle) = rememberSwrResource<List<CoreDeviceSessionDto>>(
+    val devicesController = rememberIgngDevicesResource(
         cache = container.swrCache,
+        accountRepository = container.accountRepository,
         cacheKey = McCacheKeys.CORE_DEVICES,
-        scope = IgngCacheScope.USER_ONLY,
         policy = McCachePolicies.Standard,
         tags = setOf(McCacheTags.DEVICES),
         enabled = canLoadDevices,
         slotKey = "mc_settings_devices",
-    ) {
-        container.accountRepository.listDevices().toKotlinResult().map { it.data }
-    }
+        onShowMessage = onShowMessage,
+    )
 
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
@@ -200,33 +198,12 @@ fun SettingsScreen(
                     }
 
                     item(key = "devices") {
-                        IgngDevicesSecurityCard(
-                            devices = devicesState.data.orEmpty(),
-                            loading = devicesState.isInitialLoading,
-                            error = devicesState.error,
-                            onRefresh = { devicesHandle.refresh() },
-                            onRenameDevice = { deviceId, newName ->
-                                scope.launch {
-                                    when (val res = container.accountRepository.renameDevice(deviceId, newName)) {
-                                        is ApiResult.Success -> {
-                                            onShowMessage("设备名称已更新")
-                                            devicesHandle.silentRefresh()
-                                        }
-                                        is ApiResult.Failure -> onShowMessage(res.error.message)
-                                    }
-                                }
-                            },
-                            onRevokeDevice = { deviceId ->
-                                scope.launch {
-                                    when (val res = container.accountRepository.revokeDevice(deviceId)) {
-                                        is ApiResult.Success -> {
-                                            onShowMessage("已吊销该设备会话")
-                                            devicesHandle.silentRefresh()
-                                        }
-                                        is ApiResult.Failure -> onShowMessage(res.error.message)
-                                    }
-                                }
-                            },
+                        IgngDevicesSecurityEntryCard(
+                            devices = devicesController.devices,
+                            totalCount = devicesController.totalCount,
+                            loading = devicesController.isInitialLoading,
+                            error = devicesController.error,
+                            onClick = onOpenLoginDevices,
                         )
                     }
                 }
@@ -311,4 +288,43 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+fun LoginDevicesScreen(
+    container: IgngAppContainer,
+    activeAccount: SavedAccount?,
+    sessionAuthStatus: SessionAuthStatus = if (activeAccount != null) SessionAuthStatus.ACTIVE else SessionAuthStatus.SIGNED_OUT,
+    onBack: () -> Unit,
+    onShowMessage: (String) -> Unit = {},
+) {
+    val canLoadDevices = activeAccount != null && !sessionAuthStatus.requiresReauth
+    val devicesController = rememberIgngDevicesResource(
+        cache = container.swrCache,
+        accountRepository = container.accountRepository,
+        cacheKey = McCacheKeys.CORE_DEVICES,
+        policy = McCachePolicies.Standard,
+        tags = setOf(McCacheTags.DEVICES),
+        enabled = canLoadDevices,
+        slotKey = "mc_login_devices",
+        onShowMessage = onShowMessage,
+    )
+
+    IgngDevicesSecurityScreen(
+        devices = devicesController.devices,
+        totalCount = devicesController.totalCount,
+        loading = devicesController.isInitialLoading,
+        refreshing = devicesController.isUserRefreshing,
+        revalidating = devicesController.isRevalidating,
+        error = devicesController.error,
+        authenticated = canLoadDevices,
+        hasMore = devicesController.hasMore,
+        loadingMore = devicesController.loadingMore,
+        busyDeviceIds = devicesController.busyDeviceIds,
+        onBack = onBack,
+        onRefresh = { devicesController.refresh() },
+        onLoadMore = { devicesController.loadMore() },
+        onRenameDevice = { deviceId, newName -> devicesController.renameDevice(deviceId, newName) },
+        onRevokeDevice = { deviceId -> devicesController.revokeDevice(deviceId) },
+    )
 }
