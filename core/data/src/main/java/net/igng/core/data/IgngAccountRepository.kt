@@ -1,8 +1,9 @@
 package net.igng.core.data
 
 import net.igng.core.model.CoreAvatarUploadResponseDto
-import net.igng.core.model.CoreDailyLoginDto
 import net.igng.core.model.CoreDeviceSessionDto
+import net.igng.core.model.CoreFamilyHandoffRequest
+import net.igng.core.model.CoreFamilyHandoffResponse
 import net.igng.core.model.CorePaginatedResponseDto
 import net.igng.core.model.CoreRenameDeviceRequest
 import net.igng.core.model.CoreUpdateProfileMeRequest
@@ -12,8 +13,8 @@ import net.igng.core.network.CryptoChallenge
 import net.igng.core.network.IgngHttpClient
 
 /**
- * Unified Client API v1 account, device security, daily-login, and credential-crypto repository
- * shared across IGNG BBS, IGNGmc, and future IGNG Ink.
+ * Unified Client API v1 account, device security, cross-app family handoff, and credential-crypto
+ * repository shared across all IGNG official Android apps.
  */
 class IgngAccountRepository(
     private val http: IgngHttpClient,
@@ -54,6 +55,6 @@ class IgngAccountRepository(
     suspend fun fetchCryptoChallenge(): ApiResult<CryptoChallenge> =
         http.get("/auth/crypto", requireAuth = true)
 
-    suspend fun settleDailyLogin(): ApiResult<CoreDailyLoginDto> =
-        http.postEmpty("/users/me/daily-login")
+    suspend fun requestFamilyHandoff(request: CoreFamilyHandoffRequest): ApiResult<CoreFamilyHandoffResponse> =
+        http.post("/auth/family-handoff", request, idempotencyKey = null, requireAuth = true)
 }

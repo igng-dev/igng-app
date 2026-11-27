@@ -1,13 +1,16 @@
 package net.igng.core.auth
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabColorSchemeParams
+import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -74,18 +77,38 @@ data class OAuthClientConfig(
 )
 
 object CustomTabsLauncher {
+    private const val TOOLBAR_DARK = 0xFF0D1117.toInt()
+    private const val TOOLBAR_LIGHT = 0xFFF5F6F8.toInt()
+    private val PREFERRED_PACKAGES = listOf(
+        "com.android.chrome",
+        "com.microsoft.emmx",
+        "com.sec.android.app.sbrowser",
+        "org.mozilla.firefox",
+    )
+
+    private fun resolveCustomTabsPackage(context: Context): String? = runCatching {
+        CustomTabsClient.getPackageName(context, PREFERRED_PACKAGES, false)
+            ?: CustomTabsClient.getPackageName(context, null)
+    }.getOrNull()
+
     fun launchOAuth(context: Context, uri: Uri, isDark: Boolean = false) {
-        val toolbarColor = if (isDark) 0xFF0B0F16.toInt() else 0xFFF4F6FA.toInt()
+        val toolbarColor = if (isDark) TOOLBAR_DARK else TOOLBAR_LIGHT
         val params = CustomTabColorSchemeParams.Builder()
             .setToolbarColor(toolbarColor)
             .build()
-        val intent = CustomTabsIntent.Builder()
+        val customTabs = CustomTabsIntent.Builder()
             .setDefaultColorSchemeParams(params)
             .setShowTitle(true)
             .build()
-        intent.intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+        resolveCustomTabsPackage(context)?.let { pkg ->
+            customTabs.intent.setPackage(pkg)
+        }
+        customTabs.intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+        if (context !is Activity) {
+            customTabs.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         runCatching {
-            intent.launchUrl(context, uri)
+            customTabs.launchUrl(context, uri)
         }.onFailure {
             val fallback = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(fallback)
@@ -94,16 +117,22 @@ object CustomTabsLauncher {
 
     fun openExternalUrl(context: Context, url: String, isDark: Boolean = false) {
         val uri = Uri.parse(url)
-        val toolbarColor = if (isDark) 0xFF0B0F16.toInt() else 0xFFF4F6FA.toInt()
+        val toolbarColor = if (isDark) TOOLBAR_DARK else TOOLBAR_LIGHT
         val params = CustomTabColorSchemeParams.Builder()
             .setToolbarColor(toolbarColor)
             .build()
-        val intent = CustomTabsIntent.Builder()
+        val customTabs = CustomTabsIntent.Builder()
             .setDefaultColorSchemeParams(params)
             .setShowTitle(true)
             .build()
+        resolveCustomTabsPackage(context)?.let { pkg ->
+            customTabs.intent.setPackage(pkg)
+        }
+        if (context !is Activity) {
+            customTabs.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         runCatching {
-            intent.launchUrl(context, uri)
+            customTabs.launchUrl(context, uri)
         }.onFailure {
             val fallback = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(fallback)
@@ -180,12 +209,15 @@ class IgngOAuthClient(
         val pending = sessionStore.consumePendingOAuth(state)
             ?: return OAuthCallbackResult.Error("授权状态已过期或不匹配，请重新发起登录")
 
-        return runCatching {
-            exchangeAuthorizationCode(code = code, codeVerifier = pending.codeVerifier)
-        }.fold(
-            onSuccess = { OAuthCallbackResult.Success(it) },
-            onFailure = { OAuthCallbackResult.Error(it.message ?: "交换令牌失败，请稍后重试") },
-        )
+        return try {
+            OAuthCallbackResult.Success(
+                exchangeAuthorizationCode(code = code, codeVerifier = pending.codeVerifier),
+            )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            OAuthCallbackResult.Error(t.message ?: "交换令牌失败，请稍后重试")
+        }
     }
 
     suspend fun exchangeAuthorizationCode(code: String, codeVerifier: String): SavedAccount =

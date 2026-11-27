@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.ConfirmationNumber
@@ -50,6 +49,8 @@ import net.igng.core.designsystem.IgngFamilySsoBanner
 import net.igng.core.designsystem.IgngGroupedSection
 import net.igng.core.designsystem.IgngListRow
 import net.igng.core.designsystem.IgngPullToRefreshBox
+import net.igng.core.designsystem.IgngSessionExpiredBanner
+import net.igng.core.designsystem.IgngSignInHeroCard
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTopBar
@@ -64,7 +65,6 @@ import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.mcstatus.core.data.PlayerRepository
 import net.igng.mcstatus.core.data.TicketListResponse
 import net.igng.mcstatus.core.data.TicketRepository
-import net.igng.mcstatus.core.model.DailyExpStatus
 import net.igng.mcstatus.core.model.adminRole
 
 enum class PlayerDestination {
@@ -89,13 +89,13 @@ fun PlayerCenterScreen(
     activeAccount: SavedAccount?,
     sessionAuthStatus: SessionAuthStatus = if (activeAccount != null) SessionAuthStatus.ACTIVE else SessionAuthStatus.SIGNED_OUT,
     sessionEpoch: Int = 0,
-    dailyExp: DailyExpStatus?,
     familyAccounts: List<FamilySharedAccountHint> = emptyList(),
     hasAppUpdate: Boolean = false,
     playerRepository: PlayerRepository,
     ticketRepository: TicketRepository,
     bottomPadding: PaddingValues,
     onSignIn: () -> Unit,
+    onSyncFamilyAccount: (FamilySharedAccountHint) -> Unit,
     onOpenPassport: (Int) -> Unit,
     onNavigate: (PlayerDestination) -> Unit,
 ) {
@@ -185,65 +185,31 @@ fun PlayerCenterScreen(
                             item(key = "familySsoHero") {
                                 IgngFamilySsoBanner(
                                     familyAccounts = familyAccounts,
-                                    onContinueWithFamilyAccount = { onSignIn() },
+                                    onContinueWithFamilyAccount = onSyncFamilyAccount,
                                 )
                             }
                         }
                         item(key = "signedOutHero") {
-                            IgngTile(modifier = Modifier.fillMaxWidth()) {
-                                IgngBadge("OAuth 2.1 · PKCE 安全登录", tone = IgngBadgeTone.Accent)
-                                Spacer(Modifier.height(10.dp))
-                                Text("登录你的 IGNG 账户", style = IgngTheme.type.pageTitle, color = colors.textPrimary)
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    "通过官方 SSO 页面完成授权，客户端不接触明文密码。若本机其他 IGNG 应用或浏览器已登录，可一键完成授权并自动同步每日登录经验。",
-                                    style = IgngTheme.type.body,
-                                    color = colors.textSecondary,
-                                )
-                                Spacer(Modifier.height(14.dp))
-                                IgngButton(
-                                    text = "通过 IGNG SSO 登录",
-                                    onClick = onSignIn,
-                                    style = if (familyAccounts.isNotEmpty()) IgngButtonStyle.Secondary else IgngButtonStyle.Primary,
-                                    icon = Icons.AutoMirrored.Rounded.Login,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
+                            IgngSignInHeroCard(
+                                description = "通过官方 SSO 页面完成授权，客户端不接触明文密码。登录后可管理游戏角色、工单、跨服仓库与领地资产。",
+                                hasFamilyAccounts = familyAccounts.isNotEmpty(),
+                                onSignIn = onSignIn,
+                            )
                         }
                         return@LazyColumn
                     }
 
                     if (sessionExpired) {
                         item(key = "sessionExpiredBanner") {
-                            val isLegacy = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
-                            IgngTile(
-                                borderColor = colors.warning.copy(alpha = 0.55f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                IgngBadge(
-                                    text = if (isLegacy) "需升级 OAuth 2.1 授权" else "登录会话已失效",
-                                    tone = IgngBadgeTone.Warning,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = if (isLegacy) {
-                                        "当前账户仍保留旧版登录凭证，新版本需通过 IGNG SSO 重新授权以恢复角色管理、工单与跨服仓库等个人数据。"
-                                    } else {
-                                        "当前仅展示本地缓存的账户标识与公开主页入口；角色管理、工单、仓库等个人数据需重新授权后同步。"
-                                    },
-                                    style = IgngTheme.type.caption,
-                                    color = colors.textSecondary,
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                IgngButton(
-                                    text = "立即重新授权",
-                                    onClick = onSignIn,
-                                    style = IgngButtonStyle.Primary,
-                                    icon = Icons.AutoMirrored.Rounded.Login,
-                                    compact = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
+                            IgngSessionExpiredBanner(
+                                sessionAuthStatus = sessionAuthStatus,
+                                activeAccount = activeAccount,
+                                familyAccounts = familyAccounts,
+                                legacyDescription = "当前账户仍保留旧版登录凭证，可通过 IGNG SSO 重新授权或从本机其他 IGNG 应用一键同步，恢复角色管理、工单与跨服仓库等个人数据。",
+                                expiredDescription = "当前仅展示本地缓存的账户标识与公开主页入口；角色管理、工单、仓库等个人数据需重新授权后同步。",
+                                onSignInWithBrowser = onSignIn,
+                                onSyncWithFamilyAccount = onSyncFamilyAccount,
+                            )
                         }
                     }
 
@@ -279,15 +245,6 @@ fun PlayerCenterScreen(
                                         style = IgngTheme.type.meta,
                                         color = colors.textSecondary,
                                     )
-                                    if (!sessionExpired && dailyExp != null && dailyExp.loggedIn) {
-                                        Spacer(Modifier.height(6.dp))
-                                        val expText = buildString {
-                                            if (dailyExp.awarded) append("今日登录经验已入账 · ")
-                                            dailyExp.level?.let { append("Lv.$it ") }
-                                            dailyExp.exp?.let { append("(${it} EXP)") }
-                                        }.ifBlank { "今日登录经验已结算" }
-                                        IgngBadge(expText, tone = IgngBadgeTone.Success)
-                                    }
                                 }
                             }
                             Spacer(Modifier.height(12.dp))

@@ -82,11 +82,12 @@ def assert_has_init(classes: dict[str, str], descriptor: str) -> None:
 def verify_app(app: str, apk_path: Path, dexdump_bin: str) -> None:
     classes, dex_count = extract_classes(apk_path, dexdump_bin)
 
-    # Shared serializers in :core:model / :core:updater and FileProvider must survive R8 across every app
+    # Shared serializers in :core:model / :core:updater and providers must survive R8 across every app
     core_serializers = [d for d in classes if d.startswith("Lnet/igng/core/") and "$$serializer;" in d]
     if not core_serializers:
         raise AssertionError("Core kotlinx.serialization $$serializer classes were stripped by R8!")
     assert_has_init(classes, "Lnet/igng/core/updater/IgngUpdateFileProvider;")
+    assert_has_init(classes, "Lnet/igng/core/auth/IgngFamilySsoProvider;")
 
     if app == "bbs":
         assert_has_init(classes, "Landroidx/work/impl/WorkDatabase_Impl;")

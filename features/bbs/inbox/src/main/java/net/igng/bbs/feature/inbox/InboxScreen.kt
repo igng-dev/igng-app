@@ -93,7 +93,10 @@ fun InboxScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    val activeAccount by container.sessionStore.activeAccount.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val requiresReauth = activeAccount != null && sessionAuthStatus.requiresReauth
+    val isAuthed = activeAccount != null && !sessionAuthStatus.requiresReauth
 
     val holder = rememberScreenHolder("bbs_inbox_ui") { InboxUiHolder() }
     var tab by holder.tabState
@@ -107,7 +110,7 @@ fun InboxScreen(
         scope = IgngCacheScope.USER_ONLY,
         policy = BbsCachePolicies.Realtime,
         tags = setOf(BbsCacheTags.INBOX),
-        enabled = activeAccount != null,
+        enabled = isAuthed,
         pollIntervalMs = 60_000L,
         slotKey = "bbs_inbox_slot",
     ) {
@@ -133,7 +136,7 @@ fun InboxScreen(
             subtitle = if (unreadTotal > 0) "$unreadTotal 条未读" else null,
             onBack = onBack,
             actions = {
-                if (activeAccount != null && unreadTotal > 0) {
+                if (isAuthed && unreadTotal > 0) {
                     IconButton(onClick = {
                         scope.launch {
                             container.inboxRepository.markAllRead("all")
@@ -147,12 +150,16 @@ fun InboxScreen(
             },
         )
 
-        if (activeAccount == null) {
+        if (!isAuthed) {
             Box(Modifier.padding(16.dp)) {
                 IgngEmptyTile(
-                    title = "登录后查看消息通知",
-                    subtitle = "系统通知、评论回复、@提及与专栏动态都会汇集在这里。",
-                    actionLabel = "登录 IGNG 账户",
+                    title = if (requiresReauth) "重新授权以查看消息通知" else "登录后查看消息通知",
+                    subtitle = if (requiresReauth) {
+                        "当前登录会话已失效，重新授权后即可同步评论回复、@提及与系统提醒。"
+                    } else {
+                        "系统通知、评论回复、@提及与专栏动态都会汇集在这里。"
+                    },
+                    actionLabel = if (requiresReauth) "重新授权登录" else "登录 IGNG 账户",
                     onAction = onRequireLogin,
                 )
             }

@@ -1,25 +1,22 @@
 package net.igng.bbs.core.data
 
 import android.content.Context
+import android.net.Uri
 import coil3.ImageLoader
-import java.time.LocalDate
-import java.time.ZoneOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import net.igng.bbs.core.model.BbsBootstrapDto
-import net.igng.bbs.core.model.DailyLoginDto
 import net.igng.bbs.core.model.SiteEndpoints
+import net.igng.core.auth.AuthUiState
 import net.igng.core.auth.IgngSessionManager
 import net.igng.core.auth.SecureSessionStore
 import net.igng.core.data.IgngAccountRepository
@@ -52,6 +49,7 @@ class BbsAppContainer(
         context = appContext,
         oauthConfig = BbsOAuthManager.oauthConfig(endpoints, appVersion),
         vaultConfig = BbsOAuthManager.VAULT_CONFIG,
+        appScope = appScope,
     )
     val sessionStore: SecureSessionStore get() = sessionManager.sessionStore
     val oauthManager = BbsOAuthManager(sessionManager)
@@ -62,6 +60,9 @@ class BbsAppContainer(
     val sessionAuthStatus: StateFlow<SessionAuthStatus> get() = sessionManager.sessionAuthStatus
     val sessionEpoch: StateFlow<Int> get() = sessionManager.sessionEpoch
     val familyAccounts: StateFlow<List<FamilySharedAccountHint>> get() = sessionManager.familyAccounts
+    val authUiState: StateFlow<AuthUiState> get() = sessionManager.authUiState
+    val authEvents: SharedFlow<String> get() = sessionManager.authEvents
+    val initialFamilySyncDone: StateFlow<Boolean> get() = sessionManager.initialFamilySyncDone
 
     val httpClient = IgngHttpClient(
         config = IgngClientConfig(
@@ -112,11 +113,9 @@ class BbsAppContainer(
     private val _bootstrap = MutableStateFlow<BbsBootstrapDto?>(null)
     val bootstrap: StateFlow<BbsBootstrapDto?> = _bootstrap.asStateFlow()
 
-    private val _dailyLoginReward = MutableSharedFlow<DailyLoginDto>(extraBufferCapacity = 1)
-    val dailyLoginReward: SharedFlow<DailyLoginDto> = _dailyLoginReward.asSharedFlow()
-
     init {
         syncSessionStampNow()
+        sessionManager.bindFamilyHandoffIssuer { req -> accountRepository.requestFamilyHandoff(req) }
         appScope.launch {
             combine(activeAccount, sessionEpoch, sessionAuthStatus) { acc, epoch, status ->
                 IgngSwrCache.buildSessionStamp(acc?.userId, epoch, status.name)
@@ -260,6 +259,17 @@ class BbsAppContainer(
         sessionManager.refreshFamilyAccounts()
     }
 
+    fun syncFamilyAccountsAndAutoSignIn() {
+        sessionManager.syncFamilyAccountsAndAutoSignIn()
+    }
+
+    fun handleIncomingOAuthCallback(uri: Uri?): Boolean =
+        sessionManager.handleIncomingOAuthCallback(uri)
+
+    fun signInWithFamilyAccount(context: Context, hint: FamilySharedAccountHint, isDark: Boolean = false) {
+        sessionManager.signInWithFamilyAccount(context = context, hint = hint, isDark = isDark)
+    }
+
     suspend fun refreshBootstrap(force: Boolean = true): ApiResult<BbsBootstrapDto> {
         val result = swrCache.fetch(
             key = BbsCacheKeys.BOOTSTRAP,
@@ -294,39 +304,11 @@ class BbsAppContainer(
 
     suspend fun refreshBootstrapIfStale(): ApiResult<BbsBootstrapDto> = refreshBootstrap(force = false)
 
-    suspend fun settleDailyLoginIfNeeded() {
-        val active = sessionManager.activeAccount.value ?: return
-        if (sessionManager.activeUsableToken().isNullOrBlank()) return
-        val todayUtc = LocalDate.now(ZoneOffset.UTC).toString()
-        val lastPeriod = settingsRepository.getLastDailyLoginPeriod(active.userId)
-        if (lastPeriod == todayUtc) return
-        when (val res = accountRepository.settleDailyLogin()) {
-            is ApiResult.Success -> {
-                val period = res.data.period.ifBlank { todayUtc }
-                settingsRepository.markDailyLoginPeriod(active.userId, period)
-                if (res.data.awarded) {
-                    _dailyLoginReward.tryEmit(
-                        DailyLoginDto(
-                            awarded = res.data.awarded,
-                            exp = res.data.exp,
-                            baseExp = res.data.baseExp,
-                            multiplier = res.data.multiplier,
-                            level = res.data.level,
-                            period = period,
-                        ),
-                    )
-                }
-            }
-            is ApiResult.Failure -> Unit
-        }
-    }
-
     suspend fun switchAccount(userId: Long) {
         sessionManager.switchAccount(userId) ?: return
         syncSessionStampNow()
         _bootstrap.value = null
         refreshBootstrap(force = true)
-        settleDailyLoginIfNeeded()
     }
 
     fun removeAccount(userId: Long) {

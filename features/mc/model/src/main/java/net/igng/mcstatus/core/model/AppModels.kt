@@ -59,17 +59,6 @@ enum class McAdminRole(val level: Int, val label: String) {
 
 
 @Serializable
-data class DailyExpStatus(
-    val loggedIn: Boolean = false,
-    val awarded: Boolean = false,
-    val exp: Int? = null,
-    val baseExp: Int? = null,
-    val level: Int? = null,
-    val multiplier: Double? = null,
-    val period: String? = null,
-)
-
-@Serializable
 data class BootstrapUrlsDto(
     @SerialName("api_base_url") val apiBaseUrl: String = "https://www.igng.net",
     @SerialName("sso_base_url") val ssoBaseUrl: String = "https://sso.igng.net",

@@ -81,191 +81,8 @@ import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.model.CoreDeviceSessionDto
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.network.ApiResult
-
-@Composable
-fun AccountSecurityScreen(
-    container: BbsAppContainer,
-    onBack: () -> Unit,
-    onSignIn: () -> Unit,
-    onAddAccount: () -> Unit,
-    onShowMessage: (String) -> Unit = {},
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val accounts by container.accounts.collectAsState()
-    val activeAccount by container.activeAccount.collectAsState()
-    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
-    val familyAccounts by container.familyAccounts.collectAsState()
-    val bootstrap by container.bootstrap.collectAsState()
-
-    val authed = activeAccount != null && !sessionAuthStatus.requiresReauth
-    val (devicesState, devicesHandle) = rememberSwrResource<List<CoreDeviceSessionDto>>(
-        cache = container.swrCache,
-        cacheKey = BbsCacheKeys.DEVICES,
-        scope = IgngCacheScope.USER_ONLY,
-        policy = BbsCachePolicies.Standard,
-        tags = setOf(BbsCacheTags.DEVICES),
-        enabled = authed,
-        slotKey = "bbs_devices_slot",
-    ) {
-        container.accountRepository.listDevices().toKotlinResult().map { it.data }
-    }
-
-    val devices = devicesState.data.orEmpty()
-    val devicesLoading = devicesState.isInitialLoading || devicesState.isUserRefreshing
-    val devicesError = if (devicesState.data == null) devicesState.error else null
-
-    var usernameInput by remember(activeAccount?.username) { mutableStateOf(activeAccount?.username.orEmpty()) }
-    var uploadingAvatar by remember { mutableStateOf(false) }
-    var savingUsername by remember { mutableStateOf(false) }
-    var notice by remember { mutableStateOf<String?>(null) }
-
-    fun report(msg: String) {
-        notice = msg
-        onShowMessage(msg)
-    }
-
-    LaunchedEffect(Unit) {
-        container.refreshFamilyAccounts()
-    }
-
-    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            uploadingAvatar = true
-            val payload = withContext(Dispatchers.IO) {
-                runCatching {
-                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching null
-                    Triple(bytes, mime, "avatar_${System.currentTimeMillis()}.jpg")
-                }.getOrNull()
-            }
-            if (payload != null) {
-                when (val r = container.accountRepository.uploadAvatar(payload.third, payload.second, payload.first)) {
-                    is ApiResult.Success -> {
-                        container.sessionManager.updateActiveProfile(avatarUrl = r.data.avatarUrl)
-                        container.refreshBootstrap(force = true)
-                        report("头像已更新并同步")
-                    }
-                    is ApiResult.Failure -> report(r.error.message)
-                }
-            } else {
-                report("无法读取所选图片")
-            }
-            uploadingAvatar = false
-        }
-    }
-
-    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-
-    IgngAmbientCanvas {
-        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(title = "账户与设备安全", onBack = onBack)
-            LazyColumn(
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 12.dp,
-                    bottom = 24.dp + navBottom,
-                ),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                notice?.let { item(key = "notice") { IgngInfoBanner("提示", it, IgngTone.ACCENT) } }
-
-                item(key = "accounts") {
-                    IgngAccountVaultCard(
-                        activeAccount = activeAccount,
-                        accounts = accounts,
-                        sessionAuthStatus = sessionAuthStatus,
-                        familyAccounts = familyAccounts,
-                        onSignIn = onSignIn,
-                        onAddAccount = onAddAccount,
-                        onSwitchAccount = { uid ->
-                            scope.launch {
-                                container.switchAccount(uid)
-                                report("已切换当前账户")
-                            }
-                        },
-                        onRemoveAccount = { uid ->
-                            container.removeAccount(uid)
-                            report("已移除该账户记录")
-                        },
-                        onLogoutActive = {
-                            scope.launch {
-                                container.logoutActive()
-                                report("已退出当前账户")
-                            }
-                        },
-                    )
-                }
-
-                if (authed) {
-                    item(key = "profile_identity") {
-                        IgngProfileIdentityCard(
-                            activeAccount = activeAccount!!,
-                            avatarUrlOverride = bootstrap?.viewer?.user?.avatarUrl ?: activeAccount?.avatarUrl,
-                            usernameInput = usernameInput,
-                            onUsernameChange = { usernameInput = it },
-                            uploadingAvatar = uploadingAvatar,
-                            savingUsername = savingUsername,
-                            onPickAvatar = {
-                                avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            },
-                            onSaveUsername = {
-                                val next = usernameInput.trim()
-                                if (next.isEmpty()) return@IgngProfileIdentityCard
-                                scope.launch {
-                                    savingUsername = true
-                                    when (val r = container.accountRepository.updateUsername(next)) {
-                                        is ApiResult.Success -> {
-                                            container.sessionManager.updateActiveProfile(username = r.data.username)
-                                            container.refreshBootstrap(force = true)
-                                            report("用户名已保存")
-                                        }
-                                        is ApiResult.Failure -> report(r.error.message)
-                                    }
-                                    savingUsername = false
-                                }
-                            },
-                        )
-                    }
-
-                    item(key = "devices") {
-                        IgngDevicesSecurityCard(
-                            devices = devices,
-                            loading = devicesLoading,
-                            error = devicesError,
-                            onRefresh = { devicesHandle.refresh() },
-                            onRenameDevice = { deviceId, newName ->
-                                scope.launch {
-                                    when (val r = container.accountRepository.renameDevice(deviceId, newName)) {
-                                        is ApiResult.Success -> {
-                                            report("设备名称已更新")
-                                            devicesHandle.silentRefresh()
-                                        }
-                                        is ApiResult.Failure -> report(r.error.message)
-                                    }
-                                }
-                            },
-                            onRevokeDevice = { deviceId ->
-                                scope.launch {
-                                    when (val r = container.accountRepository.revokeDevice(deviceId)) {
-                                        is ApiResult.Success -> {
-                                            report("已吊销该设备登录状态")
-                                            devicesHandle.silentRefresh()
-                                        }
-                                        is ApiResult.Failure -> report(r.error.message)
-                                    }
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 private class PrivacyFormUiHolder {
     val bioState = mutableStateOf("")
@@ -493,19 +310,46 @@ fun PrivacyPreferencesScreen(
 fun AppSettingsScreen(
     container: BbsAppContainer,
     onBack: () -> Unit,
+    onSignIn: () -> Unit,
+    onAddAccount: () -> Unit,
+    onSyncFamilyAccount: (FamilySharedAccountHint) -> Unit,
     onShowMessage: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
     val prefs by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
+    val accounts by container.accounts.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val familyAccounts by container.familyAccounts.collectAsState()
+    val bootstrap by container.bootstrap.collectAsState()
     val updateSnapshot by container.appUpdateManager.snapshot.collectAsState()
+
     var cacheBytes by remember { mutableLongStateOf(0L) }
     var clearingCache by remember { mutableStateOf(false) }
     var showUpdateSheet by remember { mutableStateOf(false) }
 
+    var usernameInput by remember(activeAccount?.username) { mutableStateOf(activeAccount?.username.orEmpty()) }
+    var uploadingAvatar by remember { mutableStateOf(false) }
+    var savingUsername by remember { mutableStateOf(false) }
+
+    val authed = activeAccount != null && !sessionAuthStatus.requiresReauth
+    val (devicesState, devicesHandle) = rememberSwrResource<List<CoreDeviceSessionDto>>(
+        cache = container.swrCache,
+        cacheKey = BbsCacheKeys.DEVICES,
+        scope = IgngCacheScope.USER_ONLY,
+        policy = BbsCachePolicies.Standard,
+        tags = setOf(BbsCacheTags.DEVICES),
+        enabled = authed,
+        slotKey = "bbs_devices_slot",
+    ) {
+        container.accountRepository.listDevices().toKotlinResult().map { it.data }
+    }
+
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
+        container.syncFamilyAccountsAndAutoSignIn()
     }
 
     LifecycleResumeEffect(Unit) {
@@ -513,11 +357,38 @@ fun AppSettingsScreen(
         onPauseOrDispose { }
     }
 
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            uploadingAvatar = true
+            val payload = withContext(Dispatchers.IO) {
+                runCatching {
+                    val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching null
+                    Triple(bytes, mime, "avatar_${System.currentTimeMillis()}.jpg")
+                }.getOrNull()
+            }
+            if (payload != null) {
+                when (val r = container.accountRepository.uploadAvatar(payload.third, payload.second, payload.first)) {
+                    is ApiResult.Success -> {
+                        container.sessionManager.updateActiveProfile(avatarUrl = r.data.avatarUrl)
+                        container.refreshBootstrap(force = true)
+                        onShowMessage("头像已更新并同步")
+                    }
+                    is ApiResult.Failure -> onShowMessage(r.error.message)
+                }
+            } else {
+                onShowMessage("无法读取所选图片")
+            }
+            uploadingAvatar = false
+        }
+    }
+
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     IgngAmbientCanvas {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            IgngTopBar(title = "应用设置", onBack = onBack)
+            IgngTopBar(title = "设置", onBack = onBack)
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -527,6 +398,100 @@ fun AppSettingsScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                // 1. Unified Multi-Account Vault + Cross-App Family SSO
+                item(key = "accounts") {
+                    IgngAccountVaultCard(
+                        activeAccount = activeAccount,
+                        accounts = accounts,
+                        sessionAuthStatus = sessionAuthStatus,
+                        familyAccounts = familyAccounts,
+                        onSignIn = onSignIn,
+                        onAddAccount = onAddAccount,
+                        onSyncFamilyAccount = onSyncFamilyAccount,
+                        onSwitchAccount = { uid ->
+                            scope.launch {
+                                container.switchAccount(uid)
+                                onShowMessage("已切换当前账户")
+                            }
+                        },
+                        onRemoveAccount = { uid ->
+                            container.removeAccount(uid)
+                            onShowMessage("已移除该账户记录")
+                        },
+                        onLogoutActive = {
+                            scope.launch {
+                                container.logoutActive()
+                                onShowMessage("已退出当前账户")
+                            }
+                        },
+                    )
+                }
+
+                // 2. Unified Profile Identity & Login Devices Security (shared Client API v1)
+                if (authed) {
+                    item(key = "profile_identity") {
+                        IgngProfileIdentityCard(
+                            activeAccount = activeAccount!!,
+                            avatarUrlOverride = bootstrap?.viewer?.user?.avatarUrl ?: activeAccount?.avatarUrl,
+                            usernameInput = usernameInput,
+                            onUsernameChange = { usernameInput = it },
+                            uploadingAvatar = uploadingAvatar,
+                            savingUsername = savingUsername,
+                            onPickAvatar = {
+                                avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            onSaveUsername = {
+                                val next = usernameInput.trim()
+                                if (next.isEmpty()) return@IgngProfileIdentityCard
+                                scope.launch {
+                                    savingUsername = true
+                                    when (val r = container.accountRepository.updateUsername(next)) {
+                                        is ApiResult.Success -> {
+                                            container.sessionManager.updateActiveProfile(username = r.data.username)
+                                            container.refreshBootstrap(force = true)
+                                            onShowMessage("用户名已更新")
+                                        }
+                                        is ApiResult.Failure -> onShowMessage(r.error.message)
+                                    }
+                                    savingUsername = false
+                                }
+                            },
+                        )
+                    }
+
+                    item(key = "devices") {
+                        IgngDevicesSecurityCard(
+                            devices = devicesState.data.orEmpty(),
+                            loading = devicesState.isInitialLoading,
+                            error = if (devicesState.data == null) devicesState.error else null,
+                            onRefresh = { devicesHandle.refresh() },
+                            onRenameDevice = { deviceId, newName ->
+                                scope.launch {
+                                    when (val r = container.accountRepository.renameDevice(deviceId, newName)) {
+                                        is ApiResult.Success -> {
+                                            onShowMessage("设备名称已更新")
+                                            devicesHandle.silentRefresh()
+                                        }
+                                        is ApiResult.Failure -> onShowMessage(r.error.message)
+                                    }
+                                }
+                            },
+                            onRevokeDevice = { deviceId ->
+                                scope.launch {
+                                    when (val r = container.accountRepository.revokeDevice(deviceId)) {
+                                        is ApiResult.Success -> {
+                                            onShowMessage("已吊销该设备会话")
+                                            devicesHandle.silentRefresh()
+                                        }
+                                        is ApiResult.Failure -> onShowMessage(r.error.message)
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+
+                // 3. Unified Appearance, 3-Tier Motion, Reader Canvas & Haptics
                 item(key = "appearance") {
                     IgngAppearanceMotionSettingsCard(
                         themeMode = prefs.themeMode,
@@ -542,6 +507,7 @@ fun AppSettingsScreen(
                     )
                 }
 
+                // 4. BBS-Specific Background Sync Preference
                 item(key = "bbs_preferences") {
                     IgngTile(modifier = Modifier.fillMaxWidth()) {
                         IgngSectionHeader(
@@ -559,6 +525,7 @@ fun AppSettingsScreen(
                     }
                 }
 
+                // 5. Unified Cache, Self-Update & About
                 item(key = "cache") {
                     IgngCacheCard(
                         cacheBytes = cacheBytes,

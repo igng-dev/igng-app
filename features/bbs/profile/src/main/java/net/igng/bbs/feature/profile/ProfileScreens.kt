@@ -13,13 +13,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Create
@@ -27,8 +28,9 @@ import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.ManageAccounts
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -60,11 +62,10 @@ import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
 import net.igng.core.data.toKotlinResult
+import net.igng.core.designsystem.IgngAmbientCanvas
 import net.igng.core.designsystem.IgngAvatar
 import net.igng.core.designsystem.IgngBadge
 import net.igng.core.designsystem.IgngBadgeTone
-import net.igng.core.designsystem.IgngButton
-import net.igng.core.designsystem.IgngButtonStyle
 import net.igng.core.designsystem.IgngConfirmDialog
 import net.igng.core.designsystem.IgngEmptyTile
 import net.igng.core.designsystem.IgngErrorTile
@@ -77,28 +78,30 @@ import net.igng.core.designsystem.IgngLoadingCenter
 import net.igng.core.designsystem.IgngPrimaryButton
 import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngSecondaryButton
+import net.igng.core.designsystem.IgngSessionExpiredBanner
+import net.igng.core.designsystem.IgngSignInHeroCard
 import net.igng.core.designsystem.IgngTagChip
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
 import net.igng.core.designsystem.IgngTopBar
 import net.igng.core.designsystem.IgngUpdateDotBadge
-import net.igng.core.model.SessionAuthStatus
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.network.ApiResult
 
 @Composable
 fun ProfileCenterScreen(
     container: BbsAppContainer,
     onLogin: () -> Unit,
+    onSyncFamilyAccount: (FamilySharedAccountHint) -> Unit,
     onOpenMyProfile: (String) -> Unit,
     onOpenFavorites: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenCreator: () -> Unit,
     onOpenAdmin: () -> Unit,
-    onOpenAccountSecurity: () -> Unit,
     onOpenPrivacyPreferences: () -> Unit,
-    onOpenAppSettings: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenRules: () -> Unit,
     bottomInsetPadding: PaddingValues = PaddingValues(bottom = 64.dp),
 ) {
@@ -117,128 +120,117 @@ fun ProfileCenterScreen(
         onPauseOrDispose { }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.canvas)
-            .statusBarsPadding(),
-    ) {
-        IgngTopBar(
-            title = "我的",
-            subtitle = if (sessionExpired) "登录会话已失效 · 仅展示本地缓存" else null,
-        )
-        IgngPullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = {
-                scope.launch {
-                    refreshing = true
-                    container.refreshFamilyAccounts()
-                    container.refreshBootstrap(force = true)
-                    refreshing = false
-                }
-            },
-            modifier = Modifier.weight(1f),
+    IgngAmbientCanvas {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
         ) {
-            LazyColumn(
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 6.dp,
-                    bottom = bottomInsetPadding.calculateBottomPadding() + 20.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                // Cross-app family SSO discovery card when signed out
-                if (activeAccount == null && familyAccounts.isNotEmpty()) {
-                    item(key = "family_sso") {
-                        IgngFamilySsoBanner(
-                            familyAccounts = familyAccounts,
-                            onContinueWithFamilyAccount = { onLogin() },
-                        )
-                    }
-                }
-
-                // Non-destructive session expired banner
-                if (sessionExpired) {
-                    item(key = "session_expired") {
-                        val isLegacy = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
-                        IgngTile(
-                            borderColor = colors.warning.copy(alpha = 0.45f),
-                            modifier = Modifier.fillMaxWidth(),
+            IgngTopBar(
+                title = "我的",
+                subtitle = if (sessionExpired) "登录会话已失效 · 仅展示本地缓存" else null,
+                actions = {
+                    Box {
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.size(40.dp),
                         ) {
-                            IgngBadge(
-                                text = if (isLegacy) "需升级 OAuth 2.1 授权" else "登录会话已失效",
-                                tone = IgngBadgeTone.Warning,
+                            Icon(
+                                imageVector = Icons.Outlined.Settings,
+                                contentDescription = "设置",
+                                tint = colors.textPrimary,
+                                modifier = Modifier.size(22.dp),
                             )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = if (isLegacy) {
-                                    "旧版凭证已停用，重新通过 IGNG SSO 授权即可恢复收藏、消息与草稿同步。"
-                                } else {
-                                    "当前仅展示本地缓存标识，重新授权后恢复互动、创作同步与通知。"
-                                },
-                                style = IgngTheme.type.caption,
-                                color = colors.textSecondary,
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            IgngButton(
-                                text = "立即重新授权",
-                                onClick = onLogin,
-                                style = IgngButtonStyle.Primary,
-                                icon = Icons.AutoMirrored.Rounded.Login,
-                                compact = true,
-                                modifier = Modifier.fillMaxWidth(),
+                        }
+                        if (updateSnapshot.hasBadgeAlert) {
+                            IgngUpdateDotBadge(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-6).dp, y = 6.dp),
                             )
                         }
                     }
-                }
-
-                // Identity card
-                item(key = "identity") {
-                    if (activeAccount == null) {
-                        IgngTile {
-                            IgngBadge("IGNG SSO 安全登录", tone = IgngBadgeTone.Accent)
-                            Spacer(Modifier.height(10.dp))
-                            Text("登录你的 IGNG 账户", style = IgngTheme.type.pageTitle, color = colors.textPrimary)
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                "登录后解锁点赞收藏、关注互动、云端草稿创作与实时通知。",
-                                style = IgngTheme.type.body,
-                                color = colors.textSecondary,
-                            )
-                            Spacer(Modifier.height(14.dp))
-                            IgngButton(
-                                text = "通过 IGNG SSO 登录",
-                                icon = Icons.AutoMirrored.Rounded.Login,
-                                style = if (familyAccounts.isNotEmpty()) IgngButtonStyle.Secondary else IgngButtonStyle.Primary,
-                                onClick = onLogin,
-                                modifier = Modifier.fillMaxWidth(),
+                },
+            )
+            IgngPullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = {
+                    scope.launch {
+                        refreshing = true
+                        container.syncFamilyAccountsAndAutoSignIn()
+                        container.refreshBootstrap(force = true)
+                        refreshing = false
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                LazyColumn(
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 6.dp,
+                        bottom = bottomInsetPadding.calculateBottomPadding() + 20.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // Cross-app family SSO discovery card when signed out
+                    if (activeAccount == null && familyAccounts.isNotEmpty()) {
+                        item(key = "family_sso") {
+                            IgngFamilySsoBanner(
+                                familyAccounts = familyAccounts,
+                                onContinueWithFamilyAccount = onSyncFamilyAccount,
                             )
                         }
-                    } else {
-                        val acc = activeAccount!!
-                        val viewer = bootstrap?.viewer
-                        IgngTile(onClick = { onOpenMyProfile(acc.publicUserId) }) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                IgngAvatar(avatarUrl = viewer?.user?.avatarUrl ?: acc.avatarUrl, displayName = acc.displayName, size = 54.dp)
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(acc.displayName, style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
-                                        if (sessionExpired) {
-                                            IgngBadge("已失效", tone = IgngBadgeTone.Warning)
-                                        }
-                                    }
-                                    Spacer(Modifier.height(2.dp))
-                                    Text("@${acc.username} · #${acc.userId}", style = IgngTheme.type.meta, color = colors.textMuted)
-                                    val hasBadges = viewer?.level != null || viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true
-                                    if (hasBadges) {
-                                        Spacer(Modifier.height(6.dp))
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            viewer?.level?.let { lvl ->
-                                                IgngBadge("Lv.$lvl · ${viewer.exp ?: 0} EXP", tone = IgngBadgeTone.Accent)
+                    }
+
+                    // Non-destructive session expired / legacy upgrade banner with 1-tap sibling sync
+                    if (sessionExpired) {
+                        item(key = "session_expired") {
+                            IgngSessionExpiredBanner(
+                                sessionAuthStatus = sessionAuthStatus,
+                                activeAccount = activeAccount,
+                                familyAccounts = familyAccounts,
+                                legacyDescription = "旧版凭证已停用，重新通过 IGNG SSO 授权或从本机其他 IGNG 应用一键同步即可恢复收藏、消息与草稿同步。",
+                                expiredDescription = "当前仅展示本地缓存标识，重新授权后恢复互动、创作同步与通知。",
+                                onSignInWithBrowser = onLogin,
+                                onSyncWithFamilyAccount = onSyncFamilyAccount,
+                            )
+                        }
+                    }
+
+                    // Identity card
+                    item(key = "identity") {
+                        if (activeAccount == null) {
+                            IgngSignInHeroCard(
+                                description = "通过官方 SSO 页面完成授权，客户端不接触明文密码。登录后解锁点赞收藏、关注互动、云端草稿创作与实时通知。",
+                                hasFamilyAccounts = familyAccounts.isNotEmpty(),
+                                onSignIn = onLogin,
+                            )
+                        } else {
+                            val acc = activeAccount!!
+                            val viewer = bootstrap?.viewer
+                            IgngTile(onClick = { onOpenMyProfile(acc.publicUserId) }) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    IgngAvatar(avatarUrl = viewer?.user?.avatarUrl ?: acc.avatarUrl, displayName = acc.displayName, size = 54.dp)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(acc.displayName, style = IgngTheme.type.subpageTitle, color = colors.textPrimary)
+                                            if (sessionExpired) {
+                                                IgngBadge("已失效", tone = IgngBadgeTone.Warning)
                                             }
-                                            if (viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true) {
-                                                IgngBadge("风控观察中", tone = IgngBadgeTone.Warning)
+                                        }
+                                        Spacer(Modifier.height(2.dp))
+                                        Text("@${acc.username} · #${acc.userId}", style = IgngTheme.type.meta, color = colors.textMuted)
+                                        val hasBadges = viewer?.level != null || viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true
+                                        if (hasBadges) {
+                                            Spacer(Modifier.height(6.dp))
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                viewer?.level?.let { lvl ->
+                                                    IgngBadge("Lv.$lvl · ${viewer.exp ?: 0} EXP", tone = IgngBadgeTone.Accent)
+                                                }
+                                                if (viewer?.risk?.article?.active == true || viewer?.risk?.comment?.active == true) {
+                                                    IgngBadge("风控观察中", tone = IgngBadgeTone.Warning)
+                                                }
                                             }
                                         }
                                     }
@@ -246,95 +238,79 @@ fun ProfileCenterScreen(
                             }
                         }
                     }
-                }
 
-                // Group 1: Content & Creation (consolidated grouped list, zero card clutter)
-                if (activeAccount != null) {
-                    val isAdmin = bootstrap?.viewer?.admin?.isBbsAdmin == true
-                    item(key = "social_shortcuts") {
-                        IgngGroupedSection(title = "内容与创作") {
-                            IgngListRow(
-                                title = "我的收藏",
-                                icon = Icons.Outlined.BookmarkBorder,
-                                onClick = onOpenFavorites,
-                                showDivider = true,
-                            )
-                            IgngListRow(
-                                title = "关注与粉丝",
-                                icon = Icons.Outlined.Group,
-                                onClick = onOpenFollowing,
-                                showDivider = true,
-                            )
-                            IgngListRow(
-                                title = "阅读记录",
-                                icon = Icons.Outlined.History,
-                                onClick = onOpenHistory,
-                                showDivider = true,
-                            )
-                            IgngListRow(
-                                title = "创作中心",
-                                icon = Icons.Outlined.Create,
-                                onClick = onOpenCreator,
-                                showDivider = isAdmin,
-                            )
-                            if (isAdmin) {
+                    // Group 1: Content & Creation (consolidated grouped list, zero card clutter)
+                    if (activeAccount != null) {
+                        val isAdmin = bootstrap?.viewer?.admin?.isBbsAdmin == true
+                        item(key = "social_shortcuts") {
+                            IgngGroupedSection(title = "内容与创作") {
                                 IgngListRow(
-                                    title = "社区治理控制台",
-                                    icon = Icons.Outlined.AdminPanelSettings,
-                                    iconTint = colors.warning,
-                                    onClick = onOpenAdmin,
+                                    title = "我的收藏",
+                                    icon = Icons.Outlined.BookmarkBorder,
+                                    onClick = onOpenFavorites,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "关注与粉丝",
+                                    icon = Icons.Outlined.Group,
+                                    onClick = onOpenFollowing,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "阅读记录",
+                                    icon = Icons.Outlined.History,
+                                    onClick = onOpenHistory,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "创作中心",
+                                    icon = Icons.Outlined.Create,
+                                    onClick = onOpenCreator,
+                                    showDivider = isAdmin,
+                                )
+                                if (isAdmin) {
+                                    IgngListRow(
+                                        title = "社区治理控制台",
+                                        icon = Icons.Outlined.AdminPanelSettings,
+                                        iconTint = colors.warning,
+                                        onClick = onOpenAdmin,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Group 2: Community & Privacy
+                        item(key = "community_privacy") {
+                            IgngGroupedSection(title = "社区与隐私") {
+                                IgngListRow(
+                                    title = "隐私与内容过滤",
+                                    icon = Icons.Outlined.Lock,
+                                    onClick = onOpenPrivacyPreferences,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "社区规范与申诉准则",
+                                    icon = Icons.Outlined.Gavel,
+                                    onClick = onOpenRules,
                                 )
                             }
                         }
-                    }
-
-                    // Group 2: Account & Privacy
-                    item(key = "account_shortcuts") {
-                        IgngGroupedSection(title = "账户与隐私") {
-                            IgngListRow(
-                                title = "账户与安全",
-                                icon = Icons.Outlined.ManageAccounts,
-                                onClick = onOpenAccountSecurity,
-                                showDivider = true,
-                            )
-                            IgngListRow(
-                                title = "隐私与内容过滤",
-                                icon = Icons.Outlined.Lock,
-                                onClick = onOpenPrivacyPreferences,
-                            )
+                    } else {
+                        item(key = "guest_shortcuts") {
+                            IgngGroupedSection(title = "阅读与社区") {
+                                IgngListRow(
+                                    title = "本地阅读记录",
+                                    icon = Icons.Outlined.History,
+                                    onClick = onOpenHistory,
+                                    showDivider = true,
+                                )
+                                IgngListRow(
+                                    title = "社区规范与申诉准则",
+                                    icon = Icons.Outlined.Gavel,
+                                    onClick = onOpenRules,
+                                )
+                            }
                         }
-                    }
-                } else {
-                    item(key = "guest_history") {
-                        IgngGroupedSection(title = "阅读") {
-                            IgngListRow(
-                                title = "本地阅读记录",
-                                icon = Icons.Outlined.History,
-                                onClick = onOpenHistory,
-                            )
-                        }
-                    }
-                }
-
-                // Group 3: App
-                item(key = "app_shortcuts") {
-                    IgngGroupedSection(title = "应用") {
-                        IgngListRow(
-                            title = "应用设置",
-                            icon = Icons.Outlined.Settings,
-                            onClick = onOpenAppSettings,
-                            trailing = if (updateSnapshot.hasBadgeAlert) {
-                                { IgngUpdateDotBadge() }
-                            } else {
-                                null
-                            },
-                            showDivider = true,
-                        )
-                        IgngListRow(
-                            title = "社区规范与申诉准则",
-                            icon = Icons.Outlined.Gavel,
-                            onClick = onOpenRules,
-                        )
                     }
                 }
             }
@@ -356,7 +332,9 @@ fun UserProfileScreen(
 ) {
     val colors = IgngTheme.colors
     val scope = rememberCoroutineScope()
-    val activeAccount by container.sessionStore.activeAccount.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val isAuthed = activeAccount != null && !sessionAuthStatus.requiresReauth
     val holder = rememberScreenHolder("bbs_user_profile_ui_$userIdOrUsername") { UserProfileUiHolder() }
     var tab by holder.tabState // 0=posts, 1=collab, 2=activities
 
@@ -428,7 +406,7 @@ fun UserProfileScreen(
                                             IgngPrimaryButton(
                                                 text = if (p.viewerState.isFollowing) "已关注" else "关注",
                                                 onClick = {
-                                                    if (activeAccount == null) { onRequireLogin(); return@IgngPrimaryButton }
+                                                    if (!isAuthed) { onRequireLogin(); return@IgngPrimaryButton }
                                                     scope.launch {
                                                         when (val r = container.profileRepository.toggleFollow(p.user.id)) {
                                                             is ApiResult.Success -> {
@@ -449,7 +427,7 @@ fun UserProfileScreen(
                                             IgngSecondaryButton(
                                                 text = if (p.viewerState.blockFollow || p.viewerState.blockView) "取消屏蔽" else "屏蔽",
                                                 onClick = {
-                                                    if (activeAccount == null) { onRequireLogin(); return@IgngSecondaryButton }
+                                                    if (!isAuthed) { onRequireLogin(); return@IgngSecondaryButton }
                                                     scope.launch {
                                                         val res = if (p.viewerState.blockFollow || p.viewerState.blockView) {
                                                             container.profileRepository.deleteBlockRule(p.user.id)

@@ -11,8 +11,8 @@ import androidx.browser.customtabs.CustomTabsIntent
  * Lives in `:core:designsystem` so feature UI modules do not need to depend on `:core:auth`.
  */
 object IgngBrowserLauncher {
-    private const val TOOLBAR_DARK = 0xFF0B0F16.toInt()
-    private const val TOOLBAR_LIGHT = 0xFFF4F6FA.toInt()
+    private const val TOOLBAR_DARK = 0xFF0D1117.toInt()
+    private const val TOOLBAR_LIGHT = 0xFFF5F6F8.toInt()
 
     fun openExternalUrl(context: Context, url: String, isDark: Boolean = false) {
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
