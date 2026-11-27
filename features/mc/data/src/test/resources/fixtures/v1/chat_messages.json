@@ -127,5 +127,111 @@
     "label": "云萤",
     "description": "核心元气少女设定，带个性与风格档案"
   },
+  "yunying_status": {
+    "available": true,
+    "base": {
+      "id": "yunying",
+      "label": "云萤",
+      "description": "核心元气少女设定，带个性与风格档案"
+    },
+    "catgirl_mode": true,
+    "xingqing_mode": false,
+    "active_modes": [
+      {
+        "key": "yunying",
+        "label": "云萤",
+        "active": true
+      },
+      {
+        "key": "catgirl",
+        "label": "猫娘模式",
+        "active": true
+      },
+      {
+        "key": "xingqing",
+        "label": "性情模式",
+        "active": false
+      }
+    ],
+    "summary_label": "猫娘模式",
+    "chat_mode_enabled": true,
+    "paused": false,
+    "provisioning_status": "ready",
+    "activity": {
+      "wake_mode": "lurk",
+      "wake_mode_label": "自然潜水",
+      "wake_probability": 0.2,
+      "sleep_until": null,
+      "last_incoming_at": "2026-11-22T11:58:00Z",
+      "last_ai_reply_at": "2026-11-22T11:55:00Z"
+    },
+    "mood": {
+      "profile": "drive",
+      "mode_key": "low",
+      "mode_label": "黏人",
+      "dominant_summary": "有劲头，话头总想往你这儿接",
+      "scene": "群里正热闹讨论今晚打龙",
+      "is_cooling_down": false,
+      "cooling_down_until": null,
+      "is_aftercare": false,
+      "aftercare_until": null,
+      "updated_at": "2026-11-22T11:55:00Z",
+      "detailed": true,
+      "dimensions": [
+        {
+          "key": "lust",
+          "label": "性欲",
+          "value": 62,
+          "color": "#f97316"
+        },
+        {
+          "key": "lewd",
+          "label": "色情",
+          "value": 35,
+          "color": "#14b8a6"
+        },
+        {
+          "key": "possess",
+          "label": "占有",
+          "value": 58,
+          "color": "#a855f7"
+        },
+        {
+          "key": "shame",
+          "label": "羞耻",
+          "value": 40,
+          "color": "#ec4899"
+        },
+        {
+          "key": "resist",
+          "label": "理智",
+          "value": 45,
+          "color": "#3b82f6"
+        },
+        {
+          "key": "fatigue",
+          "label": "疲劳",
+          "value": 18,
+          "color": "#64748b"
+        },
+        {
+          "key": "affection",
+          "label": "好感",
+          "value": 78,
+          "color": "#ef4444"
+        }
+      ],
+      "recent_events": [
+        {
+          "name": "praise",
+          "label": "被夸过",
+          "tone": "good",
+          "at": "2026-11-22T11:40:00Z"
+        }
+      ],
+      "active_grudges": []
+    },
+    "updated_at": "2026-11-22T11:58:00Z"
+  },
   "channel_group_id": "123456789"
 }

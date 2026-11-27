@@ -4,7 +4,10 @@ import androidx.compose.ui.graphics.Color
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
@@ -907,8 +910,31 @@ fun extractMessageDisplay(message: ChatMessageDto): ParsedMessageDisplay {
     val isPatOnly = patCard != null && images.isEmpty() && audios.isEmpty() && videos.isEmpty() &&
         availableFiles.isEmpty() && cards.isEmpty() && forwards.isEmpty()
 
+    val safeFinalText = if (
+        !isPatOnly &&
+        finalText.isBlank() &&
+        images.isEmpty() &&
+        audios.isEmpty() &&
+        videos.isEmpty() &&
+        availableFiles.isEmpty() &&
+        cards.isEmpty() &&
+        forwards.isEmpty() &&
+        missingImages == 0 &&
+        !message.has_forward
+    ) {
+        humanizeMediaPlaceholders(message.content).trim().takeIf { it.isNotBlank() }
+            ?: structure.firstNotNullOfOrNull { part ->
+                listOf(part.title, part.summary, part.description, part.text, part.content)
+                    .firstOrNull { it.isNotBlank() }
+                    ?.trim()
+            }
+            ?: if (message.isRecalled) "[消息已撤回]" else "[暂不支持显示的消息]"
+    } else {
+        finalText
+    }
+
     return ParsedMessageDisplay(
-        text = finalText,
+        text = safeFinalText,
         images = images,
         audios = audios,
         videos = videos,
@@ -947,6 +973,7 @@ fun buildChatTimeline(
     activeAccount: SavedAccount?,
     boundMcUsernames: Set<String> = emptySet(),
     zoneId: ZoneId = ZoneId.systemDefault(),
+    today: LocalDate = LocalDate.now(zoneId),
 ): List<ChatTimelineItem> {
     if (messages.isEmpty()) return emptyList()
     val items = mutableListOf<ChatTimelineItem>()
@@ -976,7 +1003,7 @@ fun buildChatTimeline(
             flushGroup()
             items += ChatTimelineItem.DayHeader(
                 key = "day:$dayKey:${msg.id}",
-                label = formatDayHeaderLabel(msg.createdAt, zoneId),
+                label = formatDayHeaderLabel(msg.createdAt, zoneId, today),
             )
             lastDayKey = dayKey
             lastTimestampMs = ts
@@ -984,7 +1011,7 @@ fun buildChatTimeline(
             flushGroup()
             items += ChatTimelineItem.TimeDivider(
                 key = "time:${msg.id}",
-                label = formatMessageClock(msg.createdAt, zoneId),
+                label = formatTimeDividerLabel(msg.createdAt, zoneId, today),
             )
         }
 
@@ -1029,7 +1056,11 @@ fun mergeChatMessages(
     val comparator = Comparator<ChatMessageDto> { a, b ->
         val ta = parseIsoEpochMillis(a.createdAt)
         val tb = parseIsoEpochMillis(b.createdAt)
-        if (ta != tb && ta > 0L && tb > 0L) return@Comparator ta.compareTo(tb)
+        if (ta != tb) {
+            if (ta <= 0L) return@Comparator -1
+            if (tb <= 0L) return@Comparator 1
+            return@Comparator ta.compareTo(tb)
+        }
         compareMessageIds(a.id, b.id)
     }
     val base = if (pruneWindow && incoming.isNotEmpty()) {
@@ -1046,6 +1077,79 @@ fun mergeChatMessages(
     return byId.values.sortedWith(comparator)
 }
 
+/**
+ * Optimistically patches the matching session entry in [ChatSourcesResponse] when a conversation
+ * receives messages newer than the cached session-list snapshot.
+ */
+fun patchChatSourcesWithLatestMessage(
+    sources: ChatSourcesResponse,
+    source: String,
+    targetId: String,
+    latest: ChatMessageDto?,
+    persona: ChatPersonaDto? = null,
+): ChatSourcesResponse {
+    if (latest == null || targetId.isBlank()) return sources
+    val latestTs = parseIsoEpochMillis(latest.createdAt)
+    val previewContent = latest.content.trim().take(120)
+    val previewLast = ChatLastMessageDto(
+        sender = latest.senderName,
+        content = previewContent,
+        createdAt = latest.createdAt,
+        isSelf = latest.isSelf,
+        logicalSpeaker = latest.logicalSpeaker,
+        messageSourceLabel = latest.messageSourceLabel,
+    )
+
+    fun patchGroup(group: ChatGroupSourceDto): ChatGroupSourceDto {
+        if (group.id != targetId) return group
+        val currentTs = parseIsoEpochMillis(group.lastMessage?.createdAt ?: group.lastMessageAt)
+        val shouldAdvance = latestTs > 0L && (currentTs <= 0L || latestTs >= currentTs)
+        val nextPersona = persona ?: group.persona
+        if (!shouldAdvance && nextPersona == group.persona) return group
+        return if (shouldAdvance) {
+            group.copy(
+                lastMessageAt = latest.createdAt ?: group.lastMessageAt,
+                lastPreview = previewContent.ifBlank { group.lastPreview },
+                lastMessage = previewLast,
+                persona = nextPersona,
+            )
+        } else {
+            group.copy(persona = nextPersona)
+        }
+    }
+
+    if (source == "server") {
+        val numericTarget = targetId.toIntOrNull()
+        var changed = false
+        val updatedServers = sources.servers.map { srv ->
+            if (srv.id.toString() == targetId || (numericTarget != null && srv.id == numericTarget)) {
+                val currentTs = parseIsoEpochMillis(srv.lastMessage?.createdAt ?: srv.lastMessageAt)
+                if (latestTs > 0L && (currentTs <= 0L || latestTs >= currentTs)) {
+                    changed = true
+                    srv.copy(
+                        lastMessageAt = latest.createdAt ?: srv.lastMessageAt,
+                        lastPreview = previewContent.ifBlank { srv.lastPreview },
+                        lastMessage = previewLast,
+                    )
+                } else {
+                    srv
+                }
+            } else {
+                srv
+            }
+        }
+        return if (changed) sources.copy(servers = updatedServers) else sources
+    }
+
+    val updatedGroups = sources.qqGroups.map(::patchGroup)
+    val updatedPrivates = sources.privateChats.map(::patchGroup)
+    return if (updatedGroups != sources.qqGroups || updatedPrivates != sources.privateChats) {
+        sources.copy(qqGroups = updatedGroups, privateChats = updatedPrivates)
+    } else {
+        sources
+    }
+}
+
 private fun compareMessageIds(a: String, b: String): Int {
     val numA = a.removePrefix("qq-").toLongOrNull()
     val numB = b.removePrefix("qq-").toLongOrNull()
@@ -1059,12 +1163,17 @@ private val FULL_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 private val DAY_KEY_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
 fun parseIsoEpochMillis(iso: String?): Long {
-    if (iso.isNullOrBlank()) return 0L
-    return runCatching { Instant.parse(iso).toEpochMilli() }
-        .recoverCatching {
-            val normalized = iso.trim().replace(' ', 'T').let { if (it.endsWith("Z")) it else "${it}Z" }
-            Instant.parse(normalized).toEpochMilli()
-        }
+    val raw = iso?.trim().orEmpty()
+    if (raw.isEmpty()) return 0L
+    val normalized = if (raw.length >= 11 && raw[10] == ' ') {
+        raw.substring(0, 10) + "T" + raw.substring(11)
+    } else {
+        raw
+    }
+    return runCatching { Instant.parse(normalized).toEpochMilli() }
+        .recoverCatching { OffsetDateTime.parse(normalized).toInstant().toEpochMilli() }
+        .recoverCatching { ZonedDateTime.parse(normalized).toInstant().toEpochMilli() }
+        .recoverCatching { LocalDateTime.parse(normalized).toInstant(ZoneOffset.UTC).toEpochMilli() }
         .getOrDefault(0L)
 }
 
@@ -1087,6 +1196,22 @@ fun formatSessionTime(iso: String?, zoneId: ZoneId = ZoneId.systemDefault(), now
 
 fun formatMessageClock(iso: String?, zoneId: ZoneId = ZoneId.systemDefault()): String =
     toZonedDateTime(iso, zoneId)?.format(CLOCK_FMT) ?: "--:--"
+
+fun formatTimeDividerLabel(
+    iso: String?,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    today: LocalDate = LocalDate.now(zoneId),
+): String {
+    val dt = toZonedDateTime(iso, zoneId) ?: return "--:--"
+    val date = dt.toLocalDate()
+    val clock = dt.format(CLOCK_FMT)
+    return when {
+        date == today -> clock
+        date == today.minusDays(1) -> "昨天 $clock"
+        date.year == today.year -> "${date.monthValue}月${date.dayOfMonth}日 $clock"
+        else -> "${date.year}年${date.monthValue}月${date.dayOfMonth}日 $clock"
+    }
+}
 
 fun formatFullDateTime(iso: String?, zoneId: ZoneId = ZoneId.systemDefault()): String =
     toZonedDateTime(iso, zoneId)?.format(FULL_FMT) ?: "时间未知"

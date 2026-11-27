@@ -1,11 +1,14 @@
 package net.igng.mcstatus.feature.chat
 
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.ZoneOffset
 import net.igng.mcstatus.core.data.ChatAttachmentDto
 import net.igng.mcstatus.core.data.ChatForwardChildDto
 import net.igng.mcstatus.core.data.ChatGroupSourceDto
 import net.igng.mcstatus.core.data.ChatLastMessageDto
 import net.igng.mcstatus.core.data.ChatMessageDto
+import net.igng.mcstatus.core.data.ChatPersonaDto
 import net.igng.mcstatus.core.data.ChatSenderBadgeDto
 import net.igng.mcstatus.core.data.ChatSenderProfileDto
 import net.igng.mcstatus.core.data.ChatServerSourceDto
@@ -355,5 +358,102 @@ class ChatLogicTest {
         val anonSender = resolveForwardChildSender(anonChild, emptyMap(), defaultPlatform = "qq")
         assertEquals("星河", anonSender.displayName)
         assertNull(anonSender.avatarUrl)
+    }
+
+    @Test
+    fun parsesOffsetIsoTimestampsAndFormatsSessionAndDividerLabelsConsistently() {
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        val today = LocalDate.of(2026, 11, 27)
+
+        // +08:00 offset must equal the corresponding UTC instant (never corrupted by appending 'Z')
+        val utcMs = parseIsoEpochMillis("2026-11-26T13:15:00Z")
+        val offsetMs = parseIsoEpochMillis("2026-11-26T21:15:00+08:00")
+        val spaceNaiveUtcMs = parseIsoEpochMillis("2026-11-26 13:15:00")
+        assertTrue(utcMs > 0L)
+        assertEquals(utcMs, offsetMs)
+        assertEquals(utcMs, spaceNaiveUtcMs)
+        assertEquals(0L, parseIsoEpochMillis("not-a-timestamp"))
+
+        // Session list timestamps keep "昨天" for yesterday
+        assertEquals("17:05", formatSessionTime("2026-11-27T09:05:00Z", shanghai, today))
+        assertEquals("昨天", formatSessionTime("2026-11-26T13:15:00Z", shanghai, today))
+        assertEquals("11/25", formatSessionTime("2026-11-25T13:15:00Z", shanghai, today))
+        assertEquals("2025/12", formatSessionTime("2025-12-31T08:00:00Z", shanghai, today))
+
+        // Time dividers carry day prefix for non-today messages so yesterday's 03:20/21:15 never looks like today
+        assertEquals("17:05", formatTimeDividerLabel("2026-11-27T09:05:00Z", shanghai, today))
+        assertEquals("昨天 21:15", formatTimeDividerLabel("2026-11-26T21:15:00+08:00", shanghai, today))
+        assertEquals("昨天 03:20", formatTimeDividerLabel("2026-11-25T19:20:00Z", shanghai, today))
+        assertEquals("11月25日 09:30", formatTimeDividerLabel("2026-11-25T01:30:00Z", shanghai, today))
+    }
+
+    @Test
+    fun mergeChatMessagesMaintainsStrictOrderAndExtractsFallbackForEmptyBubbles() {
+        val mixed = listOf(
+            ChatMessageDto(id = "qq-3", source = "qq", content = "newest", createdAt = "2026-11-27T09:00:00Z"),
+            ChatMessageDto(id = "qq-1", source = "qq", content = "missing ts", createdAt = null),
+            ChatMessageDto(id = "qq-2", source = "qq", content = "offset", createdAt = "2026-11-26T21:15:00+08:00"),
+        )
+        val merged = mergeChatMessages(emptyList(), mixed, pruneWindow = false)
+        assertEquals(listOf("qq-1", "qq-2", "qq-3"), merged.map { it.id })
+
+        // Stripped-to-empty special structure never produces a blank invisible bubble
+        val quoteOnlyLink = ChatMessageDto(
+            id = "qq-60",
+            source = "qq",
+            platform = "qq",
+            content = "[链接]",
+            messageStructure = listOf(ChatStructurePartDto(type = "card", cardType = "quote", title = "Bob", description = "hi")),
+        )
+        val parsed = extractMessageDisplay(quoteOnlyLink)
+        assertEquals("[链接]", parsed.text)
+
+        val trulyEmpty = ChatMessageDto(
+            id = "qq-61",
+            source = "qq",
+            platform = "qq",
+            content = "",
+            messageStructure = listOf(ChatStructurePartDto(type = "unknown")),
+        )
+        assertEquals("[暂不支持显示的消息]", extractMessageDisplay(trulyEmpty).text)
+    }
+
+    @Test
+    fun patchChatSourcesAdvancesLatestMessageAndIgnoresOlderSnapshot() {
+        val initial = ChatSourcesResponse(
+            qqGroups = listOf(
+                ChatGroupSourceDto(
+                    id = "121183016",
+                    name = "技术群",
+                    platform = "qq",
+                    lastMessageAt = "2026-11-26T12:00:00Z",
+                    lastPreview = "旧消息",
+                ),
+            ),
+        )
+        val newerMsg = ChatMessageDto(
+            id = "qq-999",
+            source = "qq",
+            platform = "qq",
+            groupId = "121183016",
+            senderName = "Alice",
+            content = "刚刚的新消息",
+            createdAt = "2026-11-27T09:00:00Z",
+        )
+        val updated = patchChatSourcesWithLatestMessage(
+            sources = initial,
+            source = "qq",
+            targetId = "121183016",
+            latest = newerMsg,
+            persona = ChatPersonaDto(id = "yunying", label = "云萤"),
+        )
+        assertEquals("2026-11-27T09:00:00Z", updated.qqGroups.first().lastMessageAt)
+        assertEquals("刚刚的新消息", updated.qqGroups.first().lastMessage?.content)
+        assertEquals("云萤", updated.qqGroups.first().persona?.label)
+
+        // Older message must not regress the cached latest timestamp
+        val olderMsg = newerMsg.copy(id = "qq-100", content = "更早的消息", createdAt = "2026-11-25T09:00:00Z")
+        val unchanged = patchChatSourcesWithLatestMessage(updated, "qq", "121183016", olderMsg, null)
+        assertEquals("2026-11-27T09:00:00Z", unchanged.qqGroups.first().lastMessageAt)
     }
 }

@@ -728,6 +728,81 @@ data class ChatPersonaDto(
 )
 
 @Serializable
+data class ChatYunyingModeDto(
+    val key: String = "",
+    val label: String = "",
+    val active: Boolean = false,
+)
+
+@Serializable
+data class ChatYunyingActivityDto(
+    @SerialName("wake_mode") val wakeMode: String? = null,
+    @SerialName("wake_mode_label") val wakeModeLabel: String? = null,
+    @SerialName("wake_probability") val wakeProbability: Double? = null,
+    @SerialName("sleep_until") val sleepUntil: String? = null,
+    @SerialName("last_incoming_at") val lastIncomingAt: String? = null,
+    @SerialName("last_ai_reply_at") val lastAiReplyAt: String? = null,
+)
+
+@Serializable
+data class ChatYunyingMoodDimensionDto(
+    val key: String = "",
+    val label: String = "",
+    val value: Int = 0,
+    val color: String? = null,
+)
+
+@Serializable
+data class ChatYunyingMoodEventDto(
+    val name: String = "",
+    val label: String = "",
+    val tone: String = "neutral",
+    val at: String? = null,
+)
+
+@Serializable
+data class ChatYunyingMoodGrudgeDto(
+    val name: String = "",
+    val label: String = "",
+    @SerialName("remaining_days") val remainingDays: Double? = null,
+    val at: String? = null,
+)
+
+@Serializable
+data class ChatYunyingMoodDto(
+    val profile: String = "calm",
+    @SerialName("mode_key") val modeKey: String = "idle",
+    @SerialName("mode_label") val modeLabel: String = "",
+    @SerialName("dominant_summary") val dominantSummary: String = "",
+    val scene: String? = null,
+    @SerialName("is_cooling_down") val isCoolingDown: Boolean = false,
+    @SerialName("cooling_down_until") val coolingDownUntil: String? = null,
+    @SerialName("is_aftercare") val isAftercare: Boolean = false,
+    @SerialName("aftercare_until") val aftercareUntil: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    val detailed: Boolean = false,
+    val dimensions: List<ChatYunyingMoodDimensionDto> = emptyList(),
+    @SerialName("recent_events") val recentEvents: List<ChatYunyingMoodEventDto> = emptyList(),
+    @SerialName("active_grudges") val activeGrudges: List<ChatYunyingMoodGrudgeDto> = emptyList(),
+)
+
+@Serializable
+data class ChatYunyingStatusDto(
+    val available: Boolean = false,
+    val base: ChatPersonaDto? = null,
+    @SerialName("catgirl_mode") val catgirlMode: Boolean = false,
+    @SerialName("xingqing_mode") val xingqingMode: Boolean = false,
+    @SerialName("active_modes") val activeModes: List<ChatYunyingModeDto> = emptyList(),
+    @SerialName("summary_label") val summaryLabel: String = "",
+    @SerialName("chat_mode_enabled") val chatModeEnabled: Boolean? = null,
+    val paused: Boolean = false,
+    @SerialName("provisioning_status") val provisioningStatus: String? = null,
+    val activity: ChatYunyingActivityDto? = null,
+    val mood: ChatYunyingMoodDto? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+@Serializable
 data class ChatServerSourceDto(
     @SerialName("server_id") val serverId: String = "",
     @SerialName("numeric_server_id") val numericServerId: Int = 0,
@@ -895,6 +970,7 @@ data class ChatLogsResponse(
     @SerialName("focused_id") val focusedId: String? = null,
     @SerialName("sender_profiles") val senderProfiles: Map<String, ChatSenderProfileDto> = emptyMap(),
     val persona: ChatPersonaDto? = null,
+    @SerialName("yunying_status") val yunyingStatus: ChatYunyingStatusDto? = null,
     @SerialName("channel_group_id") val channelGroupId: String? = null,
 )
 
