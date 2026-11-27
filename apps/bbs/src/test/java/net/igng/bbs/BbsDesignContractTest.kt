@@ -80,4 +80,19 @@ class BbsDesignContractTest {
             assertFalse("$rel must not revert search bar to pill OutlinedTextField", src.contains("leadingIcon = { Icon(Icons.Rounded.Search"))
         }
     }
+
+    @Test
+    fun settingsDelegatesLoginDevicesToCompactEntryAndSecondaryScreen() {
+        val root = repoRoot()
+        val settings = File(root, "features/bbs/profile/src/main/java/net/igng/bbs/feature/profile/AccountAndSettingsScreens.kt").readText()
+        assertTrue("BBS AppSettingsScreen must render compact IgngDevicesSecurityEntryCard", settings.contains("IgngDevicesSecurityEntryCard("))
+        assertTrue("BBS profile must provide secondary IgngDevicesSecurityScreen host", settings.contains("IgngDevicesSecurityScreen("))
+        assertFalse("BBS AppSettingsScreen must not inline-expand legacy IgngDevicesSecurityCard", settings.contains("IgngDevicesSecurityCard("))
+
+        val routes = File(root, "apps/bbs/src/main/java/net/igng/bbs/AppRoutes.kt").readText()
+        assertTrue("BBS BbsRoute must declare LoginDevices secondary route", routes.contains("data object LoginDevices : BbsRoute"))
+
+        val appRoot = File(root, "apps/bbs/src/main/java/net/igng/bbs/BbsAppRoot.kt").readText()
+        assertTrue("BBS NavHost must register BbsRoute.LoginDevices", appRoot.contains("igngComposable<BbsRoute.LoginDevices>"))
+    }
 }

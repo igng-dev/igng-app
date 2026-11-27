@@ -60,6 +60,7 @@ import net.igng.bbs.feature.feed.TagFeedScreen
 import net.igng.bbs.feature.inbox.InboxScreen
 import net.igng.bbs.feature.post.PostReaderScreen
 import net.igng.bbs.feature.profile.AppSettingsScreen
+import net.igng.bbs.feature.profile.BbsLoginDevicesScreen
 import net.igng.bbs.feature.profile.FavoritesScreen
 import net.igng.bbs.feature.profile.FollowingScreen
 import net.igng.bbs.feature.profile.PrivacyPreferencesScreen
@@ -512,6 +513,7 @@ fun BbsAppRoot(
                         AppSettingsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
+                            onOpenLoginDevices = { navController.navigate(BbsRoute.LoginDevices) },
                             onSignIn = { launchSso(forceSwitchAccount = false) },
                             onAddAccount = { launchSso(forceSwitchAccount = true) },
                             onSyncFamilyAccount = ::syncWithFamilyAccount,
@@ -527,9 +529,18 @@ fun BbsAppRoot(
                         AppSettingsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
+                            onOpenLoginDevices = { navController.navigate(BbsRoute.LoginDevices) },
                             onSignIn = { launchSso(forceSwitchAccount = false) },
                             onAddAccount = { launchSso(forceSwitchAccount = true) },
                             onSyncFamilyAccount = ::syncWithFamilyAccount,
+                            onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
+                        )
+                    }
+
+                    igngComposable<BbsRoute.LoginDevices> {
+                        BbsLoginDevicesScreen(
+                            container = container,
+                            onBack = { navController.popBackStack() },
                             onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
                         )
                     }

@@ -56,4 +56,5 @@ sealed interface AppRoute {
     // Admin pocket console & Settings
     @Serializable data object AdminConsole : AppRoute
     @Serializable data object Settings : AppRoute
+    @Serializable data object LoginDevices : AppRoute
 }

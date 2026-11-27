@@ -40,6 +40,7 @@ sealed interface BbsRoute {
     @Serializable data object AccountSecurity : BbsRoute
     @Serializable data object PrivacyPreferences : BbsRoute
     @Serializable data object AppSettings : BbsRoute
+    @Serializable data object LoginDevices : BbsRoute
     @Serializable data object AdminConsole : BbsRoute
 }
 

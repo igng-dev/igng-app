@@ -1,17 +1,24 @@
 package net.igng.core.designsystem
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Edit
@@ -21,14 +28,17 @@ import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -751,119 +761,430 @@ fun IgngProfileIdentityCard(
 }
 
 /**
- * Unified active login devices management card (`/api/v1/devices`) shared by all IGNG apps.
+ * Pure presentation & filtering helpers shared by [IgngDevicesSecurityEntryCard] and
+ * [IgngDevicesSecurityScreen].
+ */
+object IgngDevicesUiLogic {
+    const val SEARCH_BAR_THRESHOLD: Int = 6
+
+    data class PartitionedDevices(
+        val currentDevices: List<CoreDeviceSessionDto>,
+        val otherDevices: List<CoreDeviceSessionDto>,
+    ) {
+        val totalVisible: Int get() = currentDevices.size + otherDevices.size
+        val isEmpty: Boolean get() = currentDevices.isEmpty() && otherDevices.isEmpty()
+    }
+
+    fun stableDeviceKey(device: CoreDeviceSessionDto): String =
+        device.id.ifBlank { device.sessionId }
+
+    fun resolveTotalCount(
+        devices: List<CoreDeviceSessionDto>,
+        reportedTotal: Int? = null,
+    ): Int = maxOf(reportedTotal ?: 0, devices.size)
+
+    fun shouldShowSearchBar(
+        devices: List<CoreDeviceSessionDto>,
+        hasMore: Boolean = false,
+    ): Boolean = hasMore || devices.size >= SEARCH_BAR_THRESHOLD
+
+    fun buildEntrySummary(
+        devices: List<CoreDeviceSessionDto>,
+        totalCount: Int,
+        loading: Boolean,
+        error: String?,
+    ): String {
+        val resolvedTotal = resolveTotalCount(devices, totalCount)
+        if (loading && resolvedTotal == 0) return "正在同步活跃会话…"
+        if (error != null && resolvedTotal == 0) return "未能读取登录设备，点击进入重试"
+        if (resolvedTotal == 0) return "暂无可展示的活跃设备会话"
+
+        val currentDevice = devices.firstOrNull { it.isCurrent }
+        return if (currentDevice != null) {
+            val currentName = currentDevice.deviceName.ifBlank { "当前设备" }
+            val otherCount = (resolvedTotal - 1).coerceAtLeast(0)
+            if (otherCount > 0) {
+                "本机：$currentName · 另有 $otherCount 台设备"
+            } else {
+                "本机：$currentName · 暂无其他活跃设备"
+            }
+        } else {
+            "共 $resolvedTotal 台活跃设备 · 点击查看与管理"
+        }
+    }
+
+    fun buildEntryBadgeText(
+        devices: List<CoreDeviceSessionDto>,
+        totalCount: Int,
+        loading: Boolean,
+        error: String?,
+    ): String? {
+        val resolvedTotal = resolveTotalCount(devices, totalCount)
+        if (loading && resolvedTotal == 0) return null
+        if (error != null && resolvedTotal == 0) return "重试"
+        return "$resolvedTotal 台"
+    }
+
+    fun buildScreenSubtitle(
+        devices: List<CoreDeviceSessionDto>,
+        totalCount: Int,
+        loading: Boolean,
+        error: String?,
+    ): String {
+        val resolvedTotal = resolveTotalCount(devices, totalCount)
+        return when {
+            loading && resolvedTotal == 0 -> "正在同步活跃会话…"
+            error != null && resolvedTotal == 0 -> "未能读取登录设备"
+            resolvedTotal > 0 -> "共 $resolvedTotal 台活跃设备 · 支持重命名与远程吊销"
+            else -> "查看并远程吊销活跃会话"
+        }
+    }
+
+    fun partitionAndFilterDevices(
+        devices: List<CoreDeviceSessionDto>,
+        query: String = "",
+    ): PartitionedDevices {
+        val seenKeys = HashSet<String>(devices.size)
+        val deduplicated = ArrayList<CoreDeviceSessionDto>(devices.size)
+        for (dev in devices) {
+            val key = stableDeviceKey(dev)
+            if (key.isEmpty() || seenKeys.add(key)) {
+                deduplicated.add(dev)
+            }
+        }
+
+        val normalizedQuery = query.trim()
+        val filtered = if (normalizedQuery.isEmpty()) {
+            deduplicated
+        } else {
+            deduplicated.filter { dev ->
+                dev.deviceName.contains(normalizedQuery, ignoreCase = true) ||
+                    (dev.clientLabel?.contains(normalizedQuery, ignoreCase = true) == true) ||
+                    (dev.ipAddress?.contains(normalizedQuery, ignoreCase = true) == true)
+            }
+        }
+
+        val current = ArrayList<CoreDeviceSessionDto>()
+        val others = ArrayList<CoreDeviceSessionDto>()
+        for (dev in filtered) {
+            if (dev.isCurrent) current.add(dev) else others.add(dev)
+        }
+        return PartitionedDevices(currentDevices = current, otherDevices = others)
+    }
+}
+
+/**
+ * Compact, fixed-height Settings entry card for active login devices (`/api/v1/devices`).
+ * Prevents long multi-device lists from inflating the primary Settings screen by delegating
+ * full inspection, search, rename, and revocation to [IgngDevicesSecurityScreen].
  */
 @Composable
-fun IgngDevicesSecurityCard(
+fun IgngDevicesSecurityEntryCard(
     devices: List<CoreDeviceSessionDto>,
     loading: Boolean,
     error: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    totalCount: Int = devices.size,
+) {
+    val colors = IgngTheme.colors
+    val resolvedTotal = IgngDevicesUiLogic.resolveTotalCount(devices, totalCount)
+    val summary = IgngDevicesUiLogic.buildEntrySummary(
+        devices = devices,
+        totalCount = resolvedTotal,
+        loading = loading,
+        error = error,
+    )
+    val badgeText = IgngDevicesUiLogic.buildEntryBadgeText(
+        devices = devices,
+        totalCount = resolvedTotal,
+        loading = loading,
+        error = error,
+    )
+    val isErrorBadge = error != null && resolvedTotal == 0
+
+    IgngInteractiveTile(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(IgngTheme.radii.sm)
+                    .background(colors.tileSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Devices,
+                    contentDescription = null,
+                    tint = colors.textSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "登录设备管理",
+                    style = IgngTheme.type.sectionTitle,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = summary,
+                    style = IgngTheme.type.meta,
+                    color = if (isErrorBadge) colors.warning else colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (badgeText != null) {
+                IgngBadge(
+                    text = badgeText,
+                    tone = if (isErrorBadge) IgngBadgeTone.Warning else IgngBadgeTone.Neutral,
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = "进入登录设备管理",
+                tint = colors.textMuted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Dedicated secondary screen for managing active login device sessions (`/api/v1/devices`).
+ * Shared identically by all IGNG official Android apps.
+ */
+@Composable
+fun IgngDevicesSecurityScreen(
+    devices: List<CoreDeviceSessionDto>,
+    loading: Boolean,
+    error: String?,
+    onBack: () -> Unit,
     onRefresh: () -> Unit,
     onRenameDevice: (deviceId: String, newName: String) -> Unit,
     onRevokeDevice: (deviceId: String) -> Unit,
     modifier: Modifier = Modifier,
+    authenticated: Boolean = true,
+    totalCount: Int = devices.size,
+    refreshing: Boolean = false,
+    revalidating: Boolean = false,
+    hasMore: Boolean = false,
+    loadingMore: Boolean = false,
+    busyDeviceIds: Set<String> = emptySet(),
+    onLoadMore: (() -> Unit)? = null,
 ) {
     val colors = IgngTheme.colors
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var renameTarget by remember { mutableStateOf<CoreDeviceSessionDto?>(null) }
     var renameDraft by remember { mutableStateOf("") }
     var revokeTarget by remember { mutableStateOf<CoreDeviceSessionDto?>(null) }
 
-    IgngTile(modifier = modifier.fillMaxWidth()) {
-        IgngSectionHeader(
-            title = "登录设备管理（${devices.size}）",
-            subtitle = "查看并远程吊销活跃会话",
-            prominent = true,
-            trailing = {
-                IgngButton(
-                    text = "刷新",
-                    onClick = onRefresh,
-                    style = IgngButtonStyle.Ghost,
-                    icon = Icons.Rounded.Refresh,
-                    compact = true,
-                )
-            },
-        )
-        Spacer(Modifier.height(12.dp))
+    val resolvedTotal = IgngDevicesUiLogic.resolveTotalCount(devices, totalCount)
+    val showSearchBar = IgngDevicesUiLogic.shouldShowSearchBar(devices, hasMore)
+    val effectiveQuery = if (showSearchBar) searchQuery else ""
+    val partitioned = remember(devices, effectiveQuery) {
+        IgngDevicesUiLogic.partitionAndFilterDevices(devices, effectiveQuery)
+    }
 
-        when {
-            loading && devices.isEmpty() -> IgngSkeletonRows(count = 2)
-            error != null && devices.isEmpty() -> IgngStateBlock(
-                title = "未能读取登录设备",
-                description = error,
-                isError = true,
-                actionLabel = "重试",
-                onAction = onRefresh,
-            )
-            devices.isEmpty() -> Text(
-                text = "暂无可展示的活跃设备会话。",
-                style = IgngTheme.type.caption,
-                color = colors.textSecondary,
-            )
-            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                devices.forEach { dev ->
-                    IgngTile(
-                        soft = true,
-                        borderColor = if (dev.isCurrent) colors.success.copy(alpha = 0.35f) else colors.line,
-                        contentPadding = PaddingValues(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+    IgngAmbientCanvas(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+        ) {
+            IgngTopBar(
+                title = "登录设备管理",
+                subtitle = if (authenticated) {
+                    IgngDevicesUiLogic.buildScreenSubtitle(
+                        devices = devices,
+                        totalCount = resolvedTotal,
+                        loading = loading,
+                        error = error,
+                    )
+                } else {
+                    "请先登录或重新授权账户"
+                },
+                onBack = onBack,
+                actions = {
+                    if (authenticated) {
+                        IconButton(
+                            onClick = onRefresh,
+                            enabled = !refreshing,
+                            modifier = Modifier.size(40.dp),
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.Devices,
-                                contentDescription = null,
-                                tint = if (dev.isCurrent) colors.success else colors.textSecondary,
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "刷新登录设备",
+                                tint = if (refreshing) colors.textMuted else colors.textPrimary,
                                 modifier = Modifier.size(20.dp),
                             )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    Text(
-                                        text = dev.deviceName.ifBlank { "未命名设备" },
-                                        style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = colors.textPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                        }
+                    }
+                },
+            )
+
+            if (!authenticated) {
+                Box(modifier = Modifier.padding(16.dp)) {
+                    IgngStateBlock(
+                        title = "登录会话不可用",
+                        description = "当前账号未登录或会话已失效，返回设置完成登录后即可管理活跃设备。",
+                        actionLabel = "返回设置",
+                        onAction = onBack,
+                    )
+                }
+            } else {
+                IgngPullToRefreshBox(
+                    isRefreshing = refreshing,
+                    isRevalidating = revalidating,
+                    onRefresh = onRefresh,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    when {
+                        loading && devices.isEmpty() -> Box(modifier = Modifier.padding(16.dp)) {
+                            IgngSkeletonRows(count = 4)
+                        }
+                        error != null && devices.isEmpty() -> Box(modifier = Modifier.padding(16.dp)) {
+                            IgngStateBlock(
+                                title = "未能读取登录设备",
+                                description = error,
+                                isError = true,
+                                actionLabel = "重试",
+                                onAction = onRefresh,
+                            )
+                        }
+                        devices.isEmpty() -> Box(modifier = Modifier.padding(16.dp)) {
+                            IgngEmptyTile(
+                                title = "暂无活跃设备会话",
+                                subtitle = "当前账号没有可展示的活跃登录设备。",
+                                actionLabel = "重新加载",
+                                onAction = onRefresh,
+                            )
+                        }
+                        else -> LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = rememberIgngPageContentPadding(top = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (showSearchBar) {
+                                item(key = "device_search") {
+                                    IgngSearchField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        placeholder = "搜索设备名称、客户端或 IP",
                                     )
-                                    if (dev.isCurrent) {
-                                        IgngBadge("本机", tone = IgngBadgeTone.Success)
+                                }
+                            }
+
+                            if (partitioned.isEmpty) {
+                                item(key = "device_search_empty") {
+                                    IgngEmptyTile(
+                                        title = "未找到匹配的设备",
+                                        subtitle = "当前已加载的设备中不包含「${effectiveQuery.trim()}」。",
+                                        actionLabel = "清空搜索",
+                                        onAction = { searchQuery = "" },
+                                    )
+                                }
+                            } else {
+                                if (partitioned.currentDevices.isNotEmpty()) {
+                                    item(key = "header_current") {
+                                        IgngSectionHeader(title = "当前设备")
+                                    }
+                                    itemsIndexed(
+                                        items = partitioned.currentDevices,
+                                        key = { idx, dev -> "cur_${IgngDevicesUiLogic.stableDeviceKey(dev)}_$idx" },
+                                    ) { _, dev ->
+                                        IgngDeviceSessionCard(
+                                            device = dev,
+                                            busy = dev.id in busyDeviceIds,
+                                            onRename = {
+                                                renameTarget = dev
+                                                renameDraft = dev.deviceName
+                                            },
+                                            onRevoke = { revokeTarget = dev },
+                                        )
                                     }
                                 }
-                                Text(
-                                    text = buildString {
-                                        append(dev.clientLabel ?: "IGNG 会话")
-                                        append(" · 最近活跃 ")
-                                        append(IgngCoreFormatters.relativeTime(dev.lastActiveAt))
-                                        dev.ipAddress?.takeIf { it.isNotBlank() }?.let {
-                                            append(" · ")
-                                            append(it)
+
+                                if (partitioned.otherDevices.isNotEmpty()) {
+                                    val otherCount = if (effectiveQuery.isNotBlank()) {
+                                        partitioned.otherDevices.size
+                                    } else {
+                                        (resolvedTotal - partitioned.currentDevices.size)
+                                            .coerceAtLeast(partitioned.otherDevices.size)
+                                    }
+                                    item(key = "header_others") {
+                                        IgngSectionHeader(
+                                            title = if (effectiveQuery.isNotBlank()) {
+                                                "其他活跃设备（匹配 $otherCount 台）"
+                                            } else {
+                                                "其他活跃设备（$otherCount）"
+                                            },
+                                            subtitle = if (effectiveQuery.isBlank()) {
+                                                "发现陌生设备时可随时远程吊销其会话"
+                                            } else {
+                                                null
+                                            },
+                                        )
+                                    }
+                                    itemsIndexed(
+                                        items = partitioned.otherDevices,
+                                        key = { idx, dev -> "other_${IgngDevicesUiLogic.stableDeviceKey(dev)}_$idx" },
+                                    ) { _, dev ->
+                                        IgngDeviceSessionCard(
+                                            device = dev,
+                                            busy = dev.id in busyDeviceIds,
+                                            onRename = {
+                                                renameTarget = dev
+                                                renameDraft = dev.deviceName
+                                            },
+                                            onRevoke = { revokeTarget = dev },
+                                        )
+                                    }
+                                } else if (effectiveQuery.isBlank() && !hasMore && partitioned.currentDevices.isNotEmpty()) {
+                                    item(key = "no_other_devices") {
+                                        IgngTile(
+                                            soft = true,
+                                            contentPadding = PaddingValues(14.dp),
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text(
+                                                text = "当前仅在本设备保持活跃登录，未检测到其他活跃设备。",
+                                                style = IgngTheme.type.caption,
+                                                color = colors.textSecondary,
+                                            )
                                         }
-                                    },
-                                    style = IgngTheme.type.caption,
-                                    color = colors.textSecondary,
-                                )
+                                    }
+                                }
                             }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IgngTagChip(
-                                text = "重命名",
-                                onClick = {
-                                    renameTarget = dev
-                                    renameDraft = dev.deviceName
-                                },
-                            )
-                            if (!dev.isCurrent) {
-                                IgngTagChip(
-                                    text = "吊销会话",
-                                    tone = IgngTone.DANGER,
-                                    onClick = { revokeTarget = dev },
-                                )
+
+                            if (hasMore && onLoadMore != null) {
+                                item(key = "load_more") {
+                                    IgngButton(
+                                        text = if (loadingMore) {
+                                            "正在加载更多…"
+                                        } else {
+                                            "加载更多设备（已加载 ${devices.size} / $resolvedTotal）"
+                                        },
+                                        onClick = onLoadMore,
+                                        style = IgngButtonStyle.Secondary,
+                                        loading = loadingMore,
+                                        enabled = !loadingMore,
+                                        compact = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
                             }
                         }
                     }
@@ -914,6 +1235,101 @@ fun IgngDevicesSecurityCard(
                 onRevokeDevice(id)
             },
         )
+    }
+}
+
+@Composable
+private fun IgngDeviceSessionCard(
+    device: CoreDeviceSessionDto,
+    busy: Boolean,
+    onRename: () -> Unit,
+    onRevoke: () -> Unit,
+) {
+    val colors = IgngTheme.colors
+    val relativeActive = IgngCoreFormatters.relativeTime(device.lastActiveAt)
+    val primaryMeta = buildString {
+        append(device.clientLabel?.takeIf { it.isNotBlank() } ?: "IGNG 会话")
+        if (relativeActive.isNotBlank()) {
+            append(" · 最近活跃 ")
+            append(relativeActive)
+        }
+    }
+    val secondaryMeta = listOfNotNull(
+        device.ipAddress?.takeIf { it.isNotBlank() }?.let { "IP $it" },
+        device.expiresAt?.takeIf { it.isNotBlank() }?.let { "有效至 ${IgngCoreFormatters.shortDateTime(it)}" },
+    ).joinToString(" · ")
+
+    IgngTile(
+        borderColor = if (device.isCurrent) colors.success.copy(alpha = 0.35f) else colors.line,
+        contentPadding = PaddingValues(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Devices,
+                contentDescription = null,
+                tint = if (device.isCurrent) colors.success else colors.textSecondary,
+                modifier = Modifier.size(20.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = device.deviceName.ifBlank { "未命名设备" },
+                        style = IgngTheme.type.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (device.isCurrent) {
+                        IgngBadge("本机", tone = IgngBadgeTone.Success)
+                    }
+                }
+                Text(
+                    text = primaryMeta,
+                    style = IgngTheme.type.caption,
+                    color = colors.textSecondary,
+                )
+                if (secondaryMeta.isNotBlank()) {
+                    Text(
+                        text = secondaryMeta,
+                        style = IgngTheme.type.meta,
+                        color = colors.textMuted,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (busy) {
+                IgngBadge("处理中…", tone = IgngBadgeTone.Accent)
+            } else {
+                IgngTagChip(
+                    text = "重命名",
+                    onClick = onRename,
+                )
+                if (!device.isCurrent) {
+                    IgngTagChip(
+                        text = "吊销会话",
+                        tone = IgngTone.DANGER,
+                        onClick = onRevoke,
+                    )
+                }
+            }
+        }
     }
 }
 
