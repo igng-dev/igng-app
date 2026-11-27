@@ -48,7 +48,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import coil3.compose.AsyncImage
+import java.time.LocalDate
 import net.igng.core.data.IgngCacheScope
 import net.igng.core.data.rememberScreenHolder
 import net.igng.core.data.rememberSwrResource
@@ -118,6 +120,11 @@ fun ChatSessionListScreen(
     val loading = sourcesState.isInitialLoading
     val refreshing = sourcesState.isUserRefreshing
     val error = sourcesState.error
+    var today by remember { mutableStateOf(LocalDate.now()) }
+    LifecycleResumeEffect(Unit) {
+        today = LocalDate.now()
+        onPauseOrDispose { }
+    }
 
     val allSessions = remember(sources) { sources?.let(::buildUnifiedSessions).orEmpty() }
     val hasPrivateChats = remember(allSessions) { allSessions.any { it.isPrivate } }
@@ -320,6 +327,44 @@ fun ChatSessionListScreen(
                             }
                         }
 
+                        if (error != null && allSessions.isNotEmpty()) {
+                            item(key = "staleRefreshHint") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(IgngTheme.radii.md)
+                                        .background(colors.warningBg)
+                                        .border(
+                                            IgngStroke.hairline,
+                                            colors.warning.copy(alpha = 0.35f),
+                                            IgngTheme.radii.md,
+                                        )
+                                        .clickable {
+                                            haptic(IgngHapticKind.Tick)
+                                            sourcesHandle.refresh()
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = "列表刷新失败，当前显示缓存快照（$error）",
+                                        style = IgngTheme.type.caption.copy(fontWeight = FontWeight.Medium),
+                                        color = colors.warning,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "重试",
+                                        style = IgngTheme.type.badge,
+                                        color = colors.warning,
+                                    )
+                                }
+                            }
+                        }
+
                         // Unified WeChat-style session container card
                         item(key = "sessionCardList") {
                             Column(
@@ -339,6 +384,7 @@ fun ChatSessionListScreen(
                                     }
                                     WeChatStyleSessionRow(
                                         session = session,
+                                        today = today,
                                         endpoints = endpoints,
                                         semantic = semantic,
                                         onClick = {
@@ -392,12 +438,13 @@ private fun SessionTabPill(
 @Composable
 private fun WeChatStyleSessionRow(
     session: ChatSessionItem,
+    today: LocalDate,
     endpoints: SiteEndpoints,
     semantic: ChatSemanticColors,
     onClick: () -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val timeText = remember(session.lastMessageAt) { formatSessionTime(session.lastMessageAt) }
+    val timeText = remember(session.lastMessageAt, today) { formatSessionTime(session.lastMessageAt, nowDate = today) }
 
     Row(
         modifier = Modifier

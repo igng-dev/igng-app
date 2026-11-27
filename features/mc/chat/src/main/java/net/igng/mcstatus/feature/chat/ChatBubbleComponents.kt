@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -239,6 +240,11 @@ fun ChatMessageGroupBlock(
     val tone = semantic.tones[sender.toneIndex.coerceIn(0, semantic.tones.lastIndex)]
     val canOpenSender = sender.boundIgngId != null || !sender.mcUsername.isNullOrBlank()
     val showHeader = !sender.isMine && (!isPrivateChat || sender.isAccountSelf || sender.badges.isNotEmpty() || sender.relationship != null)
+    var showFullTime by remember(group.key) { mutableStateOf(false) }
+    val firstCreatedAt = group.messages.firstOrNull()?.createdAt
+    val groupTimeLabel = remember(firstCreatedAt, showFullTime) {
+        if (showFullTime) formatFullDateTime(firstCreatedAt) else formatMessageClock(firstCreatedAt)
+    }
 
     Column(
         modifier = modifier
@@ -326,7 +332,28 @@ fun ChatMessageGroupBlock(
                                     fg = if (sender.isBot) semantic.bot else colors.textMuted,
                                 )
                             }
+                            if (!firstCreatedAt.isNullOrBlank()) {
+                                Text(
+                                    text = groupTimeLabel,
+                                    style = IgngTheme.type.badge.copy(fontFeatureSettings = "tnum"),
+                                    color = colors.textMuted,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { showFullTime = !showFullTime }
+                                        .padding(horizontal = 2.dp),
+                                )
+                            }
                         }
+                    } else if (isFirst && !firstCreatedAt.isNullOrBlank()) {
+                        Text(
+                            text = groupTimeLabel,
+                            style = IgngTheme.type.badge.copy(fontFeatureSettings = "tnum"),
+                            color = colors.textMuted,
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { showFullTime = !showFullTime },
+                        )
                     }
 
                     // Bubble corner shaping for consecutive grouped messages
@@ -490,18 +517,20 @@ fun ChatMessageGroupBlock(
                             }
 
                             // Merged forward cards
+                            val forwardFallbackSummary = msg.forwardSummary?.takeIf { it.isNotBlank() }
+                                ?: msg.content.trim().takeIf { it.isNotBlank() }
                             if (parsed.forwards.isNotEmpty()) {
                                 parsed.forwards.forEach { fwd ->
                                     ChatForwardSummaryCard(
                                         part = fwd,
-                                        fallbackSummary = msg.forwardSummary,
+                                        fallbackSummary = forwardFallbackSummary,
                                         onClick = { onOpenForward(msg) },
                                     )
                                 }
                             } else if (msg.has_forward || msg.content.contains("[合并转发")) {
                                 ChatForwardSummaryCard(
                                     part = null,
-                                    fallbackSummary = msg.forwardSummary,
+                                    fallbackSummary = forwardFallbackSummary,
                                     onClick = { onOpenForward(msg) },
                                 )
                             }

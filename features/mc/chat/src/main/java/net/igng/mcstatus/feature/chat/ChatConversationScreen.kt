@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -43,7 +44,6 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonSearch
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import net.igng.core.data.IgngCacheScope
@@ -79,6 +81,7 @@ import net.igng.mcstatus.core.data.ChatMessageDto
 import net.igng.mcstatus.core.data.ChatPersonaDto
 import net.igng.mcstatus.core.data.ChatRepository
 import net.igng.mcstatus.core.data.ChatSenderProfileDto
+import net.igng.mcstatus.core.data.ChatSourcesResponse
 import net.igng.mcstatus.core.data.McCacheKeys
 import net.igng.mcstatus.core.data.McCacheTags
 import net.igng.core.designsystem.IgngAmbientCanvas
@@ -107,10 +110,17 @@ private data class VideoPayload(
     val title: String,
 )
 
+private sealed interface PendingChatScroll {
+    data class Bottom(val smooth: Boolean = false) : PendingChatScroll
+    data class Message(val messageId: String, val smooth: Boolean = false) : PendingChatScroll
+    data class PreserveAnchor(val anchorMessageId: String) : PendingChatScroll
+}
+
 private class ChatConversationUiHolder(
     initialFilter: ChatFilterState,
     cachedLatest: ChatLogsResponse?,
     initialPersona: ChatPersonaDto?,
+    initialGroupId: String,
 ) {
     val filterState = mutableStateOf(initialFilter)
     val searchHighlightState = mutableStateOf("")
@@ -125,6 +135,8 @@ private class ChatConversationUiHolder(
         if (!initialFilter.isActive && cachedLatest != null) cachedLatest.senderProfiles else emptyMap(),
     )
     val personaState = mutableStateOf(cachedLatest?.persona ?: initialPersona)
+    val yunyingStatusState = mutableStateOf(cachedLatest?.yunyingStatus)
+    val effectiveGroupIdState = mutableStateOf(initialGroupId)
     val hasMoreState = mutableStateOf(if (!initialFilter.isActive && cachedLatest != null) cachedLatest.hasMore else false)
     val loadingState = mutableStateOf(messagesState.value.isEmpty())
     val loadingOlderState = mutableStateOf(false)
@@ -134,6 +146,7 @@ private class ChatConversationUiHolder(
         if (!initialFilter.isActive && cachedLatest != null) initialFilter else null,
     )
     var initialScrollDone by mutableStateOf(false)
+    var hasExpandedOlderHistory by mutableStateOf(false)
 }
 
 /**
@@ -191,7 +204,7 @@ fun ChatConversationScreen(
         val initPersona = initialPersonaLabel?.takeIf { it.isNotBlank() }?.let {
             ChatPersonaDto(label = it, description = initialPersonaDescription.orEmpty())
         }
-        ChatConversationUiHolder(initFilter, cached, initPersona)
+        ChatConversationUiHolder(initFilter, cached, initPersona, targetId)
     }
 
     var filter by holder.filterState
@@ -199,16 +212,21 @@ fun ChatConversationScreen(
     var messages by holder.messagesState
     var profiles by holder.profilesState
     var persona by holder.personaState
+    var yunyingStatus by holder.yunyingStatusState
+    var effectiveGroupId by holder.effectiveGroupIdState
     var hasMore by holder.hasMoreState
     var loading by holder.loadingState
     var loadingOlder by holder.loadingOlderState
     var error by holder.errorState
     var newBelowCount by holder.newBelowCountState
 
+    // Reactive local calendar date (updates across midnight / resume)
+    var today by remember { mutableStateOf(LocalDate.now()) }
+
     // Interactive overlays
     var showSearchSheet by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var showPersonaSheet by remember { mutableStateOf(false) }
+    var showYunyingStatusSheet by remember { mutableStateOf(false) }
     var lightbox by remember { mutableStateOf<LightboxPayload?>(null) }
     var videoPlayer by remember { mutableStateOf<VideoPayload?>(null) }
     var contextActionTarget by remember { mutableStateOf<Pair<ChatMessageDto, ResolvedChatSender>?>(null) }
@@ -229,8 +247,19 @@ fun ChatConversationScreen(
         }
     }
 
-    val timeline = remember(messages, profiles, activeAccount?.userId, boundMcSet) {
-        buildChatTimeline(messages, profiles, activeAccount, boundMcSet)
+    val timeline = remember(messages, profiles, activeAccount?.userId, boundMcSet, today) {
+        buildChatTimeline(messages, profiles, activeAccount, boundMcSet, today = today)
+    }
+
+    var pendingScroll by remember(source, targetId) {
+        mutableStateOf<PendingChatScroll?>(
+            if (!holder.initialScrollDone && messages.isNotEmpty()) {
+                filter.focusedId.takeIf { it.isNotBlank() }?.let { PendingChatScroll.Message(it, smooth = false) }
+                    ?: PendingChatScroll.Bottom(smooth = false)
+            } else {
+                null
+            },
+        )
     }
 
     val isNearBottom by remember {
@@ -247,26 +276,60 @@ fun ChatConversationScreen(
         if (isNearBottom) newBelowCount = 0
     }
 
-    suspend fun scrollToMessageOrBottom(targetMsgId: String?, smooth: Boolean = false) {
-        val total = listState.layoutInfo.totalItemsCount
-        if (total == 0) return
-        if (!targetMsgId.isNullOrBlank()) {
-            val idx = timeline.indexOfFirst { item ->
-                when (item) {
-                    is ChatTimelineItem.MessageGroup -> item.messages.any { it.id == targetMsgId }
-                    is ChatTimelineItem.SystemNotice -> item.message.id == targetMsgId
-                    else -> false
-                }
-            }
-            if (idx >= 0) {
-                // Account for the top history loader item at index 0
-                val listIndex = idx + 1
-                if (smooth) listState.animateScrollToItem(listIndex) else listState.scrollToItem(listIndex)
-                return
+    // State-driven scroll executor: always reads the latest laid-out timeline instead of stale closures.
+    LaunchedEffect(timeline, pendingScroll) {
+        val request = pendingScroll ?: return@LaunchedEffect
+        if (timeline.isEmpty()) return@LaunchedEffect
+        val expectedTotal = timeline.size + 1 // +1 for historyTopHeader at index 0
+        snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it >= expectedTotal }
+
+        fun findTimelineIndex(msgId: String): Int = timeline.indexOfFirst { item ->
+            when (item) {
+                is ChatTimelineItem.MessageGroup -> item.messages.any { it.id == msgId }
+                is ChatTimelineItem.SystemNotice -> item.message.id == msgId
+                else -> false
             }
         }
-        val bottomIndex = (total - 1).coerceAtLeast(0)
-        if (smooth) listState.animateScrollToItem(bottomIndex) else listState.scrollToItem(bottomIndex)
+
+        when (request) {
+            is PendingChatScroll.Bottom -> {
+                val bottomIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                if (request.smooth) listState.animateScrollToItem(bottomIndex) else listState.scrollToItem(bottomIndex)
+            }
+            is PendingChatScroll.Message -> {
+                val idx = findTimelineIndex(request.messageId)
+                val targetIndex = if (idx >= 0) idx + 1 else (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                if (request.smooth) listState.animateScrollToItem(targetIndex) else listState.scrollToItem(targetIndex)
+            }
+            is PendingChatScroll.PreserveAnchor -> {
+                val idx = findTimelineIndex(request.anchorMessageId)
+                if (idx >= 0) {
+                    listState.scrollToItem(idx + 1)
+                }
+            }
+        }
+        holder.initialScrollDone = true
+        pendingScroll = null
+    }
+
+    fun syncSourcesCache(latestMsg: ChatMessageDto?, latestPersona: ChatPersonaDto?) {
+        if (latestMsg == null) return
+        val sessionTarget = if (source == "qq") effectiveGroupId else targetId
+        var didAdvance = false
+        chatRepository.swrCache.patch<ChatSourcesResponse>(McCacheKeys.CHAT_SOURCES) { existing ->
+            val patched = patchChatSourcesWithLatestMessage(
+                sources = existing,
+                source = source,
+                targetId = sessionTarget,
+                latest = latestMsg,
+                persona = latestPersona,
+            )
+            if (patched != existing) didAdvance = true
+            patched
+        }
+        if (didAdvance) {
+            chatRepository.swrCache.markKeyStale(McCacheKeys.CHAT_SOURCES)
+        }
     }
 
     suspend fun loadMessages(
@@ -285,12 +348,13 @@ fun ChatConversationScreen(
         val dayRange = activeFilter.dayKey.takeIf { it.isNotBlank() }?.let(::dayKeyToUtcRange)
         val beforeId = if (older) messages.firstOrNull()?.id else null
         val aroundId = if (!older && activeFilter.focusedId.isNotBlank()) activeFilter.focusedId else null
+        val requestGroupId = if (source == "qq") effectiveGroupId else null
 
         runCatching {
             chatRepository.fetchMessages(
                 source = source,
                 serverId = if (source == "server") targetId.toIntOrNull() else null,
-                groupId = if (source == "qq") targetId else null,
+                groupId = requestGroupId,
                 senderId = activeFilter.senderId,
                 atAll = activeFilter.atAll,
                 kind = activeFilter.kind,
@@ -301,27 +365,28 @@ fun ChatConversationScreen(
                 limit = 80,
             )
         }.onSuccess { resp ->
+            today = LocalDate.now()
             profiles = profiles + resp.senderProfiles
             if (resp.persona != null) persona = resp.persona
+            if (resp.yunyingStatus != null) yunyingStatus = resp.yunyingStatus
+            val resolvedGroupId = resp.channelGroupId?.takeIf { it.isNotBlank() }
+            if (source == "qq" && resolvedGroupId != null && resolvedGroupId != effectiveGroupId) {
+                effectiveGroupId = resolvedGroupId
+            }
+            error = null
+
             val prevCount = messages.size
             val prevLastId = messages.lastOrNull()?.id
             val wasAtBottom = isNearBottom
 
             when {
                 older -> {
+                    holder.hasExpandedOlderHistory = true
                     val anchorMessageId = messages.firstOrNull()?.id
                     messages = mergeChatMessages(messages, resp.messages, pruneWindow = false)
                     hasMore = resp.hasMore
                     if (anchorMessageId != null && resp.messages.isNotEmpty()) {
-                        // Preserve scroll position near previous top message
-                        delay(16)
-                        val newTimeline = buildChatTimeline(messages, profiles, activeAccount, boundMcSet)
-                        val anchorIdx = newTimeline.indexOfFirst { item ->
-                            item is ChatTimelineItem.MessageGroup && item.messages.any { it.id == anchorMessageId }
-                        }
-                        if (anchorIdx >= 0) {
-                            listState.scrollToItem(anchorIdx + 1)
-                        }
+                        pendingScroll = PendingChatScroll.PreserveAnchor(anchorMessageId)
                     }
                 }
                 silent -> {
@@ -333,56 +398,70 @@ fun ChatConversationScreen(
                         (merged.size - prevCount).coerceAtLeast(0)
                     }
                     messages = merged
-                    if (!activeFilter.isActive) {
+                    if (!holder.hasExpandedOlderHistory) {
+                        hasMore = resp.hasMore
+                    }
+                    if (!activeFilter.isActive && effectiveGroupId == targetId) {
                         chatRepository.swrCache.put(
                             key = latestCacheKey,
-                            data = resp.copy(messages = merged, senderProfiles = profiles, hasMore = hasMore),
+                            data = resp.copy(
+                                messages = merged,
+                                senderProfiles = profiles,
+                                persona = persona,
+                                yunyingStatus = yunyingStatus,
+                                hasMore = hasMore,
+                            ),
                             scope = IgngCacheScope.SESSION_AWARE,
                             tags = setOf(McCacheTags.CHAT_MESSAGES),
                         )
+                        syncSourcesCache(merged.lastOrNull(), persona)
                     }
                     if (addedTail > 0) {
                         if (wasAtBottom) {
-                            delay(24)
-                            scrollToMessageOrBottom(null, smooth = true)
+                            pendingScroll = PendingChatScroll.Bottom(smooth = true)
                         } else {
                             newBelowCount += addedTail
                         }
                     }
                 }
                 else -> {
+                    holder.hasExpandedOlderHistory = false
                     messages = mergeChatMessages(emptyList(), resp.messages, pruneWindow = false)
                     hasMore = resp.hasMore
                     newBelowCount = 0
                     holder.loadedFilter = activeFilter
-                    holder.initialScrollDone = true
-                    if (!activeFilter.isActive) {
+                    if (!activeFilter.isActive && effectiveGroupId == targetId) {
                         chatRepository.swrCache.put(
                             key = latestCacheKey,
-                            data = resp.copy(messages = messages, senderProfiles = profiles),
+                            data = resp.copy(
+                                messages = messages,
+                                senderProfiles = profiles,
+                                persona = persona,
+                                yunyingStatus = yunyingStatus,
+                            ),
                             scope = IgngCacheScope.SESSION_AWARE,
                             tags = setOf(McCacheTags.CHAT_MESSAGES),
                         )
+                        syncSourcesCache(messages.lastOrNull(), persona)
                     }
-                    delay(32)
-                    scrollToMessageOrBottom(activeFilter.focusedId.takeIf { it.isNotBlank() }, smooth = false)
+                    if (messages.isEmpty()) {
+                        holder.initialScrollDone = true
+                        pendingScroll = null
+                    } else {
+                        pendingScroll = activeFilter.focusedId.takeIf { it.isNotBlank() }
+                            ?.let { PendingChatScroll.Message(it, smooth = false) }
+                            ?: PendingChatScroll.Bottom(smooth = false)
+                    }
                 }
             }
         }.onFailure { err ->
-            if (!silent && messages.isEmpty()) error = err.message ?: "消息读取失败"
+            if (!silent) {
+                error = err.message ?: "消息读取失败"
+            }
         }
 
         loading = false
         loadingOlder = false
-    }
-
-    // Scroll to bottom once if opened from cached snapshot
-    LaunchedEffect(Unit) {
-        if (!holder.initialScrollDone && messages.isNotEmpty()) {
-            holder.initialScrollDone = true
-            delay(16)
-            scrollToMessageOrBottom(filter.focusedId.takeIf { it.isNotBlank() }, smooth = false)
-        }
     }
 
     // Load only on cold start, filter change, or session switch; never re-blank on predictive back!
@@ -394,6 +473,7 @@ fun ChatConversationScreen(
 
     // Silently catch up when returning to conversation (ON_RESUME only, never mid-predictive-back drag)
     LifecycleResumeEffect(source, targetId, filter) {
+        today = LocalDate.now()
         if (messages.isNotEmpty() && !filter.isActive && !loading && !loadingOlder) {
             scope.launch {
                 loadMessages(older = false, silent = true, activeFilter = filter)
@@ -414,10 +494,12 @@ fun ChatConversationScreen(
         }
     }
 
-    // Auto-load older messages when user scrolls to top
+    // Auto-load older messages only AFTER initial scroll has settled (prevents cold-open race)
     val shouldLoadOlder by remember {
         derivedStateOf {
-            hasMore && !loading && !loadingOlder && messages.isNotEmpty() &&
+            holder.initialScrollDone &&
+                pendingScroll == null &&
+                hasMore && !loading && !loadingOlder && messages.isNotEmpty() &&
                 listState.firstVisibleItemIndex == 0 &&
                 listState.firstVisibleItemScrollOffset < 20
         }
@@ -441,15 +523,24 @@ fun ChatConversationScreen(
         }
     }
 
-    val displaySubtitle = remember(sessionKind, targetId, activeAccount, isAdminGroup, isTechGroup) {
+    val displaySubtitle = remember(sessionKind, effectiveGroupId, activeAccount, isAdminGroup, isTechGroup) {
         buildList {
             add(sessionKind.compactLabel)
-            if (sessionKind == ChatSessionKind.QQ_GROUP && activeAccount != null && targetId.all(Char::isDigit)) {
-                add(targetId)
+            if (sessionKind == ChatSessionKind.QQ_GROUP && activeAccount != null && effectiveGroupId.all(Char::isDigit)) {
+                add(effectiveGroupId)
             }
             if (isAdminGroup) add("管理群")
             if (isTechGroup) add("技术群")
         }.joinToString(" · ")
+    }
+
+    val yunyingIndicatorColor = remember(yunyingStatus, persona, colors.isDark) {
+        when {
+            yunyingStatus?.paused == true -> colors.warning
+            yunyingStatus?.catgirlMode == true || yunyingStatus?.xingqingMode == true -> semantic.personaFg
+            yunyingStatus?.available == true || persona != null -> semantic.bot
+            else -> null
+        }
     }
 
     IgngAmbientCanvas {
@@ -460,83 +551,127 @@ fun ChatConversationScreen(
                     .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
-                // Immersive conversation header
+                // Sleek fixed-height conversation header (Yunying status collapsed into dedicated button + header tap)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colors.tile.copy(alpha = 0.94f))
-                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                        .padding(horizontal = 4.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回会话列表", tint = colors.textPrimary)
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "返回会话列表",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(21.dp),
+                        )
                     }
                     SessionPlatformAvatar(
                         kind = sessionKind,
                         avatarUrl = endpoints.resolveApiMediaUrl(sessionAvatarUrl),
                         contentDescription = title,
                         semantic = semantic,
-                        sizeDp = 36,
+                        sizeDp = 34,
                     )
-                    Spacer(Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
+                    Spacer(Modifier.width(8.dp))
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .then(
+                                if (source == "qq") {
+                                    Modifier.clickable {
+                                        haptic(IgngHapticKind.Tick)
+                                        showYunyingStatusSheet = true
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .padding(vertical = 2.dp, horizontal = 2.dp),
+                    ) {
                         Text(
                             text = title.ifBlank { sessionKind.label },
-                            style = IgngTheme.type.cardTitle.copy(fontSize = 15.5.sp),
+                            style = IgngTheme.type.cardTitle.copy(fontSize = 15.sp),
                             color = colors.textPrimary,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                text = displaySubtitle,
-                                style = IgngTheme.type.badge,
-                                color = colors.textSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            val activePersona = persona
-                            if (source == "qq" && activePersona != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(5.dp))
-                                        .background(semantic.personaBg)
-                                        .clickable { showPersonaSheet = true }
-                                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                                ) {
-                                    Text(
-                                        text = "人设: ${activePersona.label}",
-                                        style = IgngTheme.type.badge.copy(fontSize = 10.sp),
-                                        color = semantic.personaFg,
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = displaySubtitle,
+                            style = IgngTheme.type.badge,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
 
-                    IconButton(onClick = { showSearchSheet = true }) {
-                        Icon(Icons.Rounded.Search, contentDescription = "搜索消息", tint = colors.textSecondary)
+                    IconButton(
+                        onClick = { showSearchSheet = true },
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = "搜索消息",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                     Box {
-                        IconButton(onClick = { showFilterSheet = true }) {
+                        IconButton(
+                            onClick = { showFilterSheet = true },
+                            modifier = Modifier.size(38.dp),
+                        ) {
                             Icon(
                                 imageVector = Icons.Rounded.FilterList,
                                 contentDescription = "筛选消息",
                                 tint = if (filter.isActive) colors.accent else colors.textSecondary,
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                         if (filter.isActive) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .padding(top = 10.dp, end = 10.dp)
+                                    .padding(top = 8.dp, end = 8.dp)
                                     .size(7.dp)
                                     .clip(CircleShape)
                                     .background(colors.accent),
                             )
+                        }
+                    }
+                    if (source == "qq") {
+                        Box {
+                            IconButton(
+                                onClick = {
+                                    haptic(IgngHapticKind.Tick)
+                                    showYunyingStatusSheet = true
+                                },
+                                modifier = Modifier.size(38.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = "查看云萤状态",
+                                    tint = yunyingIndicatorColor ?: colors.textSecondary,
+                                    modifier = Modifier.size(19.dp),
+                                )
+                            }
+                            if (yunyingIndicatorColor != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(top = 8.dp, end = 8.dp)
+                                        .size(6.5.dp)
+                                        .clip(CircleShape)
+                                        .background(yunyingIndicatorColor),
+                                )
+                            }
                         }
                     }
                     IconButton(
@@ -544,8 +679,14 @@ fun ChatConversationScreen(
                             haptic(IgngHapticKind.Tick)
                             scope.launch { loadMessages(older = false, silent = false, activeFilter = filter) }
                         },
+                        modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新", tint = colors.textSecondary)
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "刷新",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = colors.line)
@@ -561,11 +702,12 @@ fun ChatConversationScreen(
                         filter = filter,
                         source = source,
                         platform = platform,
+                        today = today,
                         onStepDay = { delta ->
                             val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
                             val cur = runCatching { LocalDate.parse(filter.dayKey, fmt) }.getOrNull() ?: return@ActiveFilterStrip
                             val next = cur.plusDays(delta.toLong())
-                            if (!next.isAfter(LocalDate.now())) {
+                            if (!next.isAfter(today)) {
                                 filter = filter.copy(dayKey = next.format(fmt), focusedId = "")
                             }
                         },
@@ -575,13 +717,62 @@ fun ChatConversationScreen(
                         onClearKind = { filter = filter.copy(kind = "") },
                         onClearFocus = {
                             searchHighlight = ""
+                            effectiveGroupId = targetId
                             filter = filter.copy(focusedId = "")
                         },
                         onResetAll = {
                             searchHighlight = ""
+                            effectiveGroupId = targetId
                             filter = ChatFilterState()
                         },
                     )
+                }
+
+                // Non-blocking inline error banner when list already has content
+                val inlineError = error
+                AnimatedVisibility(
+                    visible = inlineError != null && messages.isNotEmpty(),
+                    enter = fadeIn(IgngMotion.microTween(motionIntensity)),
+                    exit = fadeOut(IgngMotion.microTween(motionIntensity)),
+                ) {
+                    if (inlineError != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(colors.warningBg)
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = inlineError,
+                                style = IgngTheme.type.caption,
+                                color = colors.warning,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "重试",
+                                style = IgngTheme.type.badge.copy(fontWeight = FontWeight.Bold),
+                                color = colors.warning,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        scope.launch { loadMessages(older = false, silent = false, activeFilter = filter) }
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "关闭提示",
+                                tint = colors.warning,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { error = null },
+                            )
+                        }
+                    }
                 }
 
                 // Message stream body
@@ -713,7 +904,7 @@ fun ChatConversationScreen(
                         .clickable {
                             haptic(IgngHapticKind.Tap)
                             newBelowCount = 0
-                            scope.launch { scrollToMessageOrBottom(null, smooth = true) }
+                            pendingScroll = PendingChatScroll.Bottom(smooth = true)
                         }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -754,8 +945,9 @@ fun ChatConversationScreen(
         ChatSearchSheet(
             source = source,
             platform = platform,
-            targetId = targetId,
+            targetId = if (source == "qq") effectiveGroupId else targetId,
             channelTitle = title.ifBlank { sessionKind.label },
+            activeFilter = filter,
             endpoints = endpoints,
             chatRepository = chatRepository,
             activeAccount = activeAccount,
@@ -775,31 +967,29 @@ fun ChatConversationScreen(
             platform = platform,
             isPrivate = isPrivate,
             initial = filter,
+            today = today,
             onApply = { next ->
                 searchHighlight = ""
                 filter = next
             },
             onReset = {
                 searchHighlight = ""
+                effectiveGroupId = targetId
                 filter = ChatFilterState()
             },
             onDismiss = { showFilterSheet = false },
         )
     }
 
-    val sheetPersona = persona
-    if (showPersonaSheet && sheetPersona != null) {
-        IgngDetailSheet(
-            onDismiss = { showPersonaSheet = false },
-            title = "云萤当前人设：${sheetPersona.label}",
-            subtitle = "由当前会话配置决定",
-        ) {
-            Text(
-                text = sheetPersona.description.ifBlank { "当前会话正在使用「${sheetPersona.label}」对话风格。" },
-                style = IgngTheme.type.body,
-                color = colors.textSecondary,
-            )
-        }
+    if (showYunyingStatusSheet && source == "qq") {
+        ChatYunyingStatusSheet(
+            status = yunyingStatus,
+            fallbackPersona = persona,
+            channelTitle = title.ifBlank { sessionKind.label },
+            isPrivate = isPrivate,
+            today = today,
+            onDismiss = { showYunyingStatusSheet = false },
+        )
     }
 
     val activeForwardId = forwardMessageId
@@ -934,6 +1124,7 @@ private fun ActiveFilterStrip(
     filter: ChatFilterState,
     source: String,
     platform: String,
+    today: LocalDate,
     onStepDay: (Int) -> Unit,
     onClearDay: () -> Unit,
     onClearSender: () -> Unit,
@@ -943,7 +1134,7 @@ private fun ActiveFilterStrip(
     onResetAll: () -> Unit,
 ) {
     val colors = IgngTheme.colors
-    val todayKey = remember { LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) }
+    val todayKey = remember(today) { today.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) }
 
     Row(
         modifier = Modifier
@@ -974,7 +1165,7 @@ private fun ActiveFilterStrip(
                     modifier = Modifier.size(16.dp).clickable { onStepDay(-1) },
                 )
                 Text(
-                    text = formatShortDayLabel(filter.dayKey),
+                    text = formatShortDayLabel(filter.dayKey, today),
                     style = IgngTheme.type.badge,
                     color = colors.accent,
                     modifier = Modifier.padding(horizontal = 4.dp),

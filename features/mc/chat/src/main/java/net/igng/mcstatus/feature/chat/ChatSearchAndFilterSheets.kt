@@ -31,6 +31,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -84,6 +85,7 @@ fun ChatSearchSheet(
     platform: String,
     targetId: String,
     channelTitle: String,
+    activeFilter: ChatFilterState = ChatFilterState(),
     endpoints: SiteEndpoints = SiteEndpoints(),
     chatRepository: ChatRepository,
     activeAccount: SavedAccount?,
@@ -100,20 +102,32 @@ fun ChatSearchSheet(
     var hasMore by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val hasScopedFilter = activeFilter.dayKey.isNotBlank() ||
+        activeFilter.senderId.isNotBlank() ||
+        activeFilter.atAll ||
+        activeFilter.kind.isNotBlank()
+    var applyActiveFilter by remember(activeFilter) { mutableStateOf(false) }
 
     val directLocateId = remember(query, source) { ChatPlatformRules.parseLocateMessageId(query, source) }
 
-    suspend fun runSearch(term: String, beforeId: String? = null) {
+    suspend fun runSearch(term: String, beforeId: String? = null, useFilter: Boolean = applyActiveFilter) {
         if (term.isBlank()) return
         loading = true
         error = null
+        val scoped = useFilter && hasScopedFilter
+        val dayRange = if (scoped) activeFilter.dayKey.takeIf { it.isNotBlank() }?.let(::dayKeyToUtcRange) else null
         runCatching {
             chatRepository.fetchMessages(
                 source = source,
                 serverId = if (source == "server") targetId.toIntOrNull() else null,
                 groupId = if (source == "qq") targetId else null,
                 query = term,
+                senderId = if (scoped) activeFilter.senderId else "",
+                atAll = if (scoped) activeFilter.atAll else false,
+                kind = if (scoped) activeFilter.kind else "",
                 beforeId = beforeId,
+                start = dayRange?.first,
+                end = dayRange?.second,
                 limit = 30,
             )
         }.onSuccess { resp ->
@@ -151,6 +165,26 @@ fun ChatSearchSheet(
             },
         )
         Spacer(Modifier.height(10.dp))
+
+        if (hasScopedFilter) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterOptionPill(
+                    label = if (applyActiveFilter) "已限定当前筛选范围" else "仅在当前筛选范围内搜索",
+                    selected = applyActiveFilter,
+                    onClick = {
+                        val next = !applyActiveFilter
+                        applyActiveFilter = next
+                        if (submittedKeyword.isNotBlank()) {
+                            scope.launch { runSearch(submittedKeyword, beforeId = null, useFilter = next) }
+                        }
+                    },
+                )
+            }
+        }
 
         if (directLocateId != null) {
             Row(
@@ -289,6 +323,7 @@ fun ChatFilterSheet(
     platform: String,
     isPrivate: Boolean,
     initial: ChatFilterState,
+    today: LocalDate = LocalDate.now(),
     onApply: (ChatFilterState) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
@@ -300,7 +335,6 @@ fun ChatFilterSheet(
     var kind by remember(initial) { mutableStateOf(initial.kind) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    val today = remember { LocalDate.now() }
     val dayFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd") }
     val todayStr = remember(today) { today.format(dayFmt) }
     val yesterdayStr = remember(today) { today.minusDays(1).format(dayFmt) }
@@ -324,7 +358,7 @@ fun ChatFilterSheet(
             FilterOptionPill("前天", dayKey == twoDaysAgoStr) { dayKey = twoDaysAgoStr }
             FilterOptionPill(
                 label = if (dayKey.isNotBlank() && dayKey !in setOf(todayStr, yesterdayStr, twoDaysAgoStr)) {
-                    formatShortDayLabel(dayKey)
+                    formatShortDayLabel(dayKey, today)
                 } else {
                     "选择日期…"
                 },
@@ -339,8 +373,8 @@ fun ChatFilterSheet(
             Spacer(Modifier.height(14.dp))
             val placeholder = when {
                 source == "server" -> "输入 MC 玩家名，例如 Steve"
-                platform == "wechat" -> "输入微信标识 / wxid"
-                else -> "输入 QQ 号，例如 123456789"
+                platform == "wechat" -> "输入微信昵称 / 备注 / wxid"
+                else -> "输入 QQ 号或群昵称"
             }
             IgngTextField(
                 value = senderId,
@@ -425,7 +459,24 @@ fun ChatFilterSheet(
     }
 
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState()
+        val initialSelectedMillis = remember(dayKey) {
+            runCatching { LocalDate.parse(dayKey, dayFmt) }
+                .getOrNull()
+                ?.atStartOfDay(ZoneOffset.UTC)
+                ?.toInstant()
+                ?.toEpochMilli()
+        }
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialSelectedMillis,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    val picked = Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate()
+                    return !picked.isAfter(today)
+                }
+
+                override fun isSelectableYear(year: Int): Boolean = year <= today.year
+            },
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
@@ -433,7 +484,9 @@ fun ChatFilterSheet(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
                             val picked = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
-                            dayKey = picked.format(dayFmt)
+                            if (!picked.isAfter(today)) {
+                                dayKey = picked.format(dayFmt)
+                            }
                         }
                         showDatePicker = false
                     },
