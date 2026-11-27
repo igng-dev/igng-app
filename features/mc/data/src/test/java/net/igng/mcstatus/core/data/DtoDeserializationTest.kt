@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import net.igng.core.auth.OAuthTokenResponse
 import net.igng.core.model.CoreDailyLoginDto
+import net.igng.core.model.CoreFamilyHandoffResponse
 import net.igng.core.network.IgngJson
 import net.igng.mcstatus.core.model.BootstrapResponse
 import net.igng.mcstatus.core.data.ApiClient
@@ -31,7 +32,7 @@ class DtoDeserializationTest {
     @Test
     fun decodesBootstrapAndOAuthTokenFixtures() {
         val boot = json.decodeFromString<BootstrapResponse>(fixture("bootstrap.json"))
-        assertEquals("1.18", boot.apiVersion)
+        assertEquals("1.20", boot.apiVersion)
         assertEquals("https://www.igng.net", boot.urls.apiBaseUrl)
         assertTrue(boot.features.loginHistory.available)
         assertTrue(boot.features.penaltyHistory.available)
@@ -54,6 +55,13 @@ class DtoDeserializationTest {
         assertEquals(1250, dailyDto.exp)
         assertEquals(13, dailyDto.level)
         assertEquals(1.25, dailyDto.multiplier, 0.0001)
+
+        val handoff = json.decodeFromString<CoreFamilyHandoffResponse>(fixture("family_handoff.json"))
+        assertTrue(handoff.code.isNotBlank())
+        assertEquals(60, handoff.expiresIn)
+        assertEquals("igng_mc_android", handoff.targetClientId)
+        assertEquals("igngmc://auth/callback", handoff.redirectUri)
+        assertTrue(handoff.expiresAt.isNotBlank())
 
         val errObj = json.parseToJsonElement(fixture("error_envelope.json")).jsonObject
         val nested = errObj["error"]?.jsonObject

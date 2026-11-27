@@ -2,13 +2,8 @@ package net.igng.mcstatus
 
 import net.igng.mcstatus.core.model.adminRole
 
-import android.content.Intent
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
@@ -22,7 +17,6 @@ import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -46,18 +40,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
-import net.igng.core.auth.OAuthCallbackResult
+import net.igng.core.auth.AuthUiState
 import net.igng.core.data.LaunchedAppForegroundResumeEffect
-import net.igng.mcstatus.core.data.IgngAppContainer
-import net.igng.core.designsystem.IgngBadge
-import net.igng.core.designsystem.IgngBadgeTone
-import net.igng.core.designsystem.IgngButton
-import net.igng.core.designsystem.IgngButtonStyle
-import net.igng.core.designsystem.IgngDetailSheet
+import net.igng.core.designsystem.IgngAuthOverlayHost
 import net.igng.core.designsystem.IgngDockHost
-import net.igng.core.designsystem.IgngLoadingVeil
 import net.igng.core.designsystem.IgngNavTabItem
 import net.igng.core.designsystem.IgngPredictiveBackProfile
 import net.igng.core.designsystem.IgngPredictiveNavHost
@@ -67,8 +55,10 @@ import net.igng.core.designsystem.LocalIgngPredictiveBackState
 import net.igng.core.designsystem.igngComposable
 import net.igng.core.designsystem.rememberIgngDockBottomPadding
 import net.igng.core.designsystem.rememberIgngPredictiveBackState
-import net.igng.mcstatus.core.model.AppPreferences
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.SessionAuthStatus
+import net.igng.mcstatus.core.data.IgngAppContainer
+import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.mcstatus.feature.admin.AdminPocketConsoleScreen
 import net.igng.mcstatus.feature.chat.ChatConversationScreen
 import net.igng.mcstatus.feature.chat.ChatSessionListScreen
@@ -103,19 +93,18 @@ import net.igng.mcstatus.feature.wiki.WikiCatalogScreen
 @Composable
 fun IgngMcApp(
     container: IgngAppContainer,
-    incomingIntentFlow: StateFlow<Intent?>,
-    onIntentConsumed: () -> Unit,
+    incomingShortcuts: Flow<String>,
 ) {
     val preferences by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
     val activeAccount by container.activeAccount.collectAsState()
     val accounts by container.accounts.collectAsState()
-    val dailyExp by container.dailyExp.collectAsState()
     val bootstrap by container.bootstrap.collectAsState()
     val sessionEpoch by container.sessionEpoch.collectAsState()
     val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
     val familyAccounts by container.familyAccounts.collectAsState()
+    val authUiState by container.authUiState.collectAsState()
+    val initialFamilySyncDone by container.initialFamilySyncDone.collectAsState()
     val updateSnapshot by container.appUpdateManager.snapshot.collectAsState()
-    val incomingIntent by incomingIntentFlow.collectAsState()
 
     IgngTheme(
         themeMode = preferences.themeMode,
@@ -127,11 +116,10 @@ fun IgngMcApp(
         val lifecycleOwner = LocalLifecycleOwner.current
         val scope = rememberCoroutineScope()
         val colors = IgngTheme.colors
-        val intensity = IgngTheme.motionIntensity
         val snackbarHostState = remember { SnackbarHostState() }
 
         LaunchedEffect(Unit) {
-            container.refreshFamilyAccounts()
+            container.syncFamilyAccountsAndAutoSignIn()
         }
         // Silent cold-start update check (24h cooldown, skips family-sync-only pushes)
         LaunchedEffect(Unit) {
@@ -141,20 +129,17 @@ fun IgngMcApp(
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
-                    scope.launch { container.refreshFamilyAccounts() }
+                    container.syncFamilyAccountsAndAutoSignIn()
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
 
-        var authExchanging by remember { mutableStateOf(false) }
-        var authError by remember { mutableStateOf<String?>(null) }
         var sessionExpiredPrompt by remember { mutableStateOf(false) }
         var promptedLegacyUserId by remember { mutableStateOf<Int?>(null) }
 
         fun startOAuth(forceLogin: Boolean) {
-            authError = null
             container.sessionManager.launchLogin(
                 context = context,
                 isDark = colors.isDark,
@@ -162,42 +147,40 @@ fun IgngMcApp(
             )
         }
 
-        // Handle OAuth callbacks & App Shortcut intents via unified IgngSessionManager
-        LaunchedEffect(incomingIntent) {
-            val intent = incomingIntent ?: return@LaunchedEffect
-            onIntentConsumed()
-            val data = intent.data
-            if (container.sessionManager.isMatchingCallback(data)) {
-                authExchanging = true
-                when (val result = container.handleOAuthCallback(data)) {
-                    is OAuthCallbackResult.Success -> {
-                        sessionExpiredPrompt = false
-                        snackbarHostState.showSnackbar("欢迎回来，${result.account.displayName}")
-                    }
-                    is OAuthCallbackResult.Error -> {
-                        authError = result.message
-                    }
-                    OAuthCallbackResult.Ignored -> Unit
-                }
-                authExchanging = false
-                return@LaunchedEffect
-            }
+        fun syncWithFamilyAccount(hint: FamilySharedAccountHint) {
+            container.signInWithFamilyAccount(
+                context = context,
+                hint = hint,
+                isDark = colors.isDark,
+            )
+        }
 
-            when (intent.getStringExtra(EXTRA_SHORTCUT_ACTION)) {
-                "status" -> navController.navigate(AppRoute.StatusWall) { launchSingleTop = true }
-                "map" -> navController.navigate(AppRoute.WorldMap()) { launchSingleTop = true }
-                "chat" -> navController.navigate(AppRoute.Chat) { launchSingleTop = true }
-                "create_ticket" -> {
-                    if (container.activeAccount.value != null) {
-                        navController.navigate(AppRoute.CreateTicket()) { launchSingleTop = true }
-                    } else {
-                        navController.navigate(AppRoute.PlayerCenter) { launchSingleTop = true }
+        // Unified OAuth & family handoff toast messages
+        LaunchedEffect(Unit) {
+            container.authEvents.collect { msg ->
+                snackbarHostState.showSnackbar(msg)
+            }
+        }
+
+        // Handle App Shortcut intents
+        LaunchedEffect(Unit) {
+            incomingShortcuts.collect { action ->
+                when (action) {
+                    "status" -> navController.navigate(AppRoute.StatusWall) { launchSingleTop = true }
+                    "map" -> navController.navigate(AppRoute.WorldMap()) { launchSingleTop = true }
+                    "chat" -> navController.navigate(AppRoute.Chat) { launchSingleTop = true }
+                    "create_ticket" -> {
+                        if (container.activeAccount.value != null && !container.sessionAuthStatus.value.requiresReauth) {
+                            navController.navigate(AppRoute.CreateTicket()) { launchSingleTop = true }
+                        } else {
+                            navController.navigate(AppRoute.PlayerCenter) { launchSingleTop = true }
+                        }
                     }
                 }
             }
         }
 
-        suspend fun refreshBootstrapAndDailyExp() {
+        suspend fun refreshBootstrap() {
             val boot = runCatching { container.fetchBootstrapForCurrentSession() }.getOrNull()
             if (boot != null) {
                 container.updateBootstrap(boot)
@@ -211,21 +194,15 @@ fun IgngMcApp(
                         adminRoleWire = boot.viewer.adminRole ?: current.adminRoleWire,
                     )
                     if (updated != current) {
-                        container.saveAndActivateAccount(updated, resetDailyExp = false)
+                        container.saveAndActivateAccount(updated, bumpEpoch = false)
                     }
                 }
             }
-            if (boot?.viewer?.authenticated == true) {
-                val exp = container.settleDailyLoginForCurrentSession()
-                container.updateDailyExp(exp)
-            } else if (boot != null) {
-                container.updateDailyExp(null)
-            }
         }
 
-        // Refresh bootstrap state, user metadata, admin role & settle daily login EXP whenever active session changes
+        // Refresh bootstrap state, user metadata & admin role whenever active session changes
         LaunchedEffect(activeAccount?.userId, sessionEpoch) {
-            refreshBootstrapAndDailyExp()
+            refreshBootstrap()
         }
 
         // Idle low-priority prefetch for sibling top-level tabs after first frame settles
@@ -236,13 +213,22 @@ fun IgngMcApp(
 
         // Silent bootstrap refresh when returning from background after >= 30s
         LaunchedAppForegroundResumeEffect(minBackgroundMs = 30_000L) {
-            refreshBootstrapAndDailyExp()
+            refreshBootstrap()
         }
 
-        // Prompt once for pre-v2.1.0 legacy sessions whose tokens are suppressed before hitting 401
-        LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
+        // Prompt once for pre-v2.1.0 legacy sessions after initial family sync check completes
+        LaunchedEffect(activeAccount?.userId, sessionAuthStatus, initialFamilySyncDone) {
+            if (sessionAuthStatus == SessionAuthStatus.ACTIVE) {
+                sessionExpiredPrompt = false
+                return@LaunchedEffect
+            }
             val uid = activeAccount?.userIdInt
-            if (uid != null && sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED && promptedLegacyUserId != uid) {
+            if (
+                initialFamilySyncDone &&
+                uid != null &&
+                sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED &&
+                promptedLegacyUserId != uid
+            ) {
                 promptedLegacyUserId = uid
                 sessionExpiredPrompt = true
             }
@@ -432,13 +418,13 @@ fun IgngMcApp(
                             activeAccount = activeAccount,
                             sessionAuthStatus = sessionAuthStatus,
                             sessionEpoch = sessionEpoch,
-                            dailyExp = dailyExp,
                             familyAccounts = familyAccounts,
                             hasAppUpdate = updateSnapshot.hasBadgeAlert,
                             playerRepository = container.playerRepository,
                             ticketRepository = container.ticketRepository,
                             bottomPadding = topLevelBottomBarPadding,
                             onSignIn = { startOAuth(forceLogin = false) },
+                            onSyncFamilyAccount = ::syncWithFamilyAccount,
                             onOpenPassport = { id -> navController.navigate(AppRoute.PlayerPassport(id)) },
                             onNavigate = { target ->
                                 when (target) {
@@ -649,6 +635,7 @@ fun IgngMcApp(
                             familyAccounts = familyAccounts,
                             onBack = { navController.popBackStack() },
                             onStartOAuthLogin = { force -> startOAuth(forceLogin = force) },
+                            onSyncFamilyAccount = ::syncWithFamilyAccount,
                             onSwitchAccount = { uid -> container.switchAccount(uid) },
                             onRemoveAccount = { uid -> container.removeAccount(uid) },
                             onLogoutActive = {
@@ -691,61 +678,19 @@ fun IgngMcApp(
                     .padding(bottom = bottomBarPadding.calculateBottomPadding() + 8.dp),
             )
 
-            // Full-screen Folded Core veil during OAuth PKCE token exchange
-            IgngLoadingVeil(visible = authExchanging)
-
-            if (authError != null) {
-                IgngDetailSheet(
-                    onDismiss = { authError = null },
-                    title = "登录未完成",
-                ) {
-                    IgngBadge(authError!!, tone = IgngBadgeTone.Danger)
-                    Spacer(Modifier.height(14.dp))
-                    IgngButton(
-                        text = "重新通过 IGNG SSO 登录",
-                        onClick = {
-                            authError = null
-                            startOAuth(forceLogin = false)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-
-            if (sessionExpiredPrompt) {
-                val isLegacyUpgrade = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
-                IgngDetailSheet(
-                    onDismiss = { sessionExpiredPrompt = false },
-                    title = if (isLegacyUpgrade) "需要升级登录授权" else "登录会话已失效",
-                    subtitle = "重新授权后即可继续，你正在编辑的内容不会被清除。",
-                ) {
-                    Text(
-                        text = if (isLegacyUpgrade) {
-                            "本版本已升级至 OAuth 2.1 安全认证架构，旧版登录凭证已停用。重新授权前仅可浏览公开内容与本地缓存的账户标识。"
-                        } else {
-                            "当前设备的 IGNG 登录会话可能已过期或在账户中心被撤销。重新授权前仅可浏览公开内容与本地缓存的账户标识。"
-                        },
-                        style = IgngTheme.type.body,
-                        color = colors.textSecondary,
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    IgngButton(
-                        text = "重新授权登录",
-                        onClick = {
-                            sessionExpiredPrompt = false
-                            startOAuth(forceLogin = false)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    IgngButton(
-                        text = "稍后再说",
-                        onClick = { sessionExpiredPrompt = false },
-                        style = IgngButtonStyle.Secondary,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
+            // Unified OAuth exchange veil, auth error & non-destructive session re-auth / family handoff overlay
+            IgngAuthOverlayHost(
+                isExchanging = authUiState is AuthUiState.Busy,
+                authError = (authUiState as? AuthUiState.Error)?.message,
+                onDismissAuthError = { container.sessionManager.clearAuthError() },
+                showSessionReauthSheet = sessionExpiredPrompt,
+                sessionAuthStatus = sessionAuthStatus,
+                activeAccount = activeAccount,
+                familyAccounts = familyAccounts,
+                onDismissSessionReauth = { sessionExpiredPrompt = false },
+                onSignInWithBrowser = { startOAuth(forceLogin = false) },
+                onSyncWithFamilyAccount = ::syncWithFamilyAccount,
+            )
         }
         }
     }

@@ -1,22 +1,8 @@
 package net.igng.bbs
 
 import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Create
 import androidx.compose.material.icons.outlined.FolderShared
@@ -28,7 +14,6 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -41,7 +26,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -57,7 +41,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import net.igng.bbs.core.data.BbsAppContainer
 import net.igng.bbs.core.model.AppPreferences
-import net.igng.bbs.core.model.DailyLoginDto
 import net.igng.bbs.feature.admin.AdminConsoleScreen
 import net.igng.bbs.feature.column.ColumnDetailScreen
 import net.igng.bbs.feature.column.ColumnSquareScreen
@@ -76,7 +59,6 @@ import net.igng.bbs.feature.feed.SearchScreen
 import net.igng.bbs.feature.feed.TagFeedScreen
 import net.igng.bbs.feature.inbox.InboxScreen
 import net.igng.bbs.feature.post.PostReaderScreen
-import net.igng.bbs.feature.profile.AccountSecurityScreen
 import net.igng.bbs.feature.profile.AppSettingsScreen
 import net.igng.bbs.feature.profile.FavoritesScreen
 import net.igng.bbs.feature.profile.FollowingScreen
@@ -84,19 +66,16 @@ import net.igng.bbs.feature.profile.PrivacyPreferencesScreen
 import net.igng.bbs.feature.profile.ProfileCenterScreen
 import net.igng.bbs.feature.profile.ReadingHistoryScreen
 import net.igng.bbs.feature.profile.UserProfileScreen
+import net.igng.core.auth.AuthUiState
 import net.igng.core.data.LaunchedAppForegroundResumeEffect
 import net.igng.core.data.LaunchedForegroundPollingEffect
 import net.igng.core.designsystem.IgngAmbientCanvas
+import net.igng.core.designsystem.IgngAuthOverlayHost
 import net.igng.core.designsystem.IgngBrowserLauncher
-import net.igng.core.designsystem.IgngButton
-import net.igng.core.designsystem.IgngButtonStyle
-import net.igng.core.designsystem.IgngDetailSheet
 import net.igng.core.designsystem.IgngDockHost
-import net.igng.core.designsystem.IgngMotion
 import net.igng.core.designsystem.IgngNavTabItem
 import net.igng.core.designsystem.IgngPredictiveNavHost
 import net.igng.core.designsystem.IgngPullRefreshStyle
-import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.LocalIgngDockBottomPadding
 import net.igng.core.designsystem.LocalIgngPredictiveBackState
@@ -104,18 +83,21 @@ import net.igng.core.designsystem.LocalIgngPullRefreshStyle
 import net.igng.core.designsystem.igngComposable
 import net.igng.core.designsystem.rememberIgngDockBottomPadding
 import net.igng.core.designsystem.rememberIgngPredictiveBackState
+import net.igng.core.model.FamilySharedAccountHint
 import net.igng.core.model.SessionAuthStatus
 
 @Composable
 fun BbsAppRoot(
     container: BbsAppContainer,
     incomingDeepLinks: Flow<BbsRoute>,
-    incomingAuthMessages: Flow<String>,
 ) {
     val prefs by container.settingsRepository.preferences.collectAsState(initial = AppPreferences())
     val activeAccount by container.activeAccount.collectAsState()
     val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
     val sessionEpoch by container.sessionEpoch.collectAsState()
+    val familyAccounts by container.familyAccounts.collectAsState()
+    val authUiState by container.authUiState.collectAsState()
+    val initialFamilySyncDone by container.initialFamilySyncDone.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -126,13 +108,11 @@ fun BbsAppRoot(
         hapticsEnabled = prefs.hapticsEnabled,
     ) {
         val colors = IgngTheme.colors
-        val intensity = IgngTheme.motionIntensity
         val navController = rememberNavController()
         val snackbarHostState = remember { SnackbarHostState() }
 
         var sessionExpiredReason by remember { mutableStateOf<String?>(null) }
         var promptedLegacyUserId by remember { mutableStateOf<Long?>(null) }
-        var expToast by remember { mutableStateOf<DailyLoginDto?>(null) }
 
         fun launchSso(forceSwitchAccount: Boolean = false) {
             container.oauthManager.launchLogin(
@@ -142,9 +122,17 @@ fun BbsAppRoot(
             )
         }
 
-        // Cross-app family SSO discovery on launch & resume
+        fun syncWithFamilyAccount(hint: FamilySharedAccountHint) {
+            container.signInWithFamilyAccount(
+                context = context,
+                hint = hint,
+                isDark = colors.isDark,
+            )
+        }
+
+        // Cross-app family SSO discovery & silent handoff on launch & resume
         LaunchedEffect(Unit) {
-            container.refreshFamilyAccounts()
+            container.syncFamilyAccountsAndAutoSignIn()
         }
         // Silent cold-start update check (24h cooldown, skips family-sync-only pushes)
         LaunchedEffect(Unit) {
@@ -154,21 +142,18 @@ fun BbsAppRoot(
         DisposableEffect(lifecycleOwner) {
             val observer = LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
-                    scope.launch { container.refreshFamilyAccounts() }
+                    container.syncFamilyAccountsAndAutoSignIn()
                 }
             }
             lifecycleOwner.lifecycle.addObserver(observer)
             onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
         }
 
-        // Initial hydration + bootstrap + daily login settlement
+        // Initial hydration + bootstrap refresh whenever session changes
         LaunchedEffect(activeAccount?.userId, sessionEpoch) {
             container.syncSessionStampNow()
             container.hydrateCachedBootstrap()
             container.refreshBootstrap(force = true)
-            if (activeAccount != null && sessionAuthStatus == SessionAuthStatus.ACTIVE) {
-                container.settleDailyLoginIfNeeded()
-            }
         }
 
         // Silent foreground resume refresh after returning from >= 30s background
@@ -192,10 +177,19 @@ fun BbsAppRoot(
             container.prefetchIdleTabs()
         }
 
-        // Prompt once for legacy sessions requiring OAuth 2.1 re-auth
-        LaunchedEffect(activeAccount?.userId, sessionAuthStatus) {
+        // Prompt once for legacy sessions requiring OAuth 2.1 re-auth (after initial family sync attempt)
+        LaunchedEffect(activeAccount?.userId, sessionAuthStatus, initialFamilySyncDone) {
+            if (sessionAuthStatus == SessionAuthStatus.ACTIVE) {
+                sessionExpiredReason = null
+                return@LaunchedEffect
+            }
             val uid = activeAccount?.userId
-            if (uid != null && sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED && promptedLegacyUserId != uid) {
+            if (
+                initialFamilySyncDone &&
+                uid != null &&
+                sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED &&
+                promptedLegacyUserId != uid
+            ) {
                 promptedLegacyUserId = uid
                 sessionExpiredReason = "本版本已升级至统一 OAuth 2.1 安全认证架构，旧版凭证已停用。重新授权前可继续浏览公开内容与本地记录。"
             }
@@ -219,18 +213,9 @@ fun BbsAppRoot(
             }
         }
 
-        // Daily EXP toast pill
+        // Unified OAuth & family handoff toast messages
         LaunchedEffect(Unit) {
-            container.dailyLoginReward.collect { reward ->
-                expToast = reward
-                delay(3200L)
-                expToast = null
-            }
-        }
-
-        // OAuth status toast
-        LaunchedEffect(Unit) {
-            incomingAuthMessages.collect { msg ->
+            container.authEvents.collect { msg ->
                 snackbarHostState.showSnackbar(msg)
             }
         }
@@ -337,6 +322,7 @@ fun BbsAppRoot(
                         ProfileCenterScreen(
                             container = container,
                             onLogin = { launchSso() },
+                            onSyncFamilyAccount = ::syncWithFamilyAccount,
                             onOpenMyProfile = { navController.navigate(BbsRoute.UserProfile(it)) },
                             onOpenFavorites = { navController.navigate(BbsRoute.Favorites) },
                             onOpenFollowing = { navController.navigate(BbsRoute.Following) },
@@ -349,9 +335,8 @@ fun BbsAppRoot(
                                 }
                             },
                             onOpenAdmin = { navController.navigate(BbsRoute.AdminConsole) },
-                            onOpenAccountSecurity = { navController.navigate(BbsRoute.AccountSecurity) },
                             onOpenPrivacyPreferences = { navController.navigate(BbsRoute.PrivacyPreferences) },
-                            onOpenAppSettings = { navController.navigate(BbsRoute.AppSettings) },
+                            onOpenSettings = { navController.navigate(BbsRoute.AppSettings) },
                             onOpenRules = { navController.navigate(BbsRoute.Rules) },
                             bottomInsetPadding = topLevelDockBottomPadding,
                         )
@@ -524,11 +509,12 @@ fun BbsAppRoot(
                     }
 
                     igngComposable<BbsRoute.AccountSecurity> {
-                        AccountSecurityScreen(
+                        AppSettingsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
                             onSignIn = { launchSso(forceSwitchAccount = false) },
                             onAddAccount = { launchSso(forceSwitchAccount = true) },
+                            onSyncFamilyAccount = ::syncWithFamilyAccount,
                             onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
                         )
                     }
@@ -541,6 +527,9 @@ fun BbsAppRoot(
                         AppSettingsScreen(
                             container = container,
                             onBack = { navController.popBackStack() },
+                            onSignIn = { launchSso(forceSwitchAccount = false) },
+                            onAddAccount = { launchSso(forceSwitchAccount = true) },
+                            onSyncFamilyAccount = ::syncWithFamilyAccount,
                             onShowMessage = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
                         )
                     }
@@ -578,71 +567,26 @@ fun BbsAppRoot(
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
 
-                // Animated Daily EXP Reward Pill
-                AnimatedVisibility(
-                    visible = expToast != null,
-                    enter = slideInVertically(IgngMotion.standardSpring(intensity)) { -it } + fadeIn(IgngMotion.easeTween(180, intensity)),
-                    exit = slideOutVertically(IgngMotion.standardSpring(intensity)) { -it } + fadeOut(IgngMotion.easeTween(140, intensity)),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 12.dp),
-                ) {
-                    expToast?.let { reward ->
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(IgngRadius.pill))
-                                .background(colors.tile)
-                                .border(net.igng.core.designsystem.IgngStroke.hairline, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(IgngRadius.pill))
-                                .padding(horizontal = 16.dp, vertical = 9.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "每日签到已结算 · 当前 Lv.${reward.level ?: 1}（${reward.exp ?: 0} EXP）",
-                                style = IgngTheme.type.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                                color = colors.accent,
-                            )
-                        }
-                    }
-                }
-
                 SnackbarHost(
                     hostState = snackbarHostState,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = dockBottomPadding.calculateBottomPadding() + 8.dp),
                 )
-            }
-        }
 
-        // Global 401 Session Expired Sheet (aligned with MC non-destructive re-auth sheet)
-        sessionExpiredReason?.let { reason ->
-            IgngDetailSheet(
-                onDismiss = { sessionExpiredReason = null },
-                title = "需要重新授权登录",
-                subtitle = "重新授权后即可继续，你正在编辑的内容不会被清除。",
-            ) {
-                Text(
-                    text = reason,
-                    style = IgngTheme.type.body,
-                    color = colors.textSecondary,
-                )
-                Spacer(Modifier.height(14.dp))
-                IgngButton(
-                    text = "重新通过 IGNG SSO 登录",
-                    onClick = {
-                        sessionExpiredReason = null
-                        launchSso(forceSwitchAccount = false)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                IgngButton(
-                    text = "稍后再说",
-                    onClick = { sessionExpiredReason = null },
-                    style = IgngButtonStyle.Secondary,
-                    modifier = Modifier.fillMaxWidth(),
+                // Unified OAuth exchange veil, auth error & non-destructive session re-auth / family handoff overlay
+                IgngAuthOverlayHost(
+                    isExchanging = authUiState is AuthUiState.Busy,
+                    authError = (authUiState as? AuthUiState.Error)?.message,
+                    onDismissAuthError = { container.sessionManager.clearAuthError() },
+                    showSessionReauthSheet = sessionExpiredReason != null,
+                    sessionAuthStatus = sessionAuthStatus,
+                    activeAccount = activeAccount,
+                    familyAccounts = familyAccounts,
+                    onDismissSessionReauth = { sessionExpiredReason = null },
+                    onSignInWithBrowser = { launchSso(forceSwitchAccount = false) },
+                    onSyncWithFamilyAccount = ::syncWithFamilyAccount,
+                    sessionReauthReasonOverride = sessionExpiredReason,
                 )
             }
         }

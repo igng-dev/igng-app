@@ -76,7 +76,10 @@ fun CreatorHubScreen(
     bottomInsetPadding: PaddingValues = PaddingValues(bottom = 96.dp),
 ) {
     val colors = IgngTheme.colors
-    val activeAccount by container.sessionStore.activeAccount.collectAsState()
+    val activeAccount by container.activeAccount.collectAsState()
+    val sessionAuthStatus by container.sessionAuthStatus.collectAsState()
+    val requiresReauth = activeAccount != null && sessionAuthStatus.requiresReauth
+    val isAuthed = activeAccount != null && !sessionAuthStatus.requiresReauth
 
     val (overviewState, overviewHandle) = rememberSwrResource<CreatorOverviewDto>(
         cache = container.swrCache,
@@ -84,7 +87,7 @@ fun CreatorHubScreen(
         scope = IgngCacheScope.USER_ONLY,
         policy = BbsCachePolicies.Standard,
         tags = setOf(BbsCacheTags.CREATOR),
-        enabled = activeAccount != null,
+        enabled = isAuthed,
         slotKey = "bbs_creator_overview",
     ) {
         container.creatorRepository.getOverview().toKotlinResult()
@@ -101,7 +104,7 @@ fun CreatorHubScreen(
         IgngTopBar(
             title = "创作中心",
             actions = {
-                if (activeAccount != null) {
+                if (isAuthed) {
                     IgngButton(
                         text = "写文章",
                         icon = Icons.Rounded.Add,
@@ -113,12 +116,16 @@ fun CreatorHubScreen(
             },
         )
 
-        if (activeAccount == null) {
+        if (!isAuthed) {
             Box(Modifier.padding(16.dp)) {
                 IgngEmptyTile(
-                    title = "登录开启 BBS 创作空间",
-                    subtitle = "使用原生所见即所得块级编辑器撰写长文、管理专栏与系列合集、查看 30 天阅读趋势与审核申诉状态。",
-                    actionLabel = "登录 IGNG 账户",
+                    title = if (requiresReauth) "重新授权以继续创作" else "登录开启 BBS 创作空间",
+                    subtitle = if (requiresReauth) {
+                        "当前登录会话已失效，重新通过 IGNG SSO 授权即可恢复草稿编辑、专栏管理与阅读趋势统计。"
+                    } else {
+                        "使用原生所见即所得块级编辑器撰写长文、管理专栏与系列合集、查看 30 天阅读趋势与审核申诉状态。"
+                    },
+                    actionLabel = if (requiresReauth) "重新授权登录" else "登录 IGNG 账户",
                     onAction = onRequireLogin,
                 )
             }

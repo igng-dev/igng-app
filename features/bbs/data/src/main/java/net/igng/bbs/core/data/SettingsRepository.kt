@@ -140,22 +140,6 @@ class SettingsRepository(context: Context) {
         }
     }
 
-    suspend fun getLastDailyLoginPeriod(userId: Long): String? {
-        val raw = appContext.bbsDataStore.data.first()[KEY_DAILY_LOGIN_PERIODS]
-        return decodeStringMap(raw)[userId.toString()]
-    }
-
-    suspend fun markDailyLoginPeriod(userId: Long, period: String) {
-        appContext.bbsDataStore.edit { prefs ->
-            val map = decodeStringMap(prefs[KEY_DAILY_LOGIN_PERIODS]).toMutableMap()
-            map[userId.toString()] = period
-            prefs[KEY_DAILY_LOGIN_PERIODS] = json.encodeToString(
-                MapSerializer(String.serializer(), String.serializer()),
-                map,
-            )
-        }
-    }
-
     suspend fun writeCache(key: String, payloadJson: String) = swrCache.write(key, payloadJson)
 
     suspend fun readCache(key: String): String? = swrCache.read(key)
@@ -183,6 +167,5 @@ class SettingsRepository(context: Context) {
         private val KEY_READING_HISTORY = stringPreferencesKey("reading_history_v2")
         private val KEY_EDITOR_DRAFTS = stringPreferencesKey("editor_drafts_v2")
         private val KEY_INBOX_CURSORS = stringPreferencesKey("inbox_cursors_v2")
-        private val KEY_DAILY_LOGIN_PERIODS = stringPreferencesKey("daily_login_periods_v2")
     }
 }

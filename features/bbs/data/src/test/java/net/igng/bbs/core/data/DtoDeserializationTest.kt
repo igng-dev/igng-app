@@ -17,6 +17,7 @@ import net.igng.bbs.core.model.PaginatedResponseDto
 import net.igng.bbs.core.model.PostDetailDto
 import net.igng.bbs.core.model.PostSummaryDto
 import net.igng.bbs.core.model.UserProfileDto
+import net.igng.core.model.CoreFamilyHandoffResponse
 import net.igng.core.network.ApiErrorEnvelopeDto
 import net.igng.core.network.IgngJson
 import org.junit.Assert.assertEquals
@@ -58,6 +59,7 @@ class DtoDeserializationTest {
             "admin_reviews.json",
             "devices_list.json",
             "daily_login.json",
+            "family_handoff.json",
             "error_envelope.json",
         )
         // Strict BBS-only boundary: none of the golden fixtures may contain Ink keys
@@ -71,7 +73,7 @@ class DtoDeserializationTest {
         assertTrue(bootstrap.categories.isNotEmpty())
         assertTrue(bootstrap.reportReasons.isNotEmpty())
         assertTrue(bootstrap.appealGrounds.isNotEmpty())
-        assertEquals("1.19.0", bootstrap.contractVersion)
+        assertEquals("1.20.0", bootstrap.contractVersion)
 
         val home = json.decodeFromString(BbsHomeDto.serializer(), readFixture("home.json"))
         assertTrue(home.recommendations.isNotEmpty())
@@ -142,6 +144,13 @@ class DtoDeserializationTest {
             """{"awarded":true,"exp":125,"base_exp":100,"multiplier":1.25,"level":3,"period":"2026-11-23"}""",
         )
         assertEquals(1.25, fractionalDaily.multiplier, 0.0001)
+
+        val handoff = json.decodeFromString(CoreFamilyHandoffResponse.serializer(), readFixture("family_handoff.json"))
+        assertTrue(handoff.code.isNotBlank())
+        assertEquals(60, handoff.expiresIn)
+        assertEquals("igng_bbs_android", handoff.targetClientId)
+        assertEquals("igngbbs://auth/callback", handoff.redirectUri)
+        assertTrue(handoff.expiresAt.isNotBlank())
 
         val err = json.decodeFromString(ApiErrorEnvelopeDto.serializer(), readFixture("error_envelope.json"))
         assertEquals("bbs.post_not_found", err.error.code)

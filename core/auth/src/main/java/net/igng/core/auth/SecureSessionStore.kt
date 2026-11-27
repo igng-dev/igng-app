@@ -161,6 +161,18 @@ class SecureSessionStore(
         pendingPrefs.edit().clear().apply()
     }
 
+    /**
+     * Tracks whether the user explicitly logged out of this app so background family auto-sync
+     * does not immediately re-sign them in without their explicit tap. Cleared on any sign-in.
+     */
+    fun isAutoFamilySsoSuppressed(): Boolean = synchronized(lock) {
+        vaultPrefs.getBoolean(KEY_AUTO_FAMILY_SSO_SUPPRESSED, false)
+    }
+
+    fun setAutoFamilySsoSuppressed(suppressed: Boolean) = synchronized(lock) {
+        vaultPrefs.edit().putBoolean(KEY_AUTO_FAMILY_SSO_SUPPRESSED, suppressed).apply()
+    }
+
     private fun reloadFromDisk() = synchronized(lock) {
         val encrypted = vaultPrefs.getString(KEY_VAULT_BLOB, null)
         if (!encrypted.isNullOrBlank()) {
@@ -291,6 +303,7 @@ class SecureSessionStore(
     companion object {
         private const val KEY_VAULT_BLOB = "vault_v2"
         private const val KEY_PENDING_OAUTH = "pending_oauth"
+        private const val KEY_AUTO_FAMILY_SSO_SUPPRESSED = "auto_family_sso_suppressed"
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
         private val DEVICE_ID_RE = Regex("^[a-z0-9_-]{8,64}$")

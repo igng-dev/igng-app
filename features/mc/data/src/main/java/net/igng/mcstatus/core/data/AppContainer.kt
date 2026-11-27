@@ -8,8 +8,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import coil3.ImageLoader
-import java.time.LocalDate
-import java.time.ZoneOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,14 +15,15 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import net.igng.core.auth.AuthUiState
 import net.igng.core.auth.IgngOAuthClient
 import net.igng.core.auth.IgngSessionManager
 import net.igng.core.auth.OAuthCallbackResult
@@ -43,7 +42,6 @@ import net.igng.core.model.ReaderTypographyPrefs
 import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
 import net.igng.core.model.ThemeMode
-import net.igng.core.network.ApiResult
 import net.igng.core.network.IgngClientConfig
 import net.igng.core.network.IgngHttpClient
 import net.igng.core.network.IgngJson
@@ -52,7 +50,6 @@ import net.igng.core.network.SingleFlightTokenRefresher
 import net.igng.core.updater.AppUpdateManager
 import net.igng.mcstatus.core.model.AppPreferences
 import net.igng.mcstatus.core.model.BootstrapResponse
-import net.igng.mcstatus.core.model.DailyExpStatus
 import net.igng.mcstatus.core.model.McAdminRole
 import net.igng.mcstatus.core.model.SiteEndpoints
 import net.igng.mcstatus.core.model.WikiReadingProgress
@@ -181,32 +178,6 @@ class SettingsRepository(private val context: Context) {
         }.getOrNull()
     }.orEmpty()
 
-    suspend fun getCachedDailyExp(userId: Long, periodUtc: String): DailyExpStatus? {
-        val raw = context.igngPrefsDataStore.data.first()[KEY_DAILY_EXP_CACHE] ?: return null
-        val map = decodeDailyMap(raw)
-        return map[userId.toString()]?.takeIf { it.period == periodUtc }
-    }
-
-    suspend fun saveCachedDailyExp(userId: Long, status: DailyExpStatus) {
-        context.igngPrefsDataStore.edit { prefs ->
-            val map = decodeDailyMap(prefs[KEY_DAILY_EXP_CACHE]).toMutableMap()
-            map[userId.toString()] = status
-            prefs[KEY_DAILY_EXP_CACHE] = IgngJson.instance.encodeToString(
-                MapSerializer(String.serializer(), DailyExpStatus.serializer()),
-                map,
-            )
-        }
-    }
-
-    private fun decodeDailyMap(raw: String?): Map<String, DailyExpStatus> = raw?.let {
-        runCatching {
-            IgngJson.instance.decodeFromString(
-                MapSerializer(String.serializer(), DailyExpStatus.serializer()),
-                it,
-            )
-        }.getOrNull()
-    }.orEmpty()
-
     private companion object {
         val KEY_THEME = stringPreferencesKey("theme_mode")
         val KEY_MOTION = stringPreferencesKey("motion_intensity")
@@ -215,7 +186,6 @@ class SettingsRepository(private val context: Context) {
         val KEY_RECENT_WIKI = stringPreferencesKey("recent_wiki_ids")
         val KEY_BOOKMARKED_WIKI = stringPreferencesKey("bookmarked_wiki_ids_v1")
         val KEY_WIKI_PROGRESS = stringPreferencesKey("wiki_reading_progress_v1")
-        val KEY_DAILY_EXP_CACHE = stringPreferencesKey("daily_exp_cache_v1")
         val KEY_SESSION_EPOCH = intPreferencesKey("session_epoch")
         val KEY_LAST_SELECTED_SERVER = stringPreferencesKey("last_selected_server_key_v1")
     }
@@ -231,8 +201,7 @@ class IgngAppContainer(
     val clientVersion: String,
     val clientVersionCode: Int = 0,
 ) {
-    private val _dailyExp = MutableStateFlow<DailyExpStatus?>(null)
-    val dailyExp: StateFlow<DailyExpStatus?> = _dailyExp.asStateFlow()
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _bootstrap = MutableStateFlow<BootstrapResponse?>(null)
     val bootstrap: StateFlow<BootstrapResponse?> = _bootstrap.asStateFlow()
@@ -245,14 +214,15 @@ class IgngAppContainer(
             callbackScheme = AuthRepository.CALLBACK_SCHEME,
             callbackHost = AuthRepository.CALLBACK_HOST,
             callbackPath = AuthRepository.CALLBACK_PATH,
-            scopes = AuthRepository.DEFAULT_SCOPES,
+            scopes = null,
             deviceName = "IGNGmc Android",
             endpoints = endpoints,
             clientVersion = clientVersion,
             userAgent = "IGNGmc-Android/$clientVersion",
         ),
         vaultConfig = AuthRepository.VAULT_CONFIG,
-        onSessionInvalidated = { _dailyExp.value = null },
+        appScope = appScope,
+        enrichAccount = { baseAccount -> enrichSignedInAccount(baseAccount) },
     )
 
     val sessionStore: SecureSessionStore get() = sessionManager.sessionStore
@@ -264,6 +234,9 @@ class IgngAppContainer(
     val sessionAuthStatus: StateFlow<SessionAuthStatus> get() = sessionManager.sessionAuthStatus
     val sessionEpoch: StateFlow<Int> get() = sessionManager.sessionEpoch
     val familyAccounts: StateFlow<List<FamilySharedAccountHint>> get() = sessionManager.familyAccounts
+    val authUiState: StateFlow<AuthUiState> get() = sessionManager.authUiState
+    val authEvents: SharedFlow<String> get() = sessionManager.authEvents
+    val initialFamilySyncDone: StateFlow<Boolean> get() = sessionManager.initialFamilySyncDone
 
     val tokenRefresher: SingleFlightTokenRefresher get() = sessionManager.tokenRefresher
     private val oauthClient: IgngOAuthClient get() = sessionManager.oauthClient
@@ -292,8 +265,6 @@ class IgngAppContainer(
         context = appContext,
         mediaOkHttpClient = mediaOkHttpClient,
     )
-
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val exploreCache = LocalJsonCache(appContext, "igng_explore_cache")
     val wikiCache = LocalJsonCache(appContext, "igng_wiki_cache")
@@ -331,6 +302,7 @@ class IgngAppContainer(
 
     init {
         syncSessionStampNow()
+        sessionManager.bindFamilyHandoffIssuer { req -> accountRepository.requestFamilyHandoff(req) }
         appScope.launch {
             combine(activeAccount, sessionEpoch, sessionAuthStatus) { acc, epoch, status ->
                 IgngSwrCache.buildSessionStamp(acc?.userId, epoch, status.name)
@@ -491,29 +463,39 @@ class IgngAppContainer(
         sessionManager.refreshFamilyAccounts()
     }
 
-    suspend fun handleOAuthCallback(uri: Uri?): OAuthCallbackResult {
-        val result = sessionManager.handleCallbackUri(uri) { baseAccount ->
-            val boot = runCatching { authRepository.fetchBootstrap(baseAccount.accessToken) }.getOrNull()
-            val viewerUser = boot?.viewer?.user
-            val adminRole = McAdminRole.fromWire(boot?.viewer?.adminRole)
-            baseAccount.copy(
-                userId = viewerUser?.resolvedNumericId?.takeIf { it > 0 }?.toLong() ?: baseAccount.userId,
-                username = viewerUser?.username?.takeIf { it.isNotBlank() } ?: baseAccount.username,
-                nickname = viewerUser?.nickname ?: baseAccount.nickname,
-                avatarUrl = viewerUser?.avatarUrl ?: baseAccount.avatarUrl,
-                deviceName = "IGNGmc Android",
-                adminRoleWire = adminRole?.name,
-            )
-        }
-        if (result is OAuthCallbackResult.Success) {
-            _dailyExp.value = null
-        }
-        return result
+    fun syncFamilyAccountsAndAutoSignIn() {
+        sessionManager.syncFamilyAccountsAndAutoSignIn()
     }
+
+    fun handleIncomingOAuthCallback(uri: Uri?): Boolean =
+        sessionManager.handleIncomingOAuthCallback(uri)
+
+    fun signInWithFamilyAccount(context: Context, hint: FamilySharedAccountHint, isDark: Boolean = false) {
+        sessionManager.signInWithFamilyAccount(context = context, hint = hint, isDark = isDark)
+    }
+
+    private suspend fun enrichSignedInAccount(baseAccount: SavedAccount): SavedAccount {
+        val boot = runCatching { authRepository.fetchBootstrap(baseAccount.accessToken) }.getOrNull()
+        if (boot != null) {
+            _bootstrap.value = boot
+        }
+        val viewerUser = boot?.viewer?.user
+        val adminRole = McAdminRole.fromWire(boot?.viewer?.adminRole)
+        return baseAccount.copy(
+            userId = viewerUser?.resolvedNumericId?.takeIf { it > 0 }?.toLong() ?: baseAccount.userId,
+            username = viewerUser?.username?.takeIf { it.isNotBlank() } ?: baseAccount.username,
+            nickname = viewerUser?.nickname ?: baseAccount.nickname,
+            avatarUrl = viewerUser?.avatarUrl ?: baseAccount.avatarUrl,
+            deviceName = "IGNGmc Android",
+            adminRoleWire = adminRole?.name,
+        )
+    }
+
+    suspend fun handleOAuthCallback(uri: Uri?): OAuthCallbackResult =
+        sessionManager.handleCallbackUri(uri) { baseAccount -> enrichSignedInAccount(baseAccount) }
 
     suspend fun logoutActive() {
         sessionManager.logoutActive()
-        _dailyExp.value = null
         syncSessionStampNow()
         swrCache.clearSessionDiskCache()
     }
@@ -535,63 +517,25 @@ class IgngAppContainer(
         return boot
     }
 
-    suspend fun settleDailyLoginForCurrentSession(): DailyExpStatus? {
-        val active = activeAccount.value ?: return null
-        if (activeUsableToken().isNullOrBlank()) return null
-        val todayUtc = LocalDate.now(ZoneOffset.UTC).toString()
-        settingsRepository.getCachedDailyExp(active.userId, todayUtc)?.let { cached ->
-            return cached
-        }
-        return when (val res = accountRepository.settleDailyLogin()) {
-            is ApiResult.Success -> {
-                val period = res.data.period.ifBlank { todayUtc }
-                val status = DailyExpStatus(
-                    loggedIn = true,
-                    awarded = res.data.awarded,
-                    exp = res.data.exp,
-                    baseExp = res.data.baseExp,
-                    level = res.data.level,
-                    multiplier = res.data.multiplier,
-                    period = period,
-                )
-                settingsRepository.saveCachedDailyExp(active.userId, status)
-                status
-            }
-            is ApiResult.Failure -> null
-        }
-    }
-
-    fun saveAndActivateAccount(account: SavedAccount, resetDailyExp: Boolean = true) {
-        sessionManager.saveAndActivateAccount(account, bumpEpoch = resetDailyExp)
-        if (resetDailyExp) {
-            _dailyExp.value = null
-        }
+    fun saveAndActivateAccount(account: SavedAccount, bumpEpoch: Boolean = true) {
+        sessionManager.saveAndActivateAccount(account, bumpEpoch = bumpEpoch)
         syncSessionStampNow()
     }
 
     fun switchAccount(userId: Long) {
         sessionManager.switchAccount(userId)
-        _dailyExp.value = null
         syncSessionStampNow()
     }
 
     fun switchAccount(userId: Int) = switchAccount(userId.toLong())
 
     fun removeAccount(userId: Long) {
-        val wasActive = activeAccount.value?.userId == userId
         sessionManager.removeAccount(userId)
-        if (wasActive) {
-            _dailyExp.value = null
-        }
         syncSessionStampNow()
     }
 
     fun removeActiveAccount() {
         activeAccount.value?.let { removeAccount(it.userId) }
-    }
-
-    fun updateDailyExp(status: DailyExpStatus?) {
-        _dailyExp.value = status
     }
 
     fun updateBootstrap(response: BootstrapResponse?) {

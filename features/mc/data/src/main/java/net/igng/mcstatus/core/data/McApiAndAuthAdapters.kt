@@ -1,13 +1,9 @@
 package net.igng.mcstatus.core.data
 
-import android.content.Context
 import android.net.Uri
 import java.io.File
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import net.igng.core.auth.IgngOAuthClient
-import net.igng.core.auth.OAuthClientConfig
 import net.igng.core.auth.PkcePair
 import net.igng.core.auth.SecureSessionStore
 import net.igng.core.auth.VaultStorageConfig
@@ -16,7 +12,6 @@ import net.igng.core.model.SavedAccount
 import net.igng.core.network.CryptoChallenge
 import net.igng.core.network.IgngHttpClient
 import net.igng.mcstatus.core.model.BootstrapResponse
-import net.igng.mcstatus.core.model.DailyExpStatus
 import net.igng.mcstatus.core.model.McAdminRole
 import net.igng.mcstatus.core.model.SiteEndpoints
 
@@ -133,16 +128,6 @@ class OAuthPendingStore(private val sessionStore: SecureSessionStore) {
     }
 }
 
-@Serializable
-private data class V1DailyLoginWire(
-    val awarded: Boolean = false,
-    val exp: Int? = null,
-    @SerialName("base_exp") val baseExp: Int? = null,
-    val multiplier: Double? = null,
-    val level: Int? = null,
-    val period: String? = null,
-)
-
 class AuthRepository(
     private val endpoints: SiteEndpoints,
     private val apiClient: ApiClient,
@@ -193,39 +178,12 @@ class AuthRepository(
             ),
         )
 
-    suspend fun settleDailyLogin(token: String? = null): DailyExpStatus? = runCatching {
-        val wire: V1DailyLoginWire = json.decodeFromString(
-            apiClient.post(
-                url = "${endpoints.api}/api/v1/users/me/daily-login",
-                body = "{}",
-                tokenOverride = token,
-                suppressAuthNotify = true,
-            ),
-        )
-        DailyExpStatus(
-            loggedIn = true,
-            awarded = wire.awarded,
-            exp = wire.exp,
-            baseExp = wire.baseExp,
-            level = wire.level,
-            multiplier = wire.multiplier,
-            period = wire.period,
-        )
-    }.getOrNull()
-
     companion object {
         const val CLIENT_ID = "igng_mc_android"
         const val REDIRECT_URI = "igngmc://auth/callback"
         const val CALLBACK_SCHEME = "igngmc"
         const val CALLBACK_HOST = "auth"
         const val CALLBACK_PATH = "/callback"
-        const val DEFAULT_SCOPES =
-            "profile:read profile:write devices:read devices:write " +
-                "mc:accounts:read mc:accounts:write mc:logins:read mc:permissions:read " +
-                "mc:lands:read mc:lands:write mc:vault:read mc:teleports:read " +
-                "mc:fake-players:read mc:medals:read mc:medals:write " +
-                "mc:tickets:read mc:tickets:write mc:media:write " +
-                "mc:status:read mc:search:read mc:chat:read mc:admin:read mc:admin:write"
 
         val VAULT_CONFIG = VaultStorageConfig(
             prefsName = "igng_mc_auth",

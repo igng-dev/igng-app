@@ -65,6 +65,7 @@ fun SettingsScreen(
     familyAccounts: List<FamilySharedAccountHint> = emptyList(),
     onBack: () -> Unit,
     onStartOAuthLogin: (forceLogin: Boolean) -> Unit,
+    onSyncFamilyAccount: (FamilySharedAccountHint) -> Unit,
     onSwitchAccount: (Long) -> Unit,
     onRemoveAccount: (Long) -> Unit,
     onLogoutActive: () -> Unit,
@@ -98,7 +99,7 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) {
         cacheBytes = container.cacheSizeBytes()
-        container.refreshFamilyAccounts()
+        container.syncFamilyAccountsAndAutoSignIn()
     }
 
     LifecycleResumeEffect(Unit) {
@@ -155,6 +156,7 @@ fun SettingsScreen(
                         familyAccounts = familyAccounts,
                         onSignIn = { onStartOAuthLogin(false) },
                         onAddAccount = { onStartOAuthLogin(true) },
+                        onSyncFamilyAccount = onSyncFamilyAccount,
                         onSwitchAccount = { uid ->
                             onSwitchAccount(uid)
                             onShowMessage("已切换当前账户")

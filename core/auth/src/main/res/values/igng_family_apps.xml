@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Official first-party IGNG Android app family registry (`packageName|displayName`).
-      Read at runtime by IgngFamilySsoProvider and IgngFamilyAccountDiscovery so :core:auth
-      Kotlin code remains 100% domain-agnostic while enforcing strict caller allowlisting.
+      Official first-party IGNG Android app family registry:
+      `packageName|displayName|clientId|redirectUri|releaseSigningCertSha256`
+
+      Read at runtime by IgngFamilySsoProvider, IgngFamilySignatureVerifier, and
+      IgngFamilyAccountDiscovery so :core:auth Kotlin sources stay 100% domain-agnostic
+      while enforcing bidirectional APK signing-certificate verification for native
+      cross-app PKCE handoff.
+
+      Note: SHA-256 digests below are public X.509 certificate fingerprints embedded in
+      every published official APK (identical to Android App Links assetlinks.json).
     -->
     <string-array name="igng_family_app_entries">
-        <item>net.igng.bbs|IGNG BBS</item>
-        <item>net.igng.mcstatus|IGNGmc</item>
-        <item>net.igng.ink|IGNG Ink</item>
+        <item>net.igng.bbs|IGNG BBS|igng_bbs_android|igngbbs://auth/callback|8ca1e1a703a4053a06d13078d8d50a04eb92751a1382f53407be29a541af1b2e</item>
+        <item>net.igng.mcstatus|IGNGmc|igng_mc_android|igngmc://auth/callback|0d9cd0525ab75baca783d212d1b347fdeb171866ac9c06fc72c1bef2134f2886</item>
+        <item>net.igng.ink|IGNG Ink|igng_ink_android|igngink://auth/callback|</item>
     </string-array>
 </resources>

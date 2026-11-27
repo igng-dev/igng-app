@@ -89,8 +89,30 @@ data class CoreRenameDeviceRequest(
 )
 
 /**
- * Non-secret public account identity discovered from a sibling IGNG family app on the same device
- * (Microsoft MSAL / Account Discovery pattern). Never contains access or refresh tokens.
+ * First-party cross-app native handoff request (`POST /api/v1/auth/family-handoff`).
+ * Mints a 60-second single-use PKCE S256 authorization code scoped to [targetClientId]
+ * without exposing the source app's access or refresh tokens.
+ */
+@Serializable
+data class CoreFamilyHandoffRequest(
+    @SerialName("target_client_id") val targetClientId: String,
+    @SerialName("redirect_uri") val redirectUri: String,
+    @SerialName("code_challenge") val codeChallenge: String,
+    @SerialName("code_challenge_method") val codeChallengeMethod: String = "S256",
+)
+
+@Serializable
+data class CoreFamilyHandoffResponse(
+    val code: String = "",
+    @SerialName("target_client_id") val targetClientId: String = "",
+    @SerialName("redirect_uri") val redirectUri: String = "",
+    @SerialName("expires_in") val expiresIn: Int = 60,
+    @SerialName("expires_at") val expiresAt: String = "",
+)
+
+/**
+ * Non-secret public account identity discovered from a verified sibling IGNG family app
+ * on the same device. Never contains access or refresh tokens.
  */
 @Serializable
 data class FamilySharedAccountHint(
@@ -101,6 +123,7 @@ data class FamilySharedAccountHint(
     val sourcePackage: String = "",
     val sourceAppName: String = "",
     val isActiveInSource: Boolean = false,
+    val sourceCertVerified: Boolean = true,
 ) {
     val displayName: String get() = nickname.ifBlank { username }
 }

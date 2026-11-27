@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.automirrored.rounded.Logout
@@ -40,8 +39,227 @@ import net.igng.core.model.SavedAccount
 import net.igng.core.model.SessionAuthStatus
 
 /**
- * Microsoft-style cross-app family SSO prompt card shown when a sibling IGNG official app
- * (e.g. IGNG BBS <-> IGNGmc <-> IGNG Ink) is already signed in on the same device.
+ * Unified root overlay host for OAuth 2.1 callback exchange, native family handoff progress,
+ * auth error feedback, and non-destructive session re-auth / legacy protocol upgrade sheets.
+ * Shared identically by all IGNG official Android apps so login UX never diverges.
+ */
+@Composable
+fun IgngAuthOverlayHost(
+    isExchanging: Boolean,
+    authError: String?,
+    onDismissAuthError: () -> Unit,
+    showSessionReauthSheet: Boolean,
+    sessionAuthStatus: SessionAuthStatus,
+    activeAccount: SavedAccount?,
+    familyAccounts: List<FamilySharedAccountHint>,
+    onDismissSessionReauth: () -> Unit,
+    onSignInWithBrowser: () -> Unit,
+    onSyncWithFamilyAccount: (FamilySharedAccountHint) -> Unit,
+    sessionReauthReasonOverride: String? = null,
+) {
+    val colors = IgngTheme.colors
+
+    // Full-screen Folded Core veil during OAuth PKCE token exchange or native family handoff
+    IgngLoadingVeil(visible = isExchanging)
+
+    if (!authError.isNullOrBlank()) {
+        IgngDetailSheet(
+            onDismiss = onDismissAuthError,
+            title = "登录未完成",
+            subtitle = "授权未能完成，你可以立即重试登录。",
+        ) {
+            IgngBadge(authError, tone = IgngBadgeTone.Danger)
+            Spacer(Modifier.height(14.dp))
+            IgngButton(
+                text = "重新通过 IGNG SSO 登录",
+                icon = Icons.AutoMirrored.Rounded.Login,
+                onClick = {
+                    onDismissAuthError()
+                    onSignInWithBrowser()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            IgngButton(
+                text = "关闭",
+                style = IgngButtonStyle.Secondary,
+                onClick = onDismissAuthError,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
+    if (showSessionReauthSheet) {
+        val isLegacyUpgrade = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
+        val matchingSibling = remember(familyAccounts, activeAccount?.userId) {
+            val uid = activeAccount?.userId
+            if (uid != null) {
+                familyAccounts.firstOrNull { it.userId == uid } ?: familyAccounts.firstOrNull()
+            } else {
+                familyAccounts.firstOrNull()
+            }
+        }
+        IgngDetailSheet(
+            onDismiss = onDismissSessionReauth,
+            title = if (isLegacyUpgrade) "需要升级登录授权" else "登录会话已失效",
+            subtitle = "重新授权后即可继续，你正在编辑的内容不会被清除。",
+        ) {
+            Text(
+                text = sessionReauthReasonOverride?.takeIf { it.isNotBlank() } ?: if (isLegacyUpgrade) {
+                    "本版本已升级至统一 OAuth 2.1 安全认证架构，旧版登录凭证已停用。重新授权前可继续浏览公开内容与本地记录。"
+                } else {
+                    "当前设备的 IGNG 登录会话可能已过期或在账户中心被撤销。重新授权前仅可浏览公开内容与本地缓存的账户标识。"
+                },
+                style = IgngTheme.type.body,
+                color = colors.textSecondary,
+            )
+            Spacer(Modifier.height(14.dp))
+            if (matchingSibling != null) {
+                IgngButton(
+                    text = "从 ${matchingSibling.sourceAppName} 一键同步授权（${matchingSibling.displayName}）",
+                    icon = Icons.Rounded.Link,
+                    onClick = {
+                        onDismissSessionReauth()
+                        onSyncWithFamilyAccount(matchingSibling)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                IgngButton(
+                    text = "通过浏览器 IGNG SSO 授权",
+                    icon = Icons.AutoMirrored.Rounded.Login,
+                    style = IgngButtonStyle.Secondary,
+                    onClick = {
+                        onDismissSessionReauth()
+                        onSignInWithBrowser()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                IgngButton(
+                    text = "通过 IGNG SSO 重新授权",
+                    icon = Icons.AutoMirrored.Rounded.Login,
+                    onClick = {
+                        onDismissSessionReauth()
+                        onSignInWithBrowser()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            IgngButton(
+                text = "稍后再说",
+                onClick = onDismissSessionReauth,
+                style = IgngButtonStyle.Ghost,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * Unified signed-out sign-in hero card shared by the "我的" tab across all IGNG Android apps.
+ */
+@Composable
+fun IgngSignInHeroCard(
+    description: String,
+    hasFamilyAccounts: Boolean,
+    onSignIn: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = IgngTheme.colors
+    IgngTile(modifier = modifier.fillMaxWidth()) {
+        IgngBadge("IGNG SSO · OAuth 2.1 安全登录", tone = IgngBadgeTone.Accent)
+        Spacer(Modifier.height(10.dp))
+        Text("登录你的 IGNG 账户", style = IgngTheme.type.pageTitle, color = colors.textPrimary)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = description,
+            style = IgngTheme.type.body,
+            color = colors.textSecondary,
+        )
+        Spacer(Modifier.height(14.dp))
+        IgngButton(
+            text = "通过 IGNG SSO 登录",
+            onClick = onSignIn,
+            style = if (hasFamilyAccounts) IgngButtonStyle.Secondary else IgngButtonStyle.Primary,
+            icon = Icons.AutoMirrored.Rounded.Login,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * Unified non-destructive session-expired / legacy-protocol-upgrade warning banner shared by all
+ * IGNG official Android apps. Surfaces 1-tap native sibling handoff when a verified sibling app
+ * already holds a live OAuth 2.1 session.
+ */
+@Composable
+fun IgngSessionExpiredBanner(
+    sessionAuthStatus: SessionAuthStatus,
+    activeAccount: SavedAccount?,
+    familyAccounts: List<FamilySharedAccountHint>,
+    legacyDescription: String,
+    expiredDescription: String,
+    onSignInWithBrowser: () -> Unit,
+    onSyncWithFamilyAccount: (FamilySharedAccountHint) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = IgngTheme.colors
+    val isLegacy = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
+    val matchingSibling = remember(familyAccounts, activeAccount?.userId) {
+        val uid = activeAccount?.userId
+        if (uid != null) familyAccounts.firstOrNull { it.userId == uid } else familyAccounts.firstOrNull()
+    }
+    IgngTile(
+        borderColor = colors.warning.copy(alpha = 0.55f),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        IgngBadge(
+            text = if (isLegacy) "需升级 OAuth 2.1 授权" else "登录会话已失效",
+            tone = IgngBadgeTone.Warning,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = if (isLegacy) legacyDescription else expiredDescription,
+            style = IgngTheme.type.caption,
+            color = colors.textSecondary,
+        )
+        Spacer(Modifier.height(12.dp))
+        if (matchingSibling != null) {
+            IgngButton(
+                text = "从 ${matchingSibling.sourceAppName} 一键同步授权",
+                onClick = { onSyncWithFamilyAccount(matchingSibling) },
+                style = IgngButtonStyle.Primary,
+                icon = Icons.Rounded.Link,
+                compact = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            IgngButton(
+                text = "通过浏览器 IGNG SSO 授权",
+                onClick = onSignInWithBrowser,
+                style = IgngButtonStyle.Secondary,
+                icon = Icons.AutoMirrored.Rounded.Login,
+                compact = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            IgngButton(
+                text = "立即重新授权",
+                onClick = onSignInWithBrowser,
+                style = IgngButtonStyle.Primary,
+                icon = Icons.AutoMirrored.Rounded.Login,
+                compact = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * Cross-app family SSO prompt card shown when a certificate-verified sibling IGNG official app
+ * already holds an active OAuth 2.1 session on the same device.
  */
 @Composable
 fun IgngFamilySsoBanner(
@@ -49,7 +267,7 @@ fun IgngFamilySsoBanner(
     onContinueWithFamilyAccount: (FamilySharedAccountHint) -> Unit,
     modifier: Modifier = Modifier,
     title: String = "检测到本机 IGNG 家族已登录账号",
-    subtitle: String = "通过官方 SSO 共享会话一键完成当前应用授权，无需重复输入密码。",
+    subtitle: String = "通过官方应用间安全交接一键同步授权，无需跳转网页或重复输入密码。",
 ) {
     if (familyAccounts.isEmpty()) return
     val colors = IgngTheme.colors
@@ -128,7 +346,7 @@ fun IgngFamilySsoBanner(
 }
 
 /**
- * Unified multi-account vault + cross-app family SSO discovery card shared by IGNG BBS and IGNGmc.
+ * Unified multi-account vault + cross-app family SSO discovery card shared by all IGNG Android apps.
  */
 @Composable
 fun IgngAccountVaultCard(
@@ -141,21 +359,36 @@ fun IgngAccountVaultCard(
     onSwitchAccount: (Long) -> Unit,
     onLogoutActive: () -> Unit,
     modifier: Modifier = Modifier,
+    onSyncFamilyAccount: ((FamilySharedAccountHint) -> Unit)? = null,
     onRemoveAccount: ((Long) -> Unit)? = null,
 ) {
     val colors = IgngTheme.colors
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var removeTarget by remember { mutableStateOf<SavedAccount?>(null) }
 
-    val savedUserIds = remember(accounts) { accounts.map { it.userId }.toSet() }
-    val unlinkedFamilyAccounts = remember(familyAccounts, savedUserIds) {
-        familyAccounts.filterNot { it.userId in savedUserIds }
+    val triggerFamilySync: (FamilySharedAccountHint) -> Unit = { hint ->
+        if (onSyncFamilyAccount != null) onSyncFamilyAccount(hint) else onSignIn()
+    }
+
+    // Only treat accounts with live OAuth 2.1 refresh tokens (and not invalidated active session) as already synced
+    val activeUserId = activeAccount?.userId
+    val syncedUserIds = remember(accounts, activeUserId, sessionAuthStatus) {
+        accounts
+            .filter { acc ->
+                !acc.refreshToken.isNullOrBlank() &&
+                    !(acc.userId == activeUserId && sessionAuthStatus.requiresReauth)
+            }
+            .map { it.userId }
+            .toSet()
+    }
+    val syncableFamilyAccounts = remember(familyAccounts, syncedUserIds) {
+        familyAccounts.filterNot { it.userId in syncedUserIds }
     }
 
     IgngTile(modifier = modifier.fillMaxWidth()) {
         IgngSectionHeader(
             title = "IGNG 账户与多端切换",
-            subtitle = "本机安全存储 · 支持家族应用共享登录",
+            subtitle = "本机安全存储 · 支持家族应用无感同步",
             prominent = true,
         )
         Spacer(Modifier.height(12.dp))
@@ -191,10 +424,10 @@ fun IgngAccountVaultCard(
                     }
                     Spacer(Modifier.height(10.dp))
                     IgngButton(
-                        text = "以「${primaryHint.displayName}」一键登录",
-                        onClick = onSignIn,
+                        text = "以「${primaryHint.displayName}」一键同步登录",
+                        onClick = { triggerFamilySync(primaryHint) },
                         style = IgngButtonStyle.Primary,
-                        icon = Icons.AutoMirrored.Rounded.Login,
+                        icon = Icons.Rounded.Link,
                         compact = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -220,6 +453,9 @@ fun IgngAccountVaultCard(
         } else {
             val sessionExpired = sessionAuthStatus.requiresReauth
             val isLegacyUpgrade = sessionAuthStatus == SessionAuthStatus.LEGACY_UPGRADE_REQUIRED
+            val matchingFamilyHint = remember(familyAccounts, activeAccount.userId) {
+                familyAccounts.firstOrNull { it.userId == activeAccount.userId }
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -252,7 +488,11 @@ fun IgngAccountVaultCard(
                     }
                     Text(
                         text = if (sessionExpired) {
-                            "@${activeAccount.username} · 会话已失效，仅保留本地记录"
+                            if (isLegacyUpgrade) {
+                                "@${activeAccount.username} · 旧版凭证待升级，仅保留本地标识"
+                            } else {
+                                "@${activeAccount.username} · 会话已失效，仅保留本地记录"
+                            }
                         } else {
                             buildString {
                                 append("@${activeAccount.username} · #${activeAccount.userId}")
@@ -270,14 +510,34 @@ fun IgngAccountVaultCard(
 
             if (sessionExpired) {
                 Spacer(Modifier.height(12.dp))
-                IgngButton(
-                    text = "重新授权当前账户",
-                    onClick = onSignIn,
-                    style = IgngButtonStyle.Primary,
-                    icon = Icons.AutoMirrored.Rounded.Login,
-                    compact = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (matchingFamilyHint != null) {
+                    IgngButton(
+                        text = "从 ${matchingFamilyHint.sourceAppName} 一键同步授权",
+                        onClick = { triggerFamilySync(matchingFamilyHint) },
+                        style = IgngButtonStyle.Primary,
+                        icon = Icons.Rounded.Link,
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    IgngButton(
+                        text = "通过浏览器重新授权",
+                        onClick = onSignIn,
+                        style = IgngButtonStyle.Secondary,
+                        icon = Icons.AutoMirrored.Rounded.Login,
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    IgngButton(
+                        text = "重新授权当前账户",
+                        onClick = onSignIn,
+                        style = IgngButtonStyle.Primary,
+                        icon = Icons.AutoMirrored.Rounded.Login,
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -345,7 +605,14 @@ fun IgngAccountVaultCard(
                 }
             }
 
-            if (unlinkedFamilyAccounts.isNotEmpty()) {
+            val extraFamilyHints = remember(syncableFamilyAccounts, matchingFamilyHint, sessionExpired) {
+                if (sessionExpired && matchingFamilyHint != null) {
+                    syncableFamilyAccounts.filterNot { it.userId == matchingFamilyHint.userId }
+                } else {
+                    syncableFamilyAccounts
+                }
+            }
+            if (extraFamilyHints.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = "本机其他 IGNG 应用已登录账号",
@@ -353,7 +620,7 @@ fun IgngAccountVaultCard(
                     color = colors.textSecondary,
                 )
                 Spacer(Modifier.height(6.dp))
-                unlinkedFamilyAccounts.forEach { hint ->
+                extraFamilyHints.forEach { hint ->
                     IgngTile(
                         soft = true,
                         borderColor = colors.accent.copy(alpha = 0.28f),
@@ -373,7 +640,7 @@ fun IgngAccountVaultCard(
                             IgngTagChip(
                                 text = "一键同步",
                                 tone = IgngTone.ACCENT,
-                                onClick = onSignIn,
+                                onClick = { triggerFamilySync(hint) },
                             )
                         }
                     }
@@ -484,7 +751,7 @@ fun IgngProfileIdentityCard(
 }
 
 /**
- * Unified active login devices management card (`/api/v1/devices`) shared by BBS & MC.
+ * Unified active login devices management card (`/api/v1/devices`) shared by all IGNG apps.
  */
 @Composable
 fun IgngDevicesSecurityCard(
