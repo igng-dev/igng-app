@@ -71,7 +71,7 @@ class DtoDeserializationTest {
         assertTrue(bootstrap.categories.isNotEmpty())
         assertTrue(bootstrap.reportReasons.isNotEmpty())
         assertTrue(bootstrap.appealGrounds.isNotEmpty())
-        assertEquals("1.17.0", bootstrap.contractVersion)
+        assertEquals("1.19.0", bootstrap.contractVersion)
 
         val home = json.decodeFromString(BbsHomeDto.serializer(), readFixture("home.json"))
         assertTrue(home.recommendations.isNotEmpty())
@@ -88,6 +88,11 @@ class DtoDeserializationTest {
         val postDetail = json.decodeFromString(PostDetailDto.serializer(), readFixture("post_detail.json"))
         assertTrue(postDetail.title.isNotBlank())
         assertTrue(postDetail.content.isNotBlank())
+        val sampleMeta = postDetail.mediaMeta["0123456789abcdef0123456789abcdef"]
+        assertNotNull(sampleMeta)
+        assertEquals(1600, sampleMeta!!.width)
+        assertEquals(900, sampleMeta.height)
+        assertEquals(1600f / 900f, sampleMeta.aspectRatio!!, 0.0001f)
 
         val comments = json.decodeFromString(CommentsListResponseDto.serializer(), readFixture("comments_list.json"))
         assertTrue(comments.data.isNotEmpty())
@@ -109,6 +114,9 @@ class DtoDeserializationTest {
 
         val creatorPost = json.decodeFromString(CreatorPostDetailDto.serializer(), readFixture("creator_post_detail.json"))
         assertTrue(creatorPost.title.isNotBlank())
+        assertTrue(creatorPost.mediaUrls.containsKey("0123456789abcdef0123456789abcdef"))
+        assertEquals(1600, creatorPost.mediaMeta["0123456789abcdef0123456789abcdef"]?.width)
+        assertEquals(900, creatorPost.mediaMeta["0123456789abcdef0123456789abcdef"]?.height)
 
         val creatorReviews = json.decodeFromString(CreatorReviewsResponseDto.serializer(), readFixture("creator_reviews.json"))
         assertNotNull(creatorReviews.risk)

@@ -38,7 +38,12 @@ sealed interface MarkdownBlock {
     data class CodeBlock(val language: String, val code: String) : MarkdownBlock
     data class Table(val headers: List<List<InlineSpan>>, val rows: List<List<List<InlineSpan>>>) : MarkdownBlock
     data object Divider : MarkdownBlock
-    data class Image(val url: String, val alt: String, val rawUrl: String) : MarkdownBlock
+    data class Image(
+        val url: String,
+        val alt: String,
+        val rawUrl: String,
+        val aspectRatio: Float? = null,
+    ) : MarkdownBlock
     data class VideoEmbed(val url: String, val label: String) : MarkdownBlock
 }
 
@@ -54,8 +59,11 @@ object MarkdownParser {
         source: String,
         format: String = "markdown",
         resolveUrl: (String) -> String = { it },
+        resolveImageAspectRatio: (rawUrl: String, resolvedUrl: String) -> Float? = { _, _ -> null },
     ): MarkdownDocument {
-        val normalizedSource = if (format.equals("html", ignoreCase = true) || looksLikeHtml(source)) {
+        val isHtml = format.equals("html", ignoreCase = true) || looksLikeHtml(source)
+        val htmlImgRatios = if (isHtml) extractHtmlImageAspectRatios(source) else emptyMap()
+        val normalizedSource = if (isHtml) {
             htmlToMarkdown(source)
         } else {
             source
@@ -118,8 +126,11 @@ object MarkdownParser {
                 val alt = imgMatch.groupValues[1].trim()
                 val rawUrl = imgMatch.groupValues[2].trim().substringBefore(' ')
                 val resolved = resolveUrl(rawUrl)
+                val ratio = resolveImageAspectRatio(rawUrl, resolved)
+                    ?: htmlImgRatios[rawUrl]
+                    ?: htmlImgRatios[resolved]
                 images.add(resolved)
-                blocks.add(MarkdownBlock.Image(url = resolved, alt = alt, rawUrl = rawUrl))
+                blocks.add(MarkdownBlock.Image(url = resolved, alt = alt, rawUrl = rawUrl, aspectRatio = ratio))
                 i++
                 continue
             }
@@ -235,8 +246,11 @@ object MarkdownParser {
                     val alt = m.groupValues[1].trim()
                     val rawUrl = m.groupValues[2].trim().substringBefore(' ')
                     val resolved = resolveUrl(rawUrl)
+                    val ratio = resolveImageAspectRatio(rawUrl, resolved)
+                        ?: htmlImgRatios[rawUrl]
+                        ?: htmlImgRatios[resolved]
                     images.add(resolved)
-                    blocks.add(MarkdownBlock.Image(url = resolved, alt = alt, rawUrl = rawUrl))
+                    blocks.add(MarkdownBlock.Image(url = resolved, alt = alt, rawUrl = rawUrl, aspectRatio = ratio))
                     cursor = m.range.last + 1
                 }
                 val tail = joined.substring(cursor).trim()
@@ -536,6 +550,21 @@ object MarkdownParser {
         return unescapeHtml(s).replace(Regex("\n{3,}"), "\n\n").trim()
     }
 
+    private fun extractHtmlImageAspectRatios(html: String): Map<String, Float> {
+        val ratios = LinkedHashMap<String, Float>()
+        HTML_IMG_TAG_RE.findAll(html).forEach { m ->
+            val tag = m.value
+            val src = m.groupValues[1].trim()
+            if (src.isEmpty()) return@forEach
+            val w = HTML_WIDTH_ATTR_RE.find(tag)?.groupValues?.get(1)?.toIntOrNull() ?: return@forEach
+            val h = HTML_HEIGHT_ATTR_RE.find(tag)?.groupValues?.get(1)?.toIntOrNull() ?: return@forEach
+            if (w > 0 && h > 0) {
+                ratios[src] = w.toFloat() / h.toFloat()
+            }
+        }
+        return ratios
+    }
+
     private fun extractSafeHexColor(attrs: String): String? {
         val hexMatch = SAFE_HEX_COLOR_RE.find(attrs) ?: return null
         val raw = hexMatch.groupValues[1].uppercase()
@@ -577,4 +606,7 @@ object MarkdownParser {
     private val INLINE_ANCHOR_PREFIX_RE = Regex("^(?is)<a\\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>")
     private val INLINE_STRAY_FORMAT_TAG_RE = Regex("^(?i)</?(?:font|span)\\b[^>]*>")
     private val SAFE_HEX_COLOR_RE = Regex("(?i)(?:color\\s*[:=]\\s*[\"']?)#([0-9a-f]{6}|[0-9a-f]{3})(?![0-9a-f])")
+    private val HTML_IMG_TAG_RE = Regex("(?is)<img[^>]*src=[\"']([^\"']+)[\"'][^>]*>")
+    private val HTML_WIDTH_ATTR_RE = Regex("(?i)\\bwidth\\s*=\\s*[\"']?(\\d+)(?:px)?[\"']?")
+    private val HTML_HEIGHT_ATTR_RE = Regex("(?i)\\bheight\\s*=\\s*[\"']?(\\d+)(?:px)?[\"']?")
 }

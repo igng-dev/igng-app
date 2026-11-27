@@ -47,10 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -98,6 +96,7 @@ import net.igng.core.designsystem.IgngPullToRefreshBox
 import net.igng.core.designsystem.IgngRadius
 import net.igng.core.designsystem.IgngSectionHeader
 import net.igng.core.designsystem.IgngTagChip
+import net.igng.core.designsystem.IgngThumbnailImage
 import net.igng.core.designsystem.IgngTheme
 import net.igng.core.designsystem.IgngTile
 import net.igng.core.designsystem.IgngTone
@@ -1063,11 +1062,11 @@ fun CreatorMediaScreen(
                             items(mediaList.data, key = { it.id }) { file ->
                                 IgngTile(padding = PaddingValues(12.dp)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        AsyncImage(
+                                        IgngThumbnailImage(
                                             model = container.endpoints.resolveMediaUrl(file.url),
                                             contentDescription = file.originalName,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(IgngRadius.control)).background(colors.tileSoft),
+                                            modifier = Modifier.size(64.dp),
+                                            shape = RoundedCornerShape(IgngRadius.control),
                                         )
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(file.originalName ?: file.id, style = IgngTheme.type.bodyMedium, color = colors.textPrimary, maxLines = 1)

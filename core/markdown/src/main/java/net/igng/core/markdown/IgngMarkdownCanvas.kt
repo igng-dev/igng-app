@@ -35,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -50,9 +49,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import net.igng.core.designsystem.IgngColors
+import net.igng.core.designsystem.IgngContentImage
 import net.igng.core.designsystem.IgngHairlineDivider
 import net.igng.core.designsystem.IgngHapticKind
 import net.igng.core.designsystem.IgngStroke
@@ -415,16 +414,12 @@ fun IgngMarkdownBlockView(
                 modifier = modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                AsyncImage(
+                IgngContentImage(
                     model = block.url,
                     contentDescription = block.alt.ifBlank { "插图" },
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(radii.md)
-                        .background(colors.tileSoft)
-                        .border(IgngStroke.hairline, colors.line, radii.md)
-                        .igngPressScale(haptic = true, onClick = { onImageClick(block.url) }),
+                    aspectRatioHint = block.aspectRatio,
+                    shape = radii.md,
+                    onClick = { onImageClick(block.url) },
                 )
                 if (block.alt.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))

@@ -136,5 +136,12 @@
   },
   "media_urls": {
     "0123456789abcdef0123456789abcdef": "https://www.igng.net/api/v1/media/med_0123456789abcdef0123456789abcdef/content?post_id=post_2048"
+  },
+  "media_meta": {
+    "0123456789abcdef0123456789abcdef": {
+      "width": 1600,
+      "height": 900,
+      "mime_type": "image/webp"
+    }
   }
 }

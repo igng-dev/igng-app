@@ -9,6 +9,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -84,6 +85,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -93,6 +95,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.decode.DataSource
 import kotlinx.coroutines.delay
 
 /**
@@ -1322,7 +1326,20 @@ fun IgngAvatar(
     size: Dp = 44.dp,
 ) {
     val colors = IgngTheme.colors
+    val intensity = IgngTheme.motionIntensity
+    val reduced = IgngTheme.motionReduced
     val initial = name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+    var loaded by remember(avatarUrl) { mutableStateOf(false) }
+    var fromMemory by remember(avatarUrl) { mutableStateOf(false) }
+    val avatarAlpha by animateFloatAsState(
+        targetValue = if (loaded) 1f else 0f,
+        animationSpec = if (fromMemory || reduced || !loaded) {
+            androidx.compose.animation.core.snap()
+        } else {
+            IgngMotion.microTween(intensity)
+        },
+        label = "igngAvatarAlpha",
+    )
     Box(
         modifier = modifier
             .size(size)
@@ -1341,7 +1358,23 @@ fun IgngAvatar(
                 model = avatarUrl,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                onState = { state ->
+                    when (state) {
+                        is AsyncImagePainter.State.Success -> {
+                            fromMemory = state.result.dataSource == DataSource.MEMORY_CACHE ||
+                                state.result.dataSource == DataSource.MEMORY
+                            loaded = true
+                        }
+                        is AsyncImagePainter.State.Error -> {
+                            fromMemory = false
+                            loaded = false
+                        }
+                        else -> Unit
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = avatarAlpha },
             )
         }
     }

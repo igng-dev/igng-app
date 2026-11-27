@@ -3,32 +3,46 @@ package net.igng.core.designsystem
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,12 +55,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.decode.DataSource
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 import kotlin.math.abs
 import kotlin.math.sign
 import kotlinx.coroutines.CancellationException
@@ -90,7 +110,19 @@ fun IgngImageLightbox(
     val intensity = IgngTheme.motionIntensity
     val haptic = rememberIgngHaptics()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val density = LocalDensity.current
+
+    // Lightweight prefetch of immediate neighbor images when browsing multi-image galleries
+    LaunchedEffect(pagerState.currentPage, imageUrls) {
+        if (imageUrls.size <= 1) return@LaunchedEffect
+        val loader = SingletonImageLoader.get(context)
+        listOf(pagerState.currentPage - 1, pagerState.currentPage + 1)
+            .filter { it in imageUrls.indices }
+            .forEach { idx ->
+                loader.enqueue(ImageRequest.Builder(context).data(imageUrls[idx]).build())
+            }
+    }
 
     val dragYAnim = remember { Animatable(0f) }
     val dismissAlphaAnim = remember { Animatable(1f) }
@@ -396,15 +428,50 @@ private fun ZoomableLightboxPage(
     onDragCancel: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val intensity = IgngTheme.motionIntensity
+    val reduced = IgngTheme.motionReduced
+    val haptic = rememberIgngHaptics()
+
     var scale by remember(imageUrl) { mutableFloatStateOf(1f) }
     var offset by remember(imageUrl) { mutableStateOf(Offset.Zero) }
+    var loadState by remember(imageUrl) { mutableStateOf(IgngImageLoadState.Loading) }
+    var fromMemoryCache by remember(imageUrl) { mutableStateOf(false) }
+    var retryNonce by remember(imageUrl) { mutableIntStateOf(0) }
+
+    val isLoading = loadState == IgngImageLoadState.Loading
+    val isSuccess = loadState == IgngImageLoadState.Success
+    val isError = loadState == IgngImageLoadState.Error
+
+    val imageAlpha by animateFloatAsState(
+        targetValue = if (isSuccess) 1f else 0f,
+        animationSpec = if (fromMemoryCache || reduced || !isSuccess) {
+            snap()
+        } else {
+            IgngMotion.normalTween(intensity)
+        },
+        label = "lightboxImageAlpha",
+    )
+
+    val request = remember(imageUrl, retryNonce) {
+        ImageRequest.Builder(context)
+            .data(imageUrl)
+            .apply {
+                if (retryNonce > 0) {
+                    memoryCachePolicy(CachePolicy.WRITE_ONLY)
+                    diskCachePolicy(CachePolicy.WRITE_ONLY)
+                }
+            }
+            .build()
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(imageUrl) {
+            .pointerInput(imageUrl, isSuccess) {
                 detectTapGestures(
                     onDoubleTap = {
+                        if (!isSuccess) return@detectTapGestures
                         if (scale > 1.2f) {
                             scale = 1f
                             offset = Offset.Zero
@@ -417,8 +484,8 @@ private fun ZoomableLightboxPage(
                     },
                 )
             }
-            .pointerInput(imageUrl, scale) {
-                if (scale <= 1.05f) {
+            .pointerInput(imageUrl, scale, isSuccess) {
+                if (!isSuccess || scale <= 1.05f) {
                     detectVerticalDragGestures(
                         onDragEnd = onDragEnd,
                         onDragCancel = onDragCancel,
@@ -435,21 +502,138 @@ private fun ZoomableLightboxPage(
             },
         contentAlignment = Alignment.Center,
     ) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = title ?: "图片预览",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    val dismissScale = (1f - abs(dragY) / 1450f).coerceIn(0.76f, 1f)
-                    scaleX = scale * dismissScale
-                    scaleY = scale * dismissScale
-                    translationX = offset.x
-                    translationY = offset.y + dragY
-                    alpha = dismissAlpha
+        if (isLoading) {
+            val glyphAlpha = rememberIgngLoadingVisibility(loading = true)
+            val frameIconAlpha = (1f - glyphAlpha).coerceIn(0f, 1f)
+            val breath = rememberIgngImageBreathFraction(active = true)
+            val trayAlpha = 0.05f + 0.05f * breath
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .graphicsLayer {
+                        translationY = dragY
+                        alpha = dismissAlpha
+                    }
+                    .clip(IgngTheme.radii.lg)
+                    .background(Color.White.copy(alpha = trayAlpha))
+                    .border(IgngStroke.hairline, Color.White.copy(alpha = 0.14f), IgngTheme.radii.lg),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (frameIconAlpha > 0.01f) {
+                    Icon(
+                        imageVector = Icons.Outlined.Image,
+                        contentDescription = "原图加载中",
+                        tint = Color.White.copy(alpha = 0.42f),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .graphicsLayer { alpha = frameIconAlpha },
+                    )
+                }
+                if (glyphAlpha > 0.01f) {
+                    IgngFoldedCoreGlyph(
+                        size = FoldedCoreSize.Md,
+                        color = Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier.graphicsLayer { alpha = glyphAlpha },
+                    )
+                }
+            }
+        }
+
+        key(retryNonce) {
+            AsyncImage(
+                model = request,
+                contentDescription = title ?: "图片预览",
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    when (state) {
+                        is AsyncImagePainter.State.Empty,
+                        is AsyncImagePainter.State.Loading,
+                        -> {
+                            if (loadState != IgngImageLoadState.Success) {
+                                loadState = IgngImageLoadState.Loading
+                            }
+                        }
+                        is AsyncImagePainter.State.Success -> {
+                            fromMemoryCache = state.result.dataSource == DataSource.MEMORY_CACHE ||
+                                state.result.dataSource == DataSource.MEMORY
+                            loadState = IgngImageLoadState.Success
+                        }
+                        is AsyncImagePainter.State.Error -> {
+                            fromMemoryCache = false
+                            scale = 1f
+                            offset = Offset.Zero
+                            loadState = IgngImageLoadState.Error
+                        }
+                    }
                 },
-        )
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val dismissScale = (1f - abs(dragY) / 1450f).coerceIn(0.76f, 1f)
+                        scaleX = scale * dismissScale
+                        scaleY = scale * dismissScale
+                        translationX = offset.x
+                        translationY = offset.y + dragY
+                        alpha = dismissAlpha * imageAlpha
+                    },
+            )
+        }
+
+        if (isError) {
+            Column(
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationY = dragY
+                        alpha = dismissAlpha
+                    }
+                    .clip(IgngTheme.radii.lg)
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .border(IgngStroke.hairline, Color.White.copy(alpha = 0.16f), IgngTheme.radii.lg)
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.BrokenImage,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.72f),
+                    modifier = Modifier.size(28.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "原图未能加载",
+                    style = IgngTheme.type.bodyMedium,
+                    color = Color.White.copy(alpha = 0.90f),
+                )
+                Spacer(Modifier.height(12.dp))
+                val pillShape = RoundedCornerShape(8.dp)
+                Row(
+                    modifier = Modifier
+                        .clip(pillShape)
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .border(IgngStroke.hairline, Color.White.copy(alpha = 0.24f), pillShape)
+                        .clickable {
+                            haptic(IgngHapticKind.Tap)
+                            loadState = IgngImageLoadState.Loading
+                            retryNonce++
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        text = "重新加载",
+                        style = IgngTheme.type.badge,
+                        color = Color.White,
+                    )
+                }
+            }
+        }
     }
 }
 
